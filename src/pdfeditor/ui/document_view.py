@@ -83,6 +83,10 @@ class DocumentView(QWidget):
 
     def shutdown(self) -> None:
         """Stop background rendering and close the document (application exit)."""
-        self.page_view.service.stop()
+        service = self.page_view.service
+        service.stop()  # asks the worker to stop; waits up to 1 s
         if self._document is not None:
-            self._document.close()
+            self._document.close()  # waits for a render in progress (lock)
+        # Never let the QThread be destroyed while running: the worker exits right after
+        # its current render (the stop request is first in its queue).
+        service.worker.wait()

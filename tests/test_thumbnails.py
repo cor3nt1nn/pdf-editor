@@ -124,3 +124,29 @@ def test_content_change_keeps_old_thumbnail(qtbot, window: MainWindow) -> None:
         c = img.pixelColor(int(img.width() * 100 / 595), int(img.height() * 120 / 842))
         assert c.blue() > 150 and c.red() < 150
     qtbot.waitUntil(lambda: model.is_rendered(0), timeout=5000)
+
+
+def test_closing_dock_with_x_is_persisted(qtbot, window: MainWindow, ini_path) -> None:
+    assert window.thumbnails_dock.isVisible()
+    window.thumbnails_dock.close()  # what the dock's title-bar X button does
+    assert not window.act_thumbnails.isChecked()
+    assert window.settings.thumbnails_visible is False
+    window.close()
+
+    w2 = MainWindow(Settings(QSettings(str(ini_path), QSettings.Format.IniFormat)))
+    qtbot.addWidget(w2)
+    w2.show()
+    assert not w2.thumbnails_dock.isVisible()
+    w2.close()
+
+
+def test_saved_dock_state_wins_over_setting(qtbot, window: MainWindow, ini_path) -> None:
+    window.close()  # saves a window state with the dock visible
+    s = Settings(QSettings(str(ini_path), QSettings.Format.IniFormat))
+    s.thumbnails_visible = False  # stale value must not override restoreState
+    w2 = MainWindow(s)
+    qtbot.addWidget(w2)
+    w2.show()
+    assert w2.thumbnails_dock.isVisible()
+    assert s.thumbnails_visible is True  # re-synced from the restored state
+    w2.close()

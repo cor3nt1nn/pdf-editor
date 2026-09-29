@@ -325,3 +325,29 @@ def test_save_dialog_appends_suffix_before_overwrite_check(qtbot, tmp_path, monk
     assert dialogs.get_save_path(None, "") == str(tmp_path / "new.pdf")
     monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s: None)
     assert dialogs.get_save_path(None, "") is None
+
+
+def test_close_event_stops_render_worker(qtbot, window: MainWindow, many_pages_pdf, monkeypatch):
+    import threading
+    import time
+
+    from pdfeditor.core.document import PdfDocument
+
+    real_render = PdfDocument.render
+    rendering = threading.Event()
+
+    def slow_render(self, *args, **kwargs):
+        rendering.set()
+        time.sleep(0.5)  # outside the lock: closing the document does not wait for it
+        return real_render(self, *args, **kwargs)
+
+    monkeypatch.setattr(PdfDocument, "render", slow_render)
+    window.open_file(str(many_pages_pdf))
+    worker = window.page_view.service.worker
+    doc = window.document_view.document
+    window.page_view.service.request(5, 1.0)
+    assert rendering.wait(3)
+    monkeypatch.setattr(worker, "stop", lambda timeout_ms=1000: type(worker).stop(worker, 1))
+    window.close()  # stop() gives up after 1 ms: shutdown must still join the thread
+    assert not worker.isRunning()
+    assert not doc.is_open

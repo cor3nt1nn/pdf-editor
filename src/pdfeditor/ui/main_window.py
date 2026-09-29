@@ -85,8 +85,9 @@ class MainWindow(QMainWindow):
         else:
             self.page_view.set_zoom_mode(mode)
 
-        self._restore_window_state()
-        self.thumbnails_dock.setVisible(self.settings.thumbnails_visible)
+        if not self._restore_window_state():
+            # First run (no saved dock layout): fall back to the plain setting.
+            self.thumbnails_dock.setVisible(self.settings.thumbnails_visible)
         self._update_title()
         self._update_actions()
 
@@ -191,7 +192,8 @@ class MainWindow(QMainWindow):
         self.act_thumbnails.setText(self.tr("&Thumbnails"))
         self.act_thumbnails.setObjectName("toggle_thumbnails")
         self.act_thumbnails.setShortcut(QKeySequence("F4"))
-        self.act_thumbnails.triggered.connect(self._on_thumbnails_toggled)
+        # toggled (not triggered): also fires when the dock's own X button closes it.
+        self.act_thumbnails.toggled.connect(self._on_thumbnails_toggled)
         self.addAction(self.act_thumbnails)
         self.act_about = self._action(self.tr("&About PDF Editor…"), None, self.show_about, "about")
         self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
@@ -589,13 +591,13 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Discard
 
     # -- window state ------------------------------------------------------------
-    def _restore_window_state(self) -> None:
+    def _restore_window_state(self) -> bool:
+        """Restore geometry and dock/toolbar state. False if no dock state was saved."""
         geometry = self.settings.window_geometry
         if not geometry.isEmpty():
             self.restoreGeometry(geometry)
         state = self.settings.window_state
-        if not state.isEmpty():
-            self.restoreState(state)
+        return not state.isEmpty() and self.restoreState(state)
 
     def _save_window_state(self) -> None:
         self.settings.window_geometry = self.saveGeometry()
