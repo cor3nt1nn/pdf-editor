@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 APP_NAME = "PDF Editor"
 ORG_NAME = "PDFEditor"
 APP_ID = "PDFEditor"
@@ -19,3 +21,9 @@ ZOOM_STEPS = (25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400)
 
 CACHE_BUDGET_BYTES = 256 * 1024 * 1024
 THUMB_WIDTH_PX = 140
+
+
+class ZoomMode(StrEnum):
+    FIT_WIDTH = "fit_width"
+    FIT_PAGE = "fit_page"
+    CUSTOM = "custom"
