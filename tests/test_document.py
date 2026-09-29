@@ -123,6 +123,47 @@ def test_set_page_rotation(qtbot, doc: PdfDocument) -> None:
         doc.set_page_rotation(1, 45)
 
 
+def test_hot_reads_do_not_wait_for_the_lock(doc: PdfDocument) -> None:
+    import threading
+
+    doc.page_size(1)  # warm the size cache
+    held = threading.Event()
+    release = threading.Event()
+
+    def hold():
+        with doc.lock:
+            held.set()
+            release.wait(5)
+
+    t = threading.Thread(target=hold)
+    t.start()
+    held.wait(5)
+    try:
+        # These would deadlock-until-timeout if they needed the lock held by "a render".
+        assert doc.page_count == 3
+        assert doc.page_size(1) == QSizeF(792, 612)
+        with pytest.raises(IndexError):
+            doc.page_size(7)
+    finally:
+        release.set()
+        t.join()
+
+
+def test_unreadable_file(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    path = tmp_path / "locked.pdf"
+    path.write_bytes(b"%PDF-1.7")
+
+    def denied(self):
+        raise PermissionError("locked by another program")
+
+    monkeypatch.setattr(Path, "read_bytes", denied)
+    with pytest.raises(OpenError) as info:
+        PdfDocument.open(path)
+    assert info.value.reason == "unreadable"
+
+
 def test_close(doc: PdfDocument) -> None:
     doc.close()
     assert not doc.is_open
