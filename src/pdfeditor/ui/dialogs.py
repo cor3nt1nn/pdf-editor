@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import os
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox, QWidget
@@ -29,8 +30,12 @@ def ask_password(parent: QWidget | None, file_name: str, wrong: bool) -> str | N
     return text if ok else None
 
 
-def warn(parent: QWidget | None, title: str, text: str) -> None:
-    QMessageBox.warning(parent, title, text)
+def warn(parent: QWidget | None, title: str, text: str, details: str | None = None) -> None:
+    """Warning box; ``details`` (e.g. a raw technical error) goes behind "Show Details..."."""
+    box = QMessageBox(QMessageBox.Icon.Warning, title, text, QMessageBox.StandardButton.Ok, parent)
+    if details:
+        box.setDetailedText(details)
+    box.exec()
 
 
 def confirm_save_changes(parent: QWidget | None, file_name: str) -> QMessageBox.StandardButton:
@@ -48,18 +53,73 @@ def confirm_save_changes(parent: QWidget | None, file_name: str) -> QMessageBox.
     )
 
 
-def offer_save_as(parent: QWidget | None, error: str) -> bool:
-    """Tell the user saving failed; return True if they want to try Save As."""
-    answer = QMessageBox.warning(
-        parent,
+def offer_save_as(parent: QWidget | None, details: str) -> bool:
+    """Tell the user saving failed; return True if they want to try Save As.
+
+    ``details`` is the technical error, shown only under "Show Details...".
+    """
+    box = QMessageBox(
+        QMessageBox.Icon.Warning,
         QCoreApplication.translate("Dialogs", "Save failed"),
         QCoreApplication.translate(
-            "Dialogs", "The document could not be saved:\n{error}\n\nSave it under another name?"
-        ).format(error=error),
+            "Dialogs",
+            # Single literal: lupdate does not join implicitly concatenated strings.
+            "The document could not be saved. The file may be open in another program, read-only, or the disk may be full.\n\nSave it under another name?",  # noqa: E501
+        ),
         QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
-        QMessageBox.StandardButton.Save,
+        parent,
     )
-    return answer == QMessageBox.StandardButton.Save
+    box.setDefaultButton(QMessageBox.StandardButton.Save)
+    if details:
+        box.setDetailedText(details)
+    return box.exec() == QMessageBox.StandardButton.Save
+
+
+# Answers of ask_overwrite_modified().
+OVERWRITE, SAVE_AS, CANCEL = "overwrite", "save_as", "cancel"
+
+
+def ask_overwrite_modified(parent: QWidget | None, file_name: str) -> str:
+    """The file changed on disk since it was opened: overwrite, Save As, or cancel?"""
+    box = QMessageBox(
+        QMessageBox.Icon.Warning,
+        QCoreApplication.translate("Dialogs", "File changed on disk"),
+        QCoreApplication.translate(
+            "Dialogs",
+            "The file “{name}” has been changed by another program since it was opened.\n\nOverwrite it with your version? The other changes will be lost.",  # noqa: E501
+        ).format(name=file_name),
+        QMessageBox.StandardButton.NoButton,
+        parent,
+    )
+    overwrite = box.addButton(
+        QCoreApplication.translate("Dialogs", "Overwrite"), QMessageBox.ButtonRole.AcceptRole
+    )
+    save_as = box.addButton(
+        QCoreApplication.translate("Dialogs", "Save As…"), QMessageBox.ButtonRole.ActionRole
+    )
+    box.addButton(QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(save_as)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is overwrite:
+        return OVERWRITE
+    if clicked is save_as:
+        return SAVE_AS
+    return CANCEL
+
+
+def confirm_overwrite(parent: QWidget | None, path: str) -> bool:
+    """Ask before replacing an existing file."""
+    answer = QMessageBox.question(
+        parent,
+        QCoreApplication.translate("Dialogs", "Confirm Save As"),
+        QCoreApplication.translate(
+            "Dialogs", "“{name}” already exists.\nDo you want to replace it?"
+        ).format(name=os.path.basename(path)),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    return answer == QMessageBox.StandardButton.Yes
 
 
 def get_open_path(parent: QWidget | None, directory: str) -> str | None:
@@ -72,17 +132,38 @@ def get_open_path(parent: QWidget | None, directory: str) -> str | None:
     return path or None
 
 
-def get_save_path(parent: QWidget | None, suggested: str) -> str | None:
-    path, _ = QFileDialog.getSaveFileName(
+def make_save_dialog(parent: QWidget | None, suggested: str) -> QFileDialog:
+    """Save dialog that appends ".pdf" *before* its own overwrite confirmation."""
+    dialog = QFileDialog(
         parent,
         QCoreApplication.translate("Dialogs", "Save PDF As"),
         suggested,
         QCoreApplication.translate("Dialogs", "PDF documents (*.pdf)"),
     )
+    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+    dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+    dialog.setDefaultSuffix("pdf")
+    return dialog
+
+
+def _run_save_dialog(parent: QWidget | None, suggested: str) -> str | None:
+    dialog = make_save_dialog(parent, suggested)
+    if dialog.exec() != QFileDialog.DialogCode.Accepted:
+        return None
+    files = dialog.selectedFiles()
+    return files[0] if files else None
+
+
+def get_save_path(parent: QWidget | None, suggested: str) -> str | None:
+    """Ask for a target path; always ends in ".pdf" and never silently overwrites."""
+    path = _run_save_dialog(parent, suggested)
     if not path:
         return None
     if not path.lower().endswith(".pdf"):
+        # Another extension was typed explicitly: the dialog confirmed *that* name only.
         path += ".pdf"
+        if os.path.exists(path) and not confirm_overwrite(parent, path):
+            return None
     return path
 
 
@@ -104,15 +185,14 @@ def about_html() -> str:
     """Rich text for the About box: version, license notice and library versions."""
     import platform
 
-    import pymupdf
     import PySide6
     from PySide6.QtCore import qVersion
 
     from pdfeditor import __version__
+    from pdfeditor.core.document import pdf_library_versions
 
     rows = [
-        ("PyMuPDF", pymupdf.VersionBind),
-        ("MuPDF", pymupdf.VersionFitz),
+        *pdf_library_versions(),
         ("PySide6", PySide6.__version__),
         ("Qt", qVersion()),
         ("Python", platform.python_version()),

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QMessageBox, QSp
 
 from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core.commands import RotatePageCommand
-from pdfeditor.core.document import OpenError, PasswordRequired, SaveError
+from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired
 from pdfeditor.core.settings import Settings
 from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.resources import app_icon, icon
@@ -458,6 +458,7 @@ class MainWindow(QMainWindow):
                 self.tr("“{path}” could not be opened as a PDF document.\n\n{error}").format(
                     path=path, error=self._open_error_text(exc)
                 ),
+                details=str(exc),
             )
             return False
         except Exception as exc:  # never let a bad file take the application down
@@ -466,8 +467,9 @@ class MainWindow(QMainWindow):
                 self,
                 self.tr("Cannot open file"),
                 self.tr("“{path}” could not be opened as a PDF document.\n\n{error}").format(
-                    path=path, error=exc
+                    path=path, error=self.tr("An unexpected error occurred.")
                 ),
+                details=f"{type(exc).__name__}: {exc}",
             )
             return False
         self.settings.last_open_dir = os.path.dirname(path)
@@ -482,11 +484,14 @@ class MainWindow(QMainWindow):
     def _open_error_text(self, exc: OpenError) -> str:
         messages = {
             "missing": self.tr("The file does not exist."),
+            "unreadable": self.tr(
+                "The file could not be read. It may be locked by another program."
+            ),
             "empty": self.tr("The file is empty."),
             "corrupt": self.tr("The file is damaged or is not a PDF document."),
             "no_pages": self.tr("The document has no pages."),
         }
-        return messages.get(exc.reason, str(exc))
+        return messages.get(exc.reason, self.tr("An unexpected error occurred."))
 
     def close_document(self) -> bool:
         if not self.maybe_save():
@@ -509,15 +514,38 @@ class MainWindow(QMainWindow):
                 ),
             )
             return self.save_as()
+        if doc.modified_on_disk():
+            answer = dialogs.ask_overwrite_modified(self, os.path.basename(doc.path))
+            if answer == dialogs.SAVE_AS:
+                return self.save_as()
+            if answer != dialogs.OVERWRITE:
+                return False
         try:
             self.document_view.save()
-        except SaveError as exc:
+        except DocumentError as exc:
             log.warning("save failed: %s", exc)
+            if not self._document_survived(exc):
+                return False
             if dialogs.offer_save_as(self, str(exc)):
                 return self.save_as()
             return False
         self.statusBar().showMessage(self.tr("Saved"), 3000)
         return True
+
+    def _document_survived(self, exc: Exception) -> bool:
+        """After a failed save: if the document was lost, close it cleanly and tell the user."""
+        doc = self.document_view.document
+        if doc is not None and doc.is_open:
+            return True
+        log.error("document lost after failed save: %s", exc)
+        self.document_view.close_document()
+        dialogs.warn(
+            self,
+            self.tr("Save failed"),
+            self.tr("The document could not be saved and had to be closed."),
+            details=str(exc),
+        )
+        return False
 
     def save_as(self) -> bool:
         doc = self.document_view.document
@@ -529,12 +557,17 @@ class MainWindow(QMainWindow):
             return False
         try:
             self.document_view.save_as(path)
-        except SaveError as exc:
+        except DocumentError as exc:
             log.warning("save as failed: %s", exc)
+            if not self._document_survived(exc):
+                return False
             dialogs.warn(
                 self,
                 self.tr("Save failed"),
-                self.tr("The document could not be saved:\n{error}").format(error=exc),
+                self.tr(
+                    "The document could not be saved as “{name}”. Check that the folder exists and that you are allowed to write there."  # noqa: E501
+                ).format(name=os.path.basename(path)),
+                details=str(exc),
             )
             return False
         self.settings.last_open_dir = os.path.dirname(path)

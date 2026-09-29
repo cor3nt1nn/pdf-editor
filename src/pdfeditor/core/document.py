@@ -385,6 +385,11 @@ class PdfDocument(QObject):
         self._size_cache.clear()
 
 
+def pdf_library_versions() -> list[tuple[str, str]]:
+    """(name, version) of the PDF libraries, for the About box (UI must not import pymupdf)."""
+    return [("PyMuPDF", str(pymupdf.VersionBind)), ("MuPDF", str(pymupdf.VersionFitz))]
+
+
 def _stamp(path: str) -> DiskStamp | None:
     """(size, mtime_ns) of ``path``, or None if it does not exist."""
     try:

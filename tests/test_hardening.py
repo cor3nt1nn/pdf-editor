@@ -25,7 +25,9 @@ ICONS = (
 @pytest.fixture
 def window(qtbot, settings, monkeypatch):
     warnings: list[tuple[str, str]] = []
-    monkeypatch.setattr(dialogs, "warn", lambda parent, title, text: warnings.append((title, text)))
+    monkeypatch.setattr(
+        dialogs, "warn", lambda parent, title, text, details=None: warnings.append((title, text))
+    )
     w = MainWindow(settings)
     w.warnings = warnings
     qtbot.addWidget(w)

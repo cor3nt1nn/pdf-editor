@@ -11,6 +11,19 @@ from PySide6.QtCore import QSettings  # noqa: E402
 from pdfeditor.core.settings import Settings  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _english_after_test():
+    """app.main() installs the system language (French here); don't leak it to other tests."""
+    yield
+    from PySide6.QtCore import QCoreApplication
+
+    from pdfeditor.i18n import remove_translators
+
+    app = QCoreApplication.instance()
+    if app is not None:
+        remove_translators(app)
+
+
 @pytest.fixture
 def ini_path(tmp_path):
     return tmp_path / "PDFEditor.ini"
