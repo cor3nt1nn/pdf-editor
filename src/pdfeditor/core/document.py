@@ -66,6 +66,7 @@ class PdfDocument(QObject):
         self._path = str(path) if path else None
         self._password = password
         self._encrypted = encrypted
+        self._from_disk = path is not None
         self._size_cache: dict[int, QSizeF] = {}
         self.page_changed.connect(self._on_page_changed)
         self.structure_changed.connect(self._size_cache.clear)
@@ -124,7 +125,7 @@ class PdfDocument(QObject):
             raise OpenError(f"file is empty: {path}")
         try:
             return pymupdf.open(path, filetype="pdf")
-        except (RuntimeError, ValueError, OSError) as exc:
+        except Exception as exc:  # FileDataError, FzError*, ... -> OpenError
             raise OpenError(str(exc)) from exc
 
     # -- properties --------------------------------------------------------
@@ -231,6 +232,96 @@ class PdfDocument(QObject):
             ).copy()
         return image
 
+    # -- saving ------------------------------------------------------------
+    def can_save_incrementally(self) -> bool:
+        """True if ``save()`` can append an incremental update to the file on disk."""
+        if self._path is None or not self._from_disk or not Path(self._path).is_file():
+            return False
+        with self.lock:
+            doc = self.fitz
+            return not doc.is_repaired and bool(doc.can_save_incrementally())
+
+    def save(self, force_full: bool = False) -> None:
+        """Save in place: incrementally when possible, else a full rewrite.
+
+        Raises :class:`SaveError`. The document stays usable after a failure.
+        """
+        if self._path is None:
+            raise SaveError("document has no file path; use save_as()")
+        if not force_full and self.can_save_incrementally():
+            try:
+                with self.lock:
+                    self.fitz.save(
+                        self._path, incremental=True, encryption=pymupdf.PDF_ENCRYPT_KEEP
+                    )
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise SaveError(str(exc)) from exc
+            log.info("saved incrementally: %s", self._path)
+            return
+        self._full_save_in_place()
+
+    def _full_save_kwargs(self) -> dict[str, object]:
+        return {"garbage": 3, "deflate": True, "encryption": pymupdf.PDF_ENCRYPT_KEEP}
+
+    def _full_save_in_place(self) -> None:
+        assert self._path is not None
+        path = self._path
+        tmp = path + ".tmp"
+        with self.lock:
+            try:
+                self.fitz.save(tmp, **self._full_save_kwargs())
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                _remove_quietly(tmp)
+                raise SaveError(str(exc)) from exc
+            # Windows: MuPDF keeps the file open, so close before replacing.
+            self._doc.close()
+            self._doc = None
+            try:
+                os.replace(tmp, path)
+            except OSError as exc:
+                # Keep the saved changes alive in memory; the original file is untouched.
+                self._reopen_from_bytes(tmp)
+                raise SaveError(str(exc)) from exc
+            self._reopen(path)
+        log.info("saved (full rewrite): %s", path)
+        self._size_cache.clear()
+        self.path_changed.emit(path)
+
+    def save_as(self, new_path: str | os.PathLike[str]) -> None:
+        """Full save to ``new_path`` then reopen from there. Raises :class:`SaveError`."""
+        new_path = str(new_path)
+        if self._path is not None and _same_file(new_path, self._path):
+            self._full_save_in_place()
+            return
+        with self.lock:
+            try:
+                self.fitz.save(new_path, **self._full_save_kwargs())
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise SaveError(str(exc)) from exc
+            self._doc.close()
+            self._doc = None
+            self._reopen(new_path)
+        self._path = new_path
+        log.info("saved as: %s", new_path)
+        self._size_cache.clear()
+        self.path_changed.emit(new_path)
+
+    def _reopen(self, path: str) -> None:
+        doc = pymupdf.open(path, filetype="pdf")
+        if doc.needs_pass and self._password is not None:
+            doc.authenticate(self._password)
+        self._doc = doc
+        self._from_disk = True
+
+    def _reopen_from_bytes(self, tmp: str) -> None:
+        data = Path(tmp).read_bytes()
+        _remove_quietly(tmp)
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        if doc.needs_pass and self._password is not None:
+            doc.authenticate(self._password)
+        self._doc = doc
+        self._from_disk = False
+
     # -- lifecycle ---------------------------------------------------------
     def close(self) -> None:
         with self.lock:
@@ -241,3 +332,14 @@ class PdfDocument(QObject):
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _same_file(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
