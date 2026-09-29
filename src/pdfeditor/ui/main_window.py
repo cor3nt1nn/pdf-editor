@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -12,13 +13,14 @@ from PySide6.QtGui import (
     QDropEvent,
     QKeySequence,
 )
-from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QSpinBox
+from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QMessageBox, QSpinBox
 
 from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core.document import OpenError, PasswordRequired, SaveError
 from pdfeditor.core.settings import Settings
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
+from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         self.page_view = self.document_view.page_view
         self.undo_stack = self.document_view.undo_stack
         self.setCentralWidget(self.document_view)
+        self._create_thumbnails()
 
         self._create_actions()
         self._create_menus()
@@ -61,10 +64,24 @@ class MainWindow(QMainWindow):
             self.page_view.set_zoom_mode(mode)
 
         self._restore_window_state()
+        self.thumbnails_dock.setVisible(self.settings.thumbnails_visible)
         self._update_title()
         self._update_actions()
 
     # -- construction ---------------------------------------------------------
+    def _create_thumbnails(self) -> None:
+        self.thumbnail_model = ThumbnailModel(self.page_view.service, self)
+        self.thumbnails = ThumbnailSidebar(self.thumbnail_model, self)
+        dock = QDockWidget(self.tr("Pages"), self)
+        dock.setObjectName("thumbnails_dock")
+        dock.setWidget(self.thumbnails)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        self.thumbnails_dock = dock
+
     def _action(self, text: str, shortcut=None, slot=None, name: str = "") -> QAction:
         action = QAction(text, self)
         if name:
@@ -125,6 +142,12 @@ class MainWindow(QMainWindow):
             self.tr("&Previous Page"), None, pv.previous_page, "prev_page"
         )
         self.act_next_page = self._action(self.tr("&Next Page"), None, pv.next_page, "next_page")
+        self.act_thumbnails = self.thumbnails_dock.toggleViewAction()
+        self.act_thumbnails.setText(self.tr("&Thumbnails"))
+        self.act_thumbnails.setObjectName("toggle_thumbnails")
+        self.act_thumbnails.setShortcut(QKeySequence("F4"))
+        self.act_thumbnails.triggered.connect(self._on_thumbnails_toggled)
+        self.addAction(self.act_thumbnails)
 
     def _create_menus(self) -> None:
         bar = self.menuBar()
@@ -146,6 +169,8 @@ class MainWindow(QMainWindow):
         self.menu_view.addSeparator()
         self.menu_view.addAction(self.act_prev_page)
         self.menu_view.addAction(self.act_next_page)
+        self.menu_view.addSeparator()
+        self.menu_view.addAction(self.act_thumbnails)
         self.menu_help = bar.addMenu(self.tr("&Help"))
 
     def _create_toolbar(self) -> None:
@@ -188,6 +213,7 @@ class MainWindow(QMainWindow):
         self.zoom_widget.zoom_requested.connect(lambda z: pv.set_zoom_percent(z))
         self.zoom_widget.mode_requested.connect(pv.set_zoom_mode)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
+        self.thumbnails.page_requested.connect(pv.scroll_to_page)
         self.document_view.document_changed.connect(self._on_document_changed)
         self.document_view.path_changed.connect(lambda _p: self._on_document_changed())
 
@@ -234,12 +260,14 @@ class MainWindow(QMainWindow):
         self.status_zoom.setText(format_zoom(self.page_view.zoom_percent))
 
     def _on_document_changed(self) -> None:
+        self.thumbnail_model.set_document(self.document_view.document)
         n = self.page_view.page_count
         self.page_spin.blockSignals(True)
         self.page_spin.setRange(1 if n else 0, n)
         self.page_spin.setValue(self.page_view.current_page + 1 if n else 0)
         self.page_spin.blockSignals(False)
         self.page_total_label.setText(f" / {n} ")
+        self.thumbnails.set_current_page(self.page_view.current_page)
         self._update_title()
         self._update_actions()
         self._update_status()
@@ -248,6 +276,7 @@ class MainWindow(QMainWindow):
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
+        self.thumbnails.set_current_page(index)
         self._update_actions()
         self._update_status()
 
@@ -261,6 +290,9 @@ class MainWindow(QMainWindow):
         self.settings.zoom_mode = mode
         if mode == ZoomMode.CUSTOM:
             self.settings.zoom_percent = percent
+
+    def _on_thumbnails_toggled(self, visible: bool) -> None:
+        self.settings.thumbnails_visible = visible
 
     def _on_clean_changed(self, _clean: bool) -> None:
         self._update_title()

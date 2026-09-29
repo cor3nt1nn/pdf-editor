@@ -64,7 +64,7 @@ class RenderService(QObject):
         self.worker.stop()
 
     def _on_rendered(self, req: RenderRequest, image: QImage) -> None:
-        if req.document is not self._document or self._document is None:
+        if req.document is not self._document or self._document is None or not req.document.is_open:
             return
         if req.generation != self.worker.generation(req.kind):
             return  # superseded while the result was in the event queue
