@@ -40,14 +40,12 @@ class ThumbnailModel(QAbstractListModel):
             try:
                 self._document.page_changed.disconnect(self._on_page_changed)
                 self._document.structure_changed.disconnect(self._on_structure_changed)
-                self._document.path_changed.disconnect(self._on_structure_changed)
             except (RuntimeError, TypeError):
                 pass
         self._document = document
         if document is not None:
             document.page_changed.connect(self._on_page_changed)
             document.structure_changed.connect(self._on_structure_changed)
-            document.path_changed.connect(self._on_structure_changed)
         self.endResetModel()
 
     def rowCount(self, parent: ModelIndex = QModelIndex()) -> int:  # noqa: B008
@@ -77,7 +75,17 @@ class ThumbnailModel(QAbstractListModel):
             pixmap = self._service.pixmap(page, scale, RenderKind.THUMB)
             if pixmap is None:
                 self._service.request(page, scale, RenderKind.THUMB, Priority.THUMB)
-                return self._placeholder(page)
+                # Same-size content change: keep showing the previous thumbnail meanwhile.
+                pixmap = self._service.best(page, RenderKind.THUMB)
+                if pixmap is None:
+                    return self._placeholder(page)
+                pixmap = pixmap.scaled(
+                    self.thumb_size(page) * self.device_pixel_ratio,
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                pixmap.setDevicePixelRatio(self.device_pixel_ratio)
+                return pixmap
             pixmap = QPixmap(pixmap)
             pixmap.setDevicePixelRatio(self.device_pixel_ratio)
             return pixmap

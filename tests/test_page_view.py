@@ -150,3 +150,59 @@ def test_set_document_none(view: PageView) -> None:
     assert view.page_count == 0
     assert view.viewport_to_page(QPoint(10, 10)) is None
     assert isinstance(view.doc_scene.sceneRect().topLeft(), QPointF)
+
+
+def _wait_rendered(qtbot, view: PageView, page: int) -> float:
+    view.viewport().repaint()
+    qtbot.waitUntil(lambda: view.page_item(page).last_scale is not None, timeout=3000)
+    scale = view.page_item(page).last_scale
+    qtbot.waitUntil(lambda: view.service.pixmap(page, scale) is not None, timeout=5000)
+    return scale
+
+
+def test_content_change_keeps_scroll_and_stale_pixmap(qtbot, view: PageView, doc) -> None:
+    view.set_zoom_percent(100)
+    view.scroll_to_page(1)
+    bar = view.verticalScrollBar()
+    bar.setValue(bar.value() + 40)
+    scale = _wait_rendered(qtbot, view, 1)
+    old = view.service.pixmap(1, scale)
+    before = bar.value()
+    # Blue box drawn by the fixture on every page at (60, 90)-(200, 160).
+    probe = view.page_rect_to_viewport(1, QRectF(100, 110, 20, 20)).center()
+    with doc.lock:  # blocks the render worker: the re-render cannot arrive yet
+        doc.fitz[1].draw_rect((300, 300, 400, 400), color=(0, 0, 0), fill=(0, 0, 0))
+        doc.page_changed.emit(1)  # content only: same size
+        assert bar.value() == before
+        assert view.service.pixmap(1, scale) is None
+        assert view.service.is_stale(1)
+        assert view.service.best(1) is old
+        color = view.viewport().grab().toImage().pixelColor(probe)
+        assert color.blue() > 150 and color.red() < 150  # old pixmap painted, no white flash
+    qtbot.waitUntil(lambda: view.service.pixmap(1, scale) is not None, timeout=5000)
+    assert not view.service.is_stale(1)
+    assert bar.value() == before
+
+
+def test_rotating_page_above_keeps_view_anchor(qtbot, view: PageView, doc) -> None:
+    view.set_zoom_percent(100)
+    view.scroll_to_page(2)
+    bar = view.verticalScrollBar()
+    bar.setValue(bar.value() - 30)
+    assert view.current_page == 1 or view.current_page == 2
+    current = view.current_page
+    top = view.mapToScene(QPoint(0, 0)).y() - view.doc_scene.page_offset(current).y()
+    doc.set_page_rotation(0, 90)  # page 0 gets shorter: everything below moves up
+    assert view.current_page == current
+    new_top = view.mapToScene(QPoint(0, 0)).y() - view.doc_scene.page_offset(current).y()
+    assert new_top == pytest.approx(top, abs=1)
+
+
+def test_rotating_current_page_keeps_it_current(qtbot, view: PageView, doc) -> None:
+    view.set_zoom_percent(100)
+    view.scroll_to_page(1)
+    doc.set_page_rotation(1, 90)
+    assert view.page_item(1).size == QSizeF(612, 792)
+    assert view.current_page == 1
+    top = view.mapToScene(QPoint(0, 0)).y()
+    assert top == pytest.approx(view.doc_scene.page_offset(1).y() - PAGE_GAP_PT / 2, abs=2)

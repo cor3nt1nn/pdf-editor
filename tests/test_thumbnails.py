@@ -91,3 +91,36 @@ def test_f4_toggles_and_persists(qtbot, window: MainWindow, ini_path) -> None:
     assert w2.thumbnails_dock.isVisible()
     assert w2.settings.thumbnails_visible is True
     w2.close()
+
+
+def test_save_as_and_full_save_keep_caches(qtbot, window: MainWindow, tmp_path) -> None:
+    model = window.thumbnail_model
+    for row in range(3):
+        model.data(model.index(row), Qt.ItemDataRole.DecorationRole)
+    qtbot.waitUntil(lambda: all(model.is_rendered(r) for r in range(3)), timeout=5000)
+    cache = window.page_view.service.cache
+    entries = len(cache)
+    doc = window.document_view.document
+    with qtbot.assertNotEmitted(model.modelReset):
+        doc.save_as(tmp_path / "copy.pdf")
+        doc.save(force_full=True)
+    assert len(cache) == entries
+    assert all(model.is_rendered(r) for r in range(3))
+
+
+def test_content_change_keeps_old_thumbnail(qtbot, window: MainWindow) -> None:
+    model = window.thumbnail_model
+    idx = model.index(0)
+    model.data(idx, Qt.ItemDataRole.DecorationRole)
+    qtbot.waitUntil(lambda: model.is_rendered(0), timeout=5000)
+    doc = window.document_view.document
+    with doc.lock:
+        doc.fitz[0].draw_rect((300, 300, 400, 400), color=(0, 0, 0), fill=(0, 0, 0))
+        doc.page_changed.emit(0)
+        assert not model.is_rendered(0)
+        pm = model.data(idx, Qt.ItemDataRole.DecorationRole)
+        img = pm.toImage()
+        # the fixture's blue box, not a blank placeholder
+        c = img.pixelColor(int(img.width() * 100 / 595), int(img.height() * 120 / 842))
+        assert c.blue() > 150 and c.red() < 150
+    qtbot.waitUntil(lambda: model.is_rendered(0), timeout=5000)

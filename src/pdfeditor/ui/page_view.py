@@ -182,7 +182,6 @@ class PageView(QGraphicsView):
             try:
                 self._document.page_changed.disconnect(self._on_page_changed)
                 self._document.structure_changed.disconnect(self._on_structure_changed)
-                self._document.path_changed.disconnect(self._on_path_changed)
             except (RuntimeError, TypeError):
                 pass
         self._document = document
@@ -190,7 +189,6 @@ class PageView(QGraphicsView):
         if document is not None:
             document.page_changed.connect(self._on_page_changed)
             document.structure_changed.connect(self._on_structure_changed)
-            document.path_changed.connect(self._on_path_changed)
         self._scene.set_document(document)
         self._current = -1
         if self._mode != ZoomMode.CUSTOM:
@@ -214,14 +212,45 @@ class PageView(QGraphicsView):
         return self._scene.page_items[i]
 
     def _on_page_changed(self, i: int) -> None:
-        current = self._current
+        """Content-only change (same size): re-render in place, keeping the old pixmap as
+        placeholder and the scroll position. Size change (rotation...): relayout, keeping
+        the view anchored on the same spot of the current page."""
+        if self._document is None or not 0 <= i < self.page_count:
+            return
+        item = self.page_item(i)
+        if self._document.page_size(i) == item.size:
+            self.service.invalidate_page(i, keep_stale=True)
+            item.update()
+            self._schedule_render()
+            return
+        anchor = self._capture_anchor()
         self.service.invalidate_page(i)
         self.relayout()
-        if 0 <= i < self.page_count:
-            self.page_item(i).update()
-        if current >= 0 and current == i:
-            self.scroll_to_page(current)
+        item.update()
+        if anchor is not None:
+            self._restore_anchor(*anchor)
         self._update_current_page()
+
+    def _capture_anchor(self) -> tuple[int, float] | None:
+        """(current page, viewport top as a fraction of that page's height from its top)."""
+        if self._current < 0 or not self.page_count:
+            return None
+        page = self._current
+        top = self.mapToScene(self.viewport().rect().topLeft()).y()
+        height = max(1.0, self.page_item(page).size.height())
+        return page, (top - self._scene.page_offset(page).y()) / height
+
+    def _restore_anchor(self, page: int, fraction: float) -> None:
+        page = min(page, self.page_count - 1)
+        top = self._scene.page_offset(page).y() + fraction * self.page_item(page).size.height()
+        vh = self.viewport().height() / self.view_scale
+        center_x = self.mapToScene(self.viewport().rect().center()).x()
+        self._suppress_current = True
+        try:
+            self.centerOn(QPointF(center_x, top + vh / 2.0))
+        finally:
+            self._suppress_current = False
+        self._schedule_render()
 
     def _on_structure_changed(self) -> None:
         current = self._current
@@ -230,11 +259,6 @@ class PageView(QGraphicsView):
         self.relayout()
         if self.page_count:
             self.scroll_to_page(max(0, min(current, self.page_count - 1)))
-
-    def _on_path_changed(self, _path: str) -> None:
-        self.service.reset()
-        self.relayout()
-        self.viewport().update()
 
     def _on_pixmap_ready(self, page: int, kind: str) -> None:
         if kind == RenderKind.PAGE and 0 <= page < self.page_count:

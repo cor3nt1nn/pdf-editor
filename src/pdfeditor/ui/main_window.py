@@ -308,7 +308,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.thumbnails.page_requested.connect(pv.scroll_to_page)
         self.document_view.document_changed.connect(self._on_document_changed)
-        self.document_view.path_changed.connect(lambda _p: self._on_document_changed())
+        self.document_view.path_changed.connect(self._on_path_changed)
 
     # -- state sync -------------------------------------------------------------
     def _update_title(self) -> None:
@@ -365,6 +365,11 @@ class MainWindow(QMainWindow):
         self.thumbnails.set_current_page(self.page_view.current_page)
         self._update_title()
         self._update_actions()
+        self._update_status()
+
+    def _on_path_changed(self, _path: str) -> None:
+        # Save As: same content under a new name; views and caches stay as they are.
+        self._update_title()
         self._update_status()
 
     def _on_current_page_changed(self, index: int) -> None:
