@@ -6,7 +6,15 @@ import bisect
 import logging
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QResizeEvent, QTransform, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QResizeEvent,
+    QTransform,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QWidget
 
 from pdfeditor.constants import (
@@ -23,6 +31,7 @@ from pdfeditor.core.geometry import quantize_scale, zoom_to_scale
 from pdfeditor.render.renderer import Priority, RenderKind
 from pdfeditor.render.service import RenderService
 from pdfeditor.ui.page_item import PageItem
+from pdfeditor.ui.tools.base import ToolEvent, ToolManager
 
 log = logging.getLogger(__name__)
 
@@ -137,7 +146,7 @@ class PageView(QGraphicsView):
         self._mode = ZoomMode.FIT_WIDTH
         self._current = -1
         self._suppress_current = False
-        self.tool_manager = None  # set by the owner (ui.tools.base.ToolManager)
+        self.tool_manager: ToolManager | None = None  # set by ToolManager(view)
 
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -402,6 +411,46 @@ class PageView(QGraphicsView):
             return None
         return i, scene_pos - self._scene.page_offset(i)
 
+    # -- tool forwarding --------------------------------------------------------
+    def _tool_event(self, event: QMouseEvent | QKeyEvent) -> ToolEvent:
+        if isinstance(event, QMouseEvent):
+            pos = event.position().toPoint()
+            buttons, modifiers = event.buttons(), event.modifiers()
+        else:
+            pos = self.viewport().mapFromGlobal(self.cursor().pos())
+            buttons, modifiers = Qt.MouseButton.NoButton, event.modifiers()
+        scene_pos = self.mapToScene(pos)
+        hit = self.viewport_to_page(pos)
+        page_index, page_pos = hit if hit is not None else (None, None)
+        return ToolEvent(page_index, page_pos, scene_pos, buttons, modifiers, event)
+
+    def _forward(self, handler: str, event: QMouseEvent | QKeyEvent) -> bool:
+        tool = self.tool_manager.active_tool if self.tool_manager is not None else None
+        if tool is None or self._document is None:
+            return False
+        if getattr(tool, handler)(self._tool_event(event)):
+            event.accept()
+            return True
+        return False
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if not self._forward("mouse_press", event):
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not self._forward("mouse_move", event):
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if not self._forward("mouse_release", event):
+            super().mouseReleaseEvent(event)
+
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        tool = self.tool_manager.active_tool if self.tool_manager is not None else None
+        if tool is not None:
+            tool.paint_overlay(painter)
+
     # -- events ---------------------------------------------------------------
     def resizeEvent(self, event: QResizeEvent) -> None:
         current = self._current
@@ -424,6 +473,8 @@ class PageView(QGraphicsView):
         super().wheelEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
+        if self._forward("key_press", event):
+            return
         key = event.key()
         if event.modifiers() in (
             Qt.KeyboardModifier.NoModifier,

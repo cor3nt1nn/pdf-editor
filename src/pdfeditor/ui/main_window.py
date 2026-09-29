@@ -16,11 +16,14 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QMessageBox, QSpinBox
 
 from pdfeditor.constants import APP_NAME, ZoomMode
+from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import OpenError, PasswordRequired, SaveError
 from pdfeditor.core.settings import Settings
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
+from pdfeditor.ui.tools.base import ToolManager
+from pdfeditor.ui.tools.hand_tool import HandTool
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
 log = logging.getLogger(__name__)
@@ -52,6 +55,7 @@ class MainWindow(QMainWindow):
         self._create_thumbnails()
 
         self._create_actions()
+        self._create_tools()
         self._create_menus()
         self._create_toolbar()
         self._create_status_bar()
@@ -111,6 +115,29 @@ class MainWindow(QMainWindow):
             self.tr("&Close"), QKeySequence("Ctrl+W"), self.close_document, "close"
         )
         self.act_quit = self._action(self.tr("&Quit"), QKeySequence("Ctrl+Q"), self.close, "quit")
+        self.act_undo = self.undo_stack.createUndoAction(self, self.tr("Undo"))
+        self.act_undo.setObjectName("undo")
+        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        self.act_redo = self.undo_stack.createRedoAction(self, self.tr("Redo"))
+        self.act_redo.setObjectName("redo")
+        self.act_redo.setShortcuts(
+            [QKeySequence(QKeySequence.StandardKey.Redo), QKeySequence("Ctrl+Shift+Z")]
+        )
+        self.addAction(self.act_undo)
+        self.addAction(self.act_redo)
+        self.act_rotate_cw = self._action(
+            self.tr("Rotate Page &Clockwise"),
+            QKeySequence("Ctrl+R"),
+            lambda: self.rotate_current_page(90),
+            "rotate_cw",
+        )
+        self.act_rotate_ccw = self._action(
+            self.tr("Rotate Page C&ounterclockwise"),
+            QKeySequence("Ctrl+Shift+R"),
+            lambda: self.rotate_current_page(-90),
+            "rotate_ccw",
+        )
+        self.act_hand_tool = self._action(self.tr("&Hand Tool"), None, None, "hand_tool")
         self.act_zoom_in = self._action(
             self.tr("Zoom &In"),
             [QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")],
@@ -149,6 +176,10 @@ class MainWindow(QMainWindow):
         self.act_thumbnails.triggered.connect(self._on_thumbnails_toggled)
         self.addAction(self.act_thumbnails)
 
+    def _create_tools(self) -> None:
+        self.tool_manager = ToolManager(self.page_view, self)
+        self.tool_manager.register(HandTool(self), self.act_hand_tool)
+
     def _create_menus(self) -> None:
         bar = self.menuBar()
         self.menu_file = bar.addMenu(self.tr("&File"))
@@ -157,6 +188,13 @@ class MainWindow(QMainWindow):
         self.menu_file.addSeparator()
         self.menu_file.addAction(self.act_quit)
         self.menu_edit = bar.addMenu(self.tr("&Edit"))
+        self.menu_edit.addAction(self.act_undo)
+        self.menu_edit.addAction(self.act_redo)
+        self.menu_edit.addSeparator()
+        self.menu_edit.addAction(self.act_rotate_cw)
+        self.menu_edit.addAction(self.act_rotate_ccw)
+        self.menu_edit.addSeparator()
+        self.menu_edit.addAction(self.act_hand_tool)
         self.menu_view = bar.addMenu(self.tr("&View"))
         for act in (
             self.act_zoom_in,
@@ -181,7 +219,11 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_open)
         tb.addAction(self.act_save)
         tb.addSeparator()
-        self._toolbar_edit_anchor = tb.addSeparator()
+        tb.addAction(self.act_undo)
+        tb.addAction(self.act_redo)
+        tb.addSeparator()
+        tb.addAction(self.act_rotate_cw)
+        tb.addSeparator()
         tb.addAction(self.act_prev_page)
         self.page_spin = QSpinBox(self)
         self.page_spin.setObjectName("page_spin")
@@ -239,6 +281,8 @@ class MainWindow(QMainWindow):
             self.act_actual_size,
             self.act_prev_page,
             self.act_next_page,
+            self.act_rotate_cw,
+            self.act_rotate_ccw,
         ):
             act.setEnabled(has_doc)
         self.page_spin.setEnabled(has_doc)
@@ -296,6 +340,14 @@ class MainWindow(QMainWindow):
 
     def _on_clean_changed(self, _clean: bool) -> None:
         self._update_title()
+
+    # -- editing -------------------------------------------------------------------
+    def rotate_current_page(self, delta: int) -> None:
+        doc = self.document_view.document
+        page = self.page_view.current_page
+        if doc is None or page < 0:
+            return
+        self.undo_stack.push(RotatePageCommand(doc, page, delta))
 
     # -- file operations ------------------------------------------------------------
     def _password_prompt(self, path: str):
