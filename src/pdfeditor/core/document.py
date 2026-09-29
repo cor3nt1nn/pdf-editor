@@ -30,14 +30,21 @@ class DocumentError(Exception):
 
 
 class OpenError(DocumentError):
-    """The file could not be opened as a PDF (missing, empty, corrupt...)."""
+    """The file could not be opened as a PDF.
+
+    ``reason`` is one of "missing", "empty", "corrupt", "no_pages", "password".
+    """
+
+    def __init__(self, message: str, reason: str = "corrupt") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class PasswordRequired(OpenError):  # noqa: N818 - public API name from the design
     """The PDF is encrypted and no (correct) password was supplied."""
 
     def __init__(self, message: str = "password required", wrong_password: bool = False):
-        super().__init__(message)
+        super().__init__(message, reason="password")
         self.wrong_password = wrong_password
 
 
@@ -93,7 +100,7 @@ class PdfDocument(QObject):
             used_password = cls._authenticate(fitz_doc, password_cb, password)
         if fitz_doc.page_count == 0:
             fitz_doc.close()
-            raise OpenError(f"document has no pages: {path}")
+            raise OpenError(f"document has no pages: {path}", reason="no_pages")
         return cls(fitz_doc, path, used_password, encrypted)
 
     @staticmethod
@@ -120,13 +127,13 @@ class PdfDocument(QObject):
     def _open_fitz(path: str) -> pymupdf.Document:
         p = Path(path)
         if not p.is_file():
-            raise OpenError(f"file not found: {path}")
+            raise OpenError(f"file not found: {path}", reason="missing")
         if p.stat().st_size == 0:
-            raise OpenError(f"file is empty: {path}")
+            raise OpenError(f"file is empty: {path}", reason="empty")
         try:
             return pymupdf.open(path, filetype="pdf")
         except Exception as exc:  # FileDataError, FzError*, ... -> OpenError
-            raise OpenError(str(exc)) from exc
+            raise OpenError(str(exc), reason="corrupt") from exc
 
     # -- properties --------------------------------------------------------
     @property

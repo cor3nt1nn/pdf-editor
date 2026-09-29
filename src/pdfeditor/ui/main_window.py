@@ -22,6 +22,7 @@ from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import OpenError, PasswordRequired, SaveError
 from pdfeditor.core.settings import Settings
 from pdfeditor.i18n import LANGUAGE_NAMES, current_language
+from pdfeditor.resources import app_icon, icon
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
@@ -43,6 +44,10 @@ def pdf_paths_from_urls(urls) -> list[str]:
     return paths
 
 
+def file_exists(path: str) -> bool:
+    return os.path.isfile(path)
+
+
 def restart_command(path: str | None) -> tuple[str, list[str]]:
     """Program and arguments to relaunch the application (optionally reopening ``path``)."""
     args = [] if getattr(sys, "frozen", False) else ["-m", "pdfeditor"]
@@ -58,6 +63,7 @@ class MainWindow(QMainWindow):
         self.settings = settings if settings is not None else Settings()
         self.setObjectName("MainWindow")
         self.setAcceptDrops(True)
+        self.setWindowIcon(app_icon())
         self.resize(1000, 800)
 
         self.document_view = DocumentView(self)
@@ -187,6 +193,24 @@ class MainWindow(QMainWindow):
         self.act_thumbnails.setShortcut(QKeySequence("F4"))
         self.act_thumbnails.triggered.connect(self._on_thumbnails_toggled)
         self.addAction(self.act_thumbnails)
+        self.act_about = self._action(self.tr("&About PDF Editor…"), None, self.show_about, "about")
+        self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
+        self.act_rotate_cw.setIconText(self.tr("Rotate"))
+        for act, name in (
+            (self.act_open, "open"),
+            (self.act_save, "save"),
+            (self.act_undo, "undo"),
+            (self.act_redo, "redo"),
+            (self.act_rotate_cw, "rotate_cw"),
+            (self.act_rotate_ccw, "rotate_ccw"),
+            (self.act_prev_page, "prev"),
+            (self.act_next_page, "next"),
+            (self.act_zoom_in, "zoom_in"),
+            (self.act_zoom_out, "zoom_out"),
+            (self.act_hand_tool, "hand"),
+            (self.act_thumbnails, "thumbnails"),
+        ):
+            act.setIcon(icon(name))
 
     def _create_tools(self) -> None:
         self.tool_manager = ToolManager(self.page_view, self)
@@ -236,6 +260,7 @@ class MainWindow(QMainWindow):
             self.menu_language.addAction(act)
             self.language_actions[code] = act
         self.menu_help = bar.addMenu(self.tr("&Help"))
+        self.menu_help.addAction(self.act_about)
 
     def _create_toolbar(self) -> None:
         tb = self.addToolBar(self.tr("Main toolbar"))
@@ -375,6 +400,9 @@ class MainWindow(QMainWindow):
             return
         self.undo_stack.push(RotatePageCommand(doc, page, delta))
 
+    def show_about(self) -> None:
+        dialogs.show_about(self)
+
     # -- language -------------------------------------------------------------------
     def change_language(self, code: str) -> None:
         """Persist the UI language and offer to restart to apply it."""
@@ -428,12 +456,37 @@ class MainWindow(QMainWindow):
                 self,
                 self.tr("Cannot open file"),
                 self.tr("“{path}” could not be opened as a PDF document.\n\n{error}").format(
+                    path=path, error=self._open_error_text(exc)
+                ),
+            )
+            return False
+        except Exception as exc:  # never let a bad file take the application down
+            log.exception("unexpected error opening %s", path)
+            dialogs.warn(
+                self,
+                self.tr("Cannot open file"),
+                self.tr("“{path}” could not be opened as a PDF document.\n\n{error}").format(
                     path=path, error=exc
                 ),
             )
             return False
         self.settings.last_open_dir = os.path.dirname(path)
+        doc = self.document_view.document
+        if doc is not None and doc.was_repaired:
+            self.statusBar().showMessage(
+                self.tr("The file was repaired while opening; saving will rewrite it completely."),
+                10000,
+            )
         return True
+
+    def _open_error_text(self, exc: OpenError) -> str:
+        messages = {
+            "missing": self.tr("The file does not exist."),
+            "empty": self.tr("The file is empty."),
+            "corrupt": self.tr("The file is damaged or is not a PDF document."),
+            "no_pages": self.tr("The document has no pages."),
+        }
+        return messages.get(exc.reason, str(exc))
 
     def close_document(self) -> bool:
         if not self.maybe_save():
@@ -446,6 +499,15 @@ class MainWindow(QMainWindow):
         if doc is None:
             return False
         if doc.path is None:
+            return self.save_as()
+        if not file_exists(doc.path):
+            dialogs.warn(
+                self,
+                self.tr("Save failed"),
+                self.tr("The file “{name}” no longer exists. Use Save As to save a copy.").format(
+                    name=os.path.basename(doc.path)
+                ),
+            )
             return self.save_as()
         try:
             self.document_view.save()

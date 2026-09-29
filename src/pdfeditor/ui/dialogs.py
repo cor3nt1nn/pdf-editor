@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox, QWidget
 
@@ -96,3 +98,46 @@ def ask_restart(parent: QWidget | None) -> bool:
         QMessageBox.StandardButton.Yes,
     )
     return answer == QMessageBox.StandardButton.Yes
+
+
+def about_html() -> str:
+    """Rich text for the About box: version, license notice and library versions."""
+    import platform
+
+    import pymupdf
+    import PySide6
+    from PySide6.QtCore import qVersion
+
+    from pdfeditor import __version__
+
+    rows = [
+        ("PyMuPDF", pymupdf.VersionBind),
+        ("MuPDF", pymupdf.VersionFitz),
+        ("PySide6", PySide6.__version__),
+        ("Qt", qVersion()),
+        ("Python", platform.python_version()),
+    ]
+    libs = "<br>".join(f"{name} {html.escape(str(ver))}" for name, ver in rows)
+    version = QCoreApplication.translate("Dialogs", "Version {version}").format(version=__version__)
+    summary = QCoreApplication.translate(
+        "Dialogs", "Free and open-source PDF editor: fill forms, add text and stamps, sign."
+    )
+    # Single literal on purpose: lupdate does not join implicitly concatenated strings.
+    notice = QCoreApplication.translate(
+        "Dialogs",
+        "This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License version 3. It comes with ABSOLUTELY NO WARRANTY.",  # noqa: E501
+    )
+    built_with = QCoreApplication.translate("Dialogs", "Built with:")
+    return (
+        f"<h3>PDF Editor</h3><p>{html.escape(version)}</p>"
+        f"<p>{html.escape(summary)}</p>"
+        f"<p>{html.escape(notice)} "
+        '<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a></p>'
+        f"<p><b>{html.escape(built_with)}</b><br>{libs}</p>"
+    )
+
+
+def show_about(parent: QWidget | None) -> None:
+    QMessageBox.about(
+        parent, QCoreApplication.translate("Dialogs", "About PDF Editor"), about_html()
+    )
