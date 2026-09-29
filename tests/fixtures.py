@@ -101,3 +101,27 @@ def make_many_pages_pdf(path: Path, count: int = 200) -> Path:
     doc.save(path, garbage=3, deflate=True)
     doc.close()
     return path
+
+
+CROP_MEDIABOX = (612.0, 792.0)
+CROP_BOX = (50.0, 40.0, 562.0, 742.0)
+#: Red text widget in unrotated PDF user space (y-down, mediabox origin).
+CROP_WIDGET_RECT = (100.0, 600.0, 300.0, 650.0)
+
+
+def make_cropped_form_pdf(path: Path, rotation: int) -> Path:
+    """Letter mediabox with an offset cropbox, one opaque red text widget, and /Rotate."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=CROP_MEDIABOX[0], height=CROP_MEDIABOX[1])
+    widget = pymupdf.Widget()
+    widget.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    widget.field_name = "red"
+    widget.rect = pymupdf.Rect(CROP_WIDGET_RECT)
+    widget.fill_color = (1, 0, 0)
+    widget.border_width = 0
+    page.add_widget(widget)
+    page.set_cropbox(pymupdf.Rect(CROP_BOX))
+    page.set_rotation(rotation)
+    doc.save(path)
+    doc.close()
+    return path

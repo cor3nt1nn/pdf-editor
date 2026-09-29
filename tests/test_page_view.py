@@ -57,11 +57,27 @@ def test_fit_width_changes_on_resize(qtbot, view: PageView) -> None:
     assert view.transform().m11() == pytest.approx(view.zoom_percent / 100 * BASE_SCALE)
 
 
-def test_fit_page(view: PageView) -> None:
-    view.set_zoom_mode(ZoomMode.FIT_PAGE)
-    page_px_h = SIMPLE_SIZES[0][1] * view.view_scale
-    assert page_px_h <= view.viewport().height()
-    assert view.zoom_mode == ZoomMode.FIT_PAGE
+def test_fit_page(qtbot, view: PageView) -> None:
+    vw, vh = view.viewport().width(), view.viewport().height()
+    for page in (0, 1):  # A4 portrait (height-bound), Letter landscape (width-bound here)
+        view.set_zoom_percent(100)
+        view.scroll_to_page(page)
+        view.set_zoom_mode(ZoomMode.FIT_PAGE)
+        assert view.zoom_mode == ZoomMode.FIT_PAGE
+        assert view.current_page == page
+        w, h = SIMPLE_SIZES[page]
+        zoom_w = vw / ((w + 2 * MARGIN_PT) * BASE_SCALE) * 100
+        zoom_h = vh / ((h + 2 * PAGE_GAP_PT) * BASE_SCALE) * 100
+        assert view.zoom_percent == pytest.approx(min(zoom_w, zoom_h))
+        # The whole page is visible in the viewport.
+        rect = view.page_rect_to_viewport(page, QRectF(0, 0, w, h))
+        assert view.viewport().rect().adjusted(-1, -1, 1, 1).contains(rect), (page, rect)
+        # ...and it fills the limiting dimension.
+        if zoom_h < zoom_w:
+            assert rect.height() == pytest.approx(h * view.view_scale, abs=2)
+            assert rect.height() > 0.9 * vh
+        else:
+            assert rect.width() > 0.9 * vw
 
 
 def test_scroll_to_page_emits(qtbot, view: PageView) -> None:
@@ -206,3 +222,53 @@ def test_rotating_current_page_keeps_it_current(qtbot, view: PageView, doc) -> N
     assert view.current_page == 1
     top = view.mapToScene(QPoint(0, 0)).y()
     assert top == pytest.approx(view.doc_scene.page_offset(1).y() - PAGE_GAP_PT / 2, abs=2)
+
+
+@pytest.fixture
+def rotated_view(qtbot, tmp_path):
+    from fixtures import make_cropped_form_pdf
+
+    d = PdfDocument.open(make_cropped_form_pdf(tmp_path / "crop90.pdf", 90))
+    v = PageView()
+    qtbot.addWidget(v)
+    v.resize(900, 700)
+    v.show()
+    qtbot.waitExposed(v)
+    v.set_document(d)
+    v.set_zoom_percent(100)
+    yield v, d
+    v.service.stop()
+    d.close()
+
+
+def test_mapping_on_rotated_cropped_page_matches_pixels(qtbot, rotated_view) -> None:
+    from test_document import assert_rect_matches_red_pixels
+
+    view, doc = rotated_view
+    [(_name, widget_rect)] = doc.widget_rects(0)
+    scale = _wait_rendered(qtbot, view, 0)
+    assert scale == pytest.approx(BASE_SCALE, abs=1 / 64)
+    view.viewport().repaint()
+    image = view.viewport().grab().toImage()
+    rect = view.page_rect_to_viewport(0, widget_rect)
+    assert rect.width() == pytest.approx(widget_rect.width() * BASE_SCALE, abs=2)
+    assert_rect_matches_red_pixels(image, QRectF(rect))
+
+
+def test_viewport_to_page_on_rotated_page(qtbot, rotated_view) -> None:
+    view, doc = rotated_view
+    [(_name, widget_rect)] = doc.widget_rects(0)
+    center = view.page_rect_to_viewport(0, widget_rect).center()
+    hit = view.viewport_to_page(center)
+    assert hit is not None
+    page, pos = hit
+    assert page == 0
+    assert pos.x() == pytest.approx(widget_rect.center().x(), abs=1.5)
+    assert pos.y() == pytest.approx(widget_rect.center().y(), abs=1.5)
+    # Rotated page space: x runs along the 702 pt (rotated) width.
+    corner = view.page_rect_to_viewport(0, QRectF(690, 500, 1, 1)).center()
+    hit = view.viewport_to_page(corner)
+    assert hit is not None and hit[0] == 0
+    assert hit[1].x() == pytest.approx(690.5, abs=1.5)
+    outside = view.page_rect_to_viewport(0, QRectF(705, 100, 1, 1)).center()
+    assert view.viewport_to_page(outside) is None

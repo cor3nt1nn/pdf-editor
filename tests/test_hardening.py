@@ -14,7 +14,6 @@ from pdfeditor.resources import app_icon, icon, resource_path
 from pdfeditor.ui import dialogs
 from pdfeditor.ui import main_window as mw_module
 from pdfeditor.ui.main_window import MainWindow
-from pdfeditor.ui.page_view import PageView
 from pdfeditor.ui.tools import base as tools_base
 
 ICONS = (
@@ -162,13 +161,76 @@ def test_saving_deleted_file_offers_save_as(window: MainWindow, simple_pdf, tmp_
     assert not window.isWindowModified()
 
 
-def test_m2_entry_points_exist(simple_pdf) -> None:
-    doc = PdfDocument.open(simple_pdf)
-    assert hasattr(doc, "lock") and hasattr(doc.lock, "acquire")
-    assert hasattr(doc, "page_changed") and hasattr(doc, "structure_changed")
-    doc.close()
-    assert callable(PageView.page_rect_to_viewport)
-    assert callable(PageView.viewport_to_page)
-    assert issubclass(commands.DocumentCommand, commands.QUndoCommand)
-    assert hasattr(tools_base, "ToolManager") and hasattr(tools_base, "Tool")
-    assert hasattr(document, "SaveError")
+def test_m2_entry_points_exist(qtbot, window: MainWindow, form_pdf) -> None:
+    """Drive the M2 hooks the way the form-filling code will: a tool receives a click in
+    page space and pushes a DocumentCommand that edits a widget and emits page_changed."""
+
+    assert window.open_file(str(form_pdf))
+    doc = window.document_view.document
+    view = window.page_view
+    with doc.lock, doc.lock:  # reentrant
+        assert doc.fitz.page_count == 1
+
+    class SetFieldValue(commands.DocumentCommand):
+        def __init__(self, doc, page, name, value):
+            super().__init__(doc, "Set field")
+            self.page, self.name, self.value, self.old = page, name, value, None
+
+        def _set(self, value):
+            with self.doc.lock:
+                page = self.doc.fitz[self.page]  # keep the page alive while using its widgets
+                w = next(w for w in page.widgets() if w.field_name == self.name)
+                old, w.field_value = w.field_value, value
+                w.update()
+            self.doc.page_changed.emit(self.page)
+            return old
+
+        def redo(self):
+            self.old = self._set(self.value)
+
+        def undo(self):
+            self._set(self.old)
+
+    events: list[tools_base.ToolEvent] = []
+
+    class ProbeTool(tools_base.Tool):
+        name = "probe"
+
+        def mouse_press(self, event):
+            events.append(event)
+            window.undo_stack.push(SetFieldValue(doc, event.page_index, "text", "Hello"))
+            return True
+
+    window.tool_manager.register(ProbeTool(window))
+    window.tool_manager.set_active("probe")
+    assert window.tool_manager.active_tool.name == "probe"
+
+    try:
+        _click_and_check(qtbot, window, doc, view, events, SetFieldValue)
+    finally:
+        window.undo_stack.setClean()  # qtbot closes the window before fixture teardown
+    assert issubclass(document.SaveError, document.DocumentError)
+
+
+def _click_and_check(qtbot, window, doc, view, events, SetFieldValue) -> None:  # noqa: N803
+    from PySide6.QtCore import Qt
+
+    rect = dict(doc.widget_rects(0))["text"]
+    click = view.page_rect_to_viewport(0, rect).center()
+    scroll = view.verticalScrollBar().value()
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=click)
+
+    assert len(events) == 1
+    assert events[0].page_index == 0
+    assert rect.adjusted(-1, -1, 1, 1).contains(events[0].page_pos)
+    assert view.viewport_to_page(click)[0] == 0
+    assert view.verticalScrollBar().value() == scroll  # content change: no scroll jump
+    assert window.isWindowModified()
+    with doc.lock:
+        page = doc.fitz[0]
+        assert next(page.widgets()).field_value == "Hello"
+    window.undo_stack.push(SetFieldValue(doc, 0, "text", "World"))
+    window.undo_stack.undo()
+    with doc.lock:
+        page = doc.fitz[0]
+        assert next(page.widgets()).field_value == "Hello"

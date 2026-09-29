@@ -4,7 +4,7 @@ import math
 
 import pytest
 from fixtures import PASSWORD, SIMPLE_SIZES
-from PySide6.QtCore import QRectF, QSizeF
+from PySide6.QtCore import QPointF, QRectF, QSizeF
 from PySide6.QtGui import QImage
 
 from pdfeditor.core.document import OpenError, PasswordRequired, PdfDocument
@@ -168,3 +168,48 @@ def test_close(doc: PdfDocument) -> None:
     doc.close()
     assert not doc.is_open
     doc.close()  # idempotent
+
+
+def _is_red(color) -> bool:
+    return color.red() > 200 and color.green() < 80 and color.blue() < 80
+
+
+def assert_rect_matches_red_pixels(image, rect: QRectF) -> None:
+    """Pixels just inside ``rect`` (image pixels) are red, pixels just outside are not."""
+    inset, outset = 2.5, 3.5
+    inner = rect.adjusted(inset, inset, -inset, -inset)
+    for p in (
+        inner.topLeft(),
+        inner.topRight(),
+        inner.bottomLeft(),
+        inner.bottomRight(),
+        rect.center(),
+    ):
+        assert _is_red(image.pixelColor(int(p.x()), int(p.y()))), (p, rect)
+    c = rect.center()
+    for x, y in (
+        (rect.left() - outset, c.y()),
+        (rect.right() + outset, c.y()),
+        (c.x(), rect.top() - outset),
+        (c.x(), rect.bottom() + outset),
+    ):
+        assert not _is_red(image.pixelColor(int(x), int(y))), ((x, y), rect)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_widget_rects_match_rendered_pixels_with_cropbox(tmp_path, rotation, scale) -> None:
+    from fixtures import CROP_BOX, make_cropped_form_pdf
+
+    path = make_cropped_form_pdf(tmp_path / f"crop{rotation}.pdf", rotation)
+    d = PdfDocument.open(path)
+    crop_w, crop_h = CROP_BOX[2] - CROP_BOX[0], CROP_BOX[3] - CROP_BOX[1]
+    expected = QSizeF(crop_w, crop_h) if rotation in (0, 180) else QSizeF(crop_h, crop_w)
+    assert d.page_size(0) == expected
+    [(name, rect)] = d.widget_rects(0)
+    assert name == "red"
+    assert QRectF(QPointF(0, 0), expected).contains(rect)
+    image = d.render(0, scale)
+    scaled = QRectF(rect.x() * scale, rect.y() * scale, rect.width() * scale, rect.height() * scale)
+    assert_rect_matches_red_pixels(image, scaled)
+    d.close()
