@@ -5,50 +5,19 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from importlib import resources
 
-from PySide6.QtCore import QLibraryInfo, QLocale, Qt, QTimer, QTranslator
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from pdfeditor import __version__
 from pdfeditor.constants import APP_ID, ORG_NAME
-from pdfeditor.core.settings import LANGUAGES, Settings
+from pdfeditor.core.settings import Settings
+from pdfeditor.i18n import LANGUAGES, install_translators, system_lang
+
+__all__ = ["install_translators", "main", "parse_args", "system_lang"]
 
 log = logging.getLogger(__name__)
-
-_translators: list[QTranslator] = []  # keep installed translators alive
-
-
-def system_lang() -> str:
-    """Default UI language: French if the system locale is French, else English."""
-    return "fr" if QLocale.system().language() == QLocale.Language.French else "en"
-
-
-def install_translators(app: QApplication, lang: str) -> list[QTranslator]:
-    """Install Qt base and application translators for ``lang``. Returns them (keep alive)."""
-    installed: list[QTranslator] = []
-    if lang == "en":
-        return installed
-    qt_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
-    base = QTranslator(app)
-    if base.load(f"qtbase_{lang}", qt_dir):
-        app.installTranslator(base)
-        installed.append(base)
-    else:
-        log.warning("Qt base translation for %s not found in %s", lang, qt_dir)
-    ours = QTranslator(app)
-    try:
-        qm = resources.files("pdfeditor.i18n").joinpath(f"pdfeditor_{lang}.qm")
-        with resources.as_file(qm) as qm_path:
-            if qm_path.exists() and ours.load(str(qm_path)):
-                app.installTranslator(ours)
-                installed.append(ours)
-            else:
-                log.warning("Application translation for %s not found", lang)
-    except (ModuleNotFoundError, FileNotFoundError):
-        log.warning("Application translation for %s not available", lang)
-    return installed
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -74,8 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationVersion(__version__)
 
     settings = Settings()
-    lang = args.lang or settings.language or system_lang()
-    _translators[:] = install_translators(app, lang)
+    install_translators(app, args.lang or settings.language or system_lang())
 
     from pdfeditor.ui.main_window import MainWindow
 

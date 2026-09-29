@@ -8,10 +8,6 @@ from PySide6.QtGui import QUndoCommand
 from pdfeditor.core.document import PdfDocument
 
 
-def tr(text: str) -> str:
-    return QCoreApplication.translate("Commands", text)
-
-
 class DocumentCommand(QUndoCommand):
     """Base class for commands that mutate a PdfDocument (emitting page_changed etc.)."""
 
@@ -30,7 +26,7 @@ class RotatePageCommand(DocumentCommand):
     ID = 1001
 
     def __init__(self, doc: PdfDocument, page: int, delta: int) -> None:
-        super().__init__(doc, tr("Rotate page"))
+        super().__init__(doc, QCoreApplication.translate("Commands", "Rotate page"))
         if delta % 90:
             raise ValueError(f"rotation delta must be a multiple of 90: {delta}")
         self.page = page

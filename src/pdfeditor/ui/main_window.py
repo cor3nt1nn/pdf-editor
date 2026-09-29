@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QProcess, Qt
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
     QDragEnterEvent,
     QDropEvent,
@@ -19,6 +21,7 @@ from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import OpenError, PasswordRequired, SaveError
 from pdfeditor.core.settings import Settings
+from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
@@ -40,9 +43,18 @@ def pdf_paths_from_urls(urls) -> list[str]:
     return paths
 
 
+def restart_command(path: str | None) -> tuple[str, list[str]]:
+    """Program and arguments to relaunch the application (optionally reopening ``path``)."""
+    args = [] if getattr(sys, "frozen", False) else ["-m", "pdfeditor"]
+    if path:
+        args.append(path)
+    return sys.executable, args
+
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: Settings | None = None) -> None:
         super().__init__()
+        self._force_close = False
         self.settings = settings if settings is not None else Settings()
         self.setObjectName("MainWindow")
         self.setAcceptDrops(True)
@@ -209,6 +221,20 @@ class MainWindow(QMainWindow):
         self.menu_view.addAction(self.act_next_page)
         self.menu_view.addSeparator()
         self.menu_view.addAction(self.act_thumbnails)
+        self.menu_view.addSeparator()
+        self.menu_language = self.menu_view.addMenu(self.tr("&Language"))
+        self.language_group = QActionGroup(self)
+        self.language_group.setExclusive(True)
+        self.language_actions: dict[str, QAction] = {}
+        for code, label in LANGUAGE_NAMES.items():
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(code == current_language())
+            act.setObjectName(f"language_{code}")
+            act.triggered.connect(lambda _checked=False, c=code: self.change_language(c))
+            self.language_group.addAction(act)
+            self.menu_language.addAction(act)
+            self.language_actions[code] = act
         self.menu_help = bar.addMenu(self.tr("&Help"))
 
     def _create_toolbar(self) -> None:
@@ -349,6 +375,33 @@ class MainWindow(QMainWindow):
             return
         self.undo_stack.push(RotatePageCommand(doc, page, delta))
 
+    # -- language -------------------------------------------------------------------
+    def change_language(self, code: str) -> None:
+        """Persist the UI language and offer to restart to apply it."""
+        self.settings.language = code
+        self.settings.sync()
+        for c, act in self.language_actions.items():
+            act.setChecked(c == code)
+        if code == current_language():
+            return
+        if dialogs.ask_restart(self):
+            self.restart()
+
+    def restart(self) -> bool:
+        """Relaunch the application (after resolving unsaved changes) and close."""
+        if not self.maybe_save():
+            return False
+        doc = self.document_view.document
+        program, args = restart_command(doc.path if doc is not None else None)
+        result = QProcess.startDetached(program, args)
+        started = result[0] if isinstance(result, tuple) else bool(result)
+        if not started:
+            log.error("could not restart: %s %s", program, args)
+            return False
+        self._force_close = True
+        self.close()
+        return True
+
     # -- file operations ------------------------------------------------------------
     def _password_prompt(self, path: str):
         name = os.path.basename(path)
@@ -470,7 +523,7 @@ class MainWindow(QMainWindow):
         self.open_file(paths[0])
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if not self.maybe_save():
+        if not self._force_close and not self.maybe_save():
             event.ignore()
             return
         self._save_window_state()
