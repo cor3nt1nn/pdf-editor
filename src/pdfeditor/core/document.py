@@ -23,7 +23,8 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core.geometry import fitz_from_qrect, qrect_from_fitz, unrotated_to_page
+from pdfeditor.core.forms import WidgetInfo, read_widgets
+from pdfeditor.core.geometry import fitz_from_qrect
 
 log = logging.getLogger(__name__)
 
@@ -99,9 +100,15 @@ class PdfDocument(QObject):
         self._needs_full_save = False
         self._page_count = int(fitz_doc.page_count)
         self._size_cache: dict[int, QSizeF] = {}
+        self._widget_cache: dict[int, list[WidgetInfo]] = {}
+        self._is_form = False
+        self._can_fill_forms = False
+        self._read_form_state()
         # Connected first so that other slots see the refreshed caches.
         self.page_changed.connect(self._on_page_changed)
         self.structure_changed.connect(self._on_structure_changed)
+        self.path_changed.connect(self._clear_widget_cache)
+        self.reloaded.connect(self._on_reloaded)
 
     # -- opening -----------------------------------------------------------
     @classmethod
@@ -112,6 +119,11 @@ class PdfDocument(QObject):
         password: str | None = None,
     ) -> PdfDocument:
         """Open ``path``.
+
+        ``needs_pass`` is read only *before* authenticating: reading
+        ``pymupdf.Document.needs_pass`` (or authenticating with a wrong password) after a
+        successful ``authenticate()`` corrupts decryption for the life of that document
+        (renders fail with "aes padding out of range"). Use :attr:`is_encrypted`.
 
         Raises :class:`OpenError` (missing/empty/corrupt file) or :class:`PasswordRequired`
         (encrypted and the password was not supplied, was wrong, or the prompt was cancelled).
@@ -168,7 +180,12 @@ class PdfDocument(QObject):
     # -- properties --------------------------------------------------------
     @property
     def fitz(self) -> pymupdf.Document:
-        """The underlying document. Use only under ``self.lock``."""
+        """The underlying document. Use only under ``self.lock``.
+
+        Never read ``fitz.needs_pass`` (nor call ``authenticate()`` again) on an
+        authenticated document: it breaks decryption for the document's life. Use
+        :attr:`is_encrypted`, :attr:`permissions`.
+        """
         if self._doc is None:
             raise DocumentError("document is closed")
         return self._doc
@@ -198,6 +215,30 @@ class PdfDocument(QObject):
     def permissions(self) -> int:
         with self.lock:
             return int(self.fitz.permissions)
+
+    @property
+    def is_form(self) -> bool:
+        """The document has AcroForm fields (computed on open and after each reload)."""
+        return self._is_form
+
+    @property
+    def can_fill_forms(self) -> bool:
+        """The permissions allow filling form fields (FORM or ANNOTATE).
+
+        Based on ``permissions``, never on ``is_encrypted``: owner-password-only files open
+        without a password but may forbid filling.
+        """
+        return self._can_fill_forms
+
+    def _read_form_state(self) -> None:
+        with self.lock:
+            doc = self._doc
+            if doc is None:
+                self._is_form = self._can_fill_forms = False
+                return
+            self._is_form = bool(doc.is_form_pdf)
+            perms = int(doc.permissions)
+        self._can_fill_forms = bool(perms & (pymupdf.PDF_PERM_FORM | pymupdf.PDF_PERM_ANNOTATE))
 
     @property
     def was_repaired(self) -> bool:
@@ -239,16 +280,39 @@ class PdfDocument(QObject):
             page.set_rotation(degrees)
         self.page_changed.emit(i)
 
+    # -- form widgets ------------------------------------------------------
+    def widgets(self, i: int) -> list[WidgetInfo]:
+        """All widgets of page ``i`` (in /Annots order), cached until the page changes.
+
+        Snapshots only: the cache is dropped on ``page_changed(i)``, ``structure_changed``,
+        ``path_changed`` and ``reloaded`` (full saves may renumber xrefs).
+        """
+        cached = self._widget_cache.get(i)
+        if cached is None:
+            self._check_index(i)
+            with self.lock:
+                cached = read_widgets(self.fitz, i)
+            self._widget_cache[i] = cached
+        return list(cached)
+
+    def all_widgets(self) -> list[WidgetInfo]:
+        """Widgets of every page, page by page."""
+        return [w for i in range(self._page_count) for w in self.widgets(i)]
+
+    def widget(self, page: int, xref: int) -> WidgetInfo | None:
+        """The widget with annotation ``xref`` on ``page``, or None."""
+        return next((w for w in self.widgets(page) if w.xref == xref), None)
+
     def widget_rects(self, i: int) -> list[tuple[str, QRectF]]:
         """(field name, rect in page space) for each form widget of page ``i``."""
-        self._check_index(i)
-        with self.lock:
-            page = self.fitz[i]
-            matrix = page.rotation_matrix
-            return [
-                (w.field_name or "", qrect_from_fitz(unrotated_to_page(w.rect, matrix)))
-                for w in page.widgets()
-            ]
+        return [(w.name, QRectF(w.rect)) for w in self.widgets(i)]
+
+    def _clear_widget_cache(self, *_args: object) -> None:
+        self._widget_cache.clear()
+
+    def _on_reloaded(self) -> None:
+        self._widget_cache.clear()
+        self._read_form_state()
 
     def render(self, i: int, scale: float, clip: QRectF | None = None) -> QImage:
         """Render page ``i`` (with annotations) at ``scale`` to an RGB888 QImage.
@@ -353,9 +417,12 @@ class PdfDocument(QObject):
             log.warning("could not reload the saved document; keeping it", exc_info=True)
             self._needs_full_save = True
             return
-        if doc.needs_pass and self._password is not None:
-            doc.authenticate(self._password)
-        if doc.needs_pass or doc.page_count != self._page_count:
+        # Read needs_pass only before authenticate(): reading it afterwards breaks
+        # decryption for the document's life (see open()).
+        locked = bool(doc.needs_pass)
+        if locked and self._password is not None:
+            locked = not doc.authenticate(self._password)
+        if locked or doc.page_count != self._page_count:
             log.warning("reloaded document differs from the saved one; keeping the old one")
             doc.close()
             self._needs_full_save = True
@@ -375,14 +442,18 @@ class PdfDocument(QObject):
                 self._doc = None
         self._page_count = 0
         self._size_cache.clear()
+        self._widget_cache.clear()
+        self._is_form = self._can_fill_forms = False
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
+        self._widget_cache.pop(i, None)
 
     def _on_structure_changed(self) -> None:
         with self.lock:
             self._page_count = int(self._doc.page_count) if self._doc is not None else 0
         self._size_cache.clear()
+        self._widget_cache.clear()
 
 
 def pdf_library_versions() -> list[tuple[str, str]]:

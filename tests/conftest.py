@@ -57,3 +57,23 @@ def form_pdf(tmp_path):
 @pytest.fixture
 def many_pages_pdf(tmp_path):
     return fixtures.make_many_pages_pdf(tmp_path / "many.pdf")
+
+
+@pytest.fixture
+def lo_form_pdf(tmp_path):
+    return fixtures.make_lo_form_pdf(tmp_path / "lo_form.pdf")
+
+
+@pytest.fixture
+def lo_form_rotated_pdf(tmp_path):
+    return fixtures.make_lo_form_pdf(tmp_path / "lo_form_rotated.pdf", rotate=90)
+
+
+@pytest.fixture
+def lo_form_encrypted_pdf(tmp_path):
+    return fixtures.make_lo_form_pdf(tmp_path / "lo_form_encrypted.pdf", encrypted=True)
+
+
+@pytest.fixture
+def owner_locked_pdf(tmp_path):
+    return fixtures.make_owner_locked_pdf(tmp_path / "owner_locked.pdf")
