@@ -27,6 +27,7 @@ from pdfeditor.resources import app_icon, icon
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
+from pdfeditor.ui.tools.annot_tools import AnnotToolBase, StampTool, TextTool
 from pdfeditor.ui.tools.base import ToolManager
 from pdfeditor.ui.tools.form_tool import FormTool
 from pdfeditor.ui.tools.hand_tool import HandTool
@@ -164,8 +165,36 @@ class MainWindow(QMainWindow):
             lambda: self.rotate_current_page(-90),
             "rotate_ccw",
         )
-        self.act_hand_tool = self._action(self.tr("&Hand Tool"), None, None, "hand_tool")
-        self.act_form_tool = self._action(self.tr("&Form Tool"), None, None, "form_tool")
+        # Plain-key tool shortcuts: text editors and spin boxes accept ShortcutOverride
+        # for printable keys, so typing there never switches tools.
+        self.act_hand_tool = self._action(
+            self.tr("&Hand Tool"), QKeySequence("H"), None, "hand_tool"
+        )
+        self.act_form_tool = self._action(
+            self.tr("&Form Tool"), QKeySequence("F"), None, "form_tool"
+        )
+        self.act_text_tool = self._action(
+            self.tr("&Text Tool"), QKeySequence("T"), None, "text_tool"
+        )
+        self.act_text_tool.setToolTip(self.tr("Text (T)"))
+        self.act_stamp_check = self._action(
+            self.tr("Check Mark Stamp"), QKeySequence("1"), None, "stamp_check"
+        )
+        self.act_stamp_check.setToolTip(self.tr("Check mark (1)"))
+        self.act_stamp_cross = self._action(
+            self.tr("Cross Stamp"), QKeySequence("2"), None, "stamp_cross"
+        )
+        self.act_stamp_cross.setToolTip(self.tr("Cross (2)"))
+        self.act_stamp_dot = self._action(
+            self.tr("Dot Stamp"), QKeySequence("3"), None, "stamp_dot"
+        )
+        self.act_stamp_dot.setToolTip(self.tr("Dot (3)"))
+        self.act_delete_annot = self._action(
+            self.tr("&Delete Annotation"),
+            QKeySequence(QKeySequence.StandardKey.Delete),
+            self.delete_annotation,
+            "delete_annot",
+        )
         self.act_auto_shrink = self._action(
             self.tr("Auto-shrink Overflowing Text"), None, None, "auto_shrink_text"
         )
@@ -233,6 +262,10 @@ class MainWindow(QMainWindow):
             (self.act_zoom_out, "zoom_out"),
             (self.act_hand_tool, "hand"),
             (self.act_form_tool, "form"),
+            (self.act_text_tool, "text"),
+            (self.act_stamp_check, "stamp_check"),
+            (self.act_stamp_cross, "stamp_cross"),
+            (self.act_stamp_dot, "stamp_dot"),
             (self.act_thumbnails, "thumbnails"),
         ):
             act.setIcon(icon(name))
@@ -243,6 +276,21 @@ class MainWindow(QMainWindow):
         self.form_tool = FormTool(self.document_view, self.settings, self)
         self.form_tool.message.connect(self._show_message)
         self.tool_manager.register(self.form_tool, self.act_form_tool)
+        self.text_tool = TextTool(self.document_view, self.settings, self)
+        self.stamp_tools = {
+            stamp: StampTool(self.document_view, self.settings, stamp, self)
+            for stamp in ("check", "cross", "dot")
+        }
+        self.annot_tools: list[AnnotToolBase] = [self.text_tool, *self.stamp_tools.values()]
+        for tool, action in zip(
+            self.annot_tools,
+            (self.act_text_tool, self.act_stamp_check, self.act_stamp_cross, self.act_stamp_dot),
+            strict=True,
+        ):
+            tool.message.connect(self._show_message)
+            self.tool_manager.register(tool, action)
+        self.tool_manager.tool_changed.connect(self._update_delete_action)
+        self.document_view.annot_selection.changed.connect(self._update_delete_action)
 
     def _create_menus(self) -> None:
         bar = self.menuBar()
@@ -260,6 +308,9 @@ class MainWindow(QMainWindow):
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_hand_tool)
         self.menu_edit.addAction(self.act_form_tool)
+        for act in self._annot_actions():
+            self.menu_edit.addAction(act)
+        self.menu_edit.addAction(self.act_delete_annot)
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_auto_shrink)
         self.menu_view = bar.addMenu(self.tr("&View"))
@@ -309,6 +360,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction(self.act_hand_tool)
         tb.addAction(self.act_form_tool)
+        tb.addSeparator()
+        for act in self._annot_actions():
+            tb.addAction(act)
         tb.addSeparator()
         tb.addAction(self.act_prev_page)
         self.page_spin = QSpinBox(self)
@@ -373,6 +427,10 @@ class MainWindow(QMainWindow):
             act.setEnabled(has_doc)
         self.page_spin.setEnabled(has_doc)
         self.act_form_tool.setEnabled(self._can_fill_forms())
+        can_annotate = self._can_annotate()
+        for act in self._annot_actions():
+            act.setEnabled(can_annotate)
+        self._update_delete_action()
         if has_doc:
             cur = self.page_view.current_page
             self.act_prev_page.setEnabled(cur > 0)
@@ -404,6 +462,24 @@ class MainWindow(QMainWindow):
         self._update_status()
         # A fillable form opens with the form tool; anything else with the hand tool.
         self.tool_manager.set_active("form" if self._can_fill_forms() else "hand")
+
+    def _annot_actions(self) -> tuple[QAction, ...]:
+        return (self.act_text_tool, self.act_stamp_check, self.act_stamp_cross, self.act_stamp_dot)
+
+    def _can_annotate(self) -> bool:
+        doc = self.document_view.document
+        return doc is not None and doc.can_annotate
+
+    def _active_annot_tool(self) -> AnnotToolBase | None:
+        tool = self.tool_manager.active_tool
+        return tool if isinstance(tool, AnnotToolBase) else None
+
+    def _update_delete_action(self, *_args: object) -> None:
+        self.act_delete_annot.setEnabled(
+            self._can_annotate()
+            and self._active_annot_tool() is not None
+            and self.document_view.annot_selection.current is not None
+        )
 
     def _can_fill_forms(self) -> bool:
         doc = self.document_view.document
@@ -464,6 +540,12 @@ class MainWindow(QMainWindow):
     def redo(self) -> None:
         self.document_view.commit_pending_edits()
         self.undo_stack.redo()
+
+    def delete_annotation(self) -> None:
+        """Edit ▸ Delete Annotation: delete the selection of the active annotation tool."""
+        tool = self._active_annot_tool()
+        if tool is not None:
+            tool.delete_selection()
 
     def rotate_current_page(self, delta: int) -> None:
         doc = self.document_view.document
@@ -547,6 +629,13 @@ class MainWindow(QMainWindow):
             return False
         self.settings.last_open_dir = os.path.dirname(path)
         doc = self.document_view.document
+        if doc is not None and not doc.can_annotate:
+            self.statusBar().showMessage(
+                self.tr(
+                    "Adding text and stamps is not permitted by this document’s security settings."
+                ),
+                10000,
+            )
         if doc is not None and doc.was_repaired:
             self.statusBar().showMessage(
                 self.tr("The file was repaired while opening; saving will rewrite it completely."),

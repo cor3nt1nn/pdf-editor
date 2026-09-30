@@ -166,3 +166,37 @@ class Settings:
     @auto_shrink_text.setter
     def auto_shrink_text(self, value: bool) -> None:
         self._s.setValue("forms/auto_shrink_text", bool(value))
+
+    def _float(self, key: str, default: float) -> float:
+        try:
+            value = float(self._s.value(key, default))
+        except (TypeError, ValueError):
+            return default
+        return value if value > 0 else default
+
+    @property
+    def annot_font_size(self) -> float:
+        """Font size (points) of new text boxes."""
+        return self._float("annots/font_size", 11.0)
+
+    @annot_font_size.setter
+    def annot_font_size(self, value: float) -> None:
+        self._s.setValue("annots/font_size", float(value))
+
+    @property
+    def annot_color(self) -> str:
+        """Colour ("#rrggbb") of new text boxes and stamps."""
+        return self._str("annots/color", "#000000") or "#000000"
+
+    @annot_color.setter
+    def annot_color(self, value: str) -> None:
+        self._s.setValue("annots/color", str(value))
+
+    @property
+    def stamp_size(self) -> float:
+        """Side (points) of a stamp placed outside a checkbox."""
+        return self._float("annots/stamp_size", 12.0)
+
+    @stamp_size.setter
+    def stamp_size(self, value: float) -> None:
+        self._s.setValue("annots/stamp_size", float(value))

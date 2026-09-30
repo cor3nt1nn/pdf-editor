@@ -56,6 +56,9 @@ class Tool(QObject):
     def mouse_release(self, event: ToolEvent) -> bool:
         return False
 
+    def mouse_double_click(self, event: ToolEvent) -> bool:
+        return False
+
     def key_press(self, event: ToolEvent) -> bool:
         return False
 

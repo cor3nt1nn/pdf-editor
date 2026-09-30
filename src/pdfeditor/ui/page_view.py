@@ -469,6 +469,10 @@ class PageView(QGraphicsView):
         if not self._forward("mouse_release", event):
             super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if not self._forward("mouse_double_click", event):
+            super().mouseDoubleClickEvent(event)
+
     def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
         super().drawForeground(painter, rect)
         tool = self.tool_manager.active_tool if self.tool_manager is not None else None
