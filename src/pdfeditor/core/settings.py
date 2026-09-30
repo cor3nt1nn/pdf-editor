@@ -148,3 +148,21 @@ class Settings:
     @flatten_on_export.setter
     def flatten_on_export(self, value: bool) -> None:
         self._s.setValue("files/flatten_on_export", bool(value))
+
+    @property
+    def highlight_fields(self) -> bool:
+        """Highlight fillable form fields."""
+        return self._bool("forms/highlight_fields", True)
+
+    @highlight_fields.setter
+    def highlight_fields(self, value: bool) -> None:
+        self._s.setValue("forms/highlight_fields", bool(value))
+
+    @property
+    def auto_shrink_text(self) -> bool:
+        """Switch a single-line text field to auto-size when the typed text overflows."""
+        return self._bool("forms/auto_shrink_text", True)
+
+    @auto_shrink_text.setter
+    def auto_shrink_text(self, value: bool) -> None:
+        self._s.setValue("forms/auto_shrink_text", bool(value))

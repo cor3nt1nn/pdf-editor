@@ -22,6 +22,8 @@ def test_defaults(settings: Settings) -> None:
     assert settings.last_open_dir == ""
     assert settings.recent_files == []
     assert settings.flatten_on_export is False
+    assert settings.highlight_fields is True
+    assert settings.auto_shrink_text is True
 
 
 def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
@@ -34,6 +36,8 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     settings.last_open_dir = "C:/Users/Test/Documents"
     settings.recent_files = ["C:/a.pdf", "C:/b é.pdf"]
     settings.flatten_on_export = True
+    settings.highlight_fields = False
+    settings.auto_shrink_text = False
     settings.sync()
     assert ini_path.exists()
 
@@ -47,6 +51,8 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     assert s.last_open_dir == "C:/Users/Test/Documents"
     assert s.recent_files == ["C:/a.pdf", "C:/b é.pdf"]
     assert s.flatten_on_export is True
+    assert s.highlight_fields is False
+    assert s.auto_shrink_text is False
 
 
 def test_single_recent_file_and_language_reset(settings: Settings, ini_path) -> None:

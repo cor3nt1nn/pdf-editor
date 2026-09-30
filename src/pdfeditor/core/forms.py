@@ -1,4 +1,4 @@
-"""AcroForm widgets: read side (M2).
+"""AcroForm widgets: reading and filling (M2).
 
 Pure functions on ``pymupdf.Document`` / ``pymupdf.Page``. Callers hold
 ``PdfDocument.lock``. Never keep ``pymupdf.Page`` / ``Widget`` objects across calls:
@@ -8,6 +8,12 @@ every save replaces the document and full saves renumber xrefs. Identify a widge
 Checkbox / radio values are *names*: ``WidgetInfo.on_state_token`` is the raw token as
 it appears in the file (possibly ``#xx``-escaped, e.g. ``Case#20#C3#A0#20cocher#201_3``,
 which must be written back verbatim); compare values with :func:`decode_pdf_name`.
+
+Writing: text/choice values go through ``Widget.update()`` (it regenerates the
+appearance streams); checkbox/radio states are written directly as /AS and /V so the
+authored appearances are kept (``Widget.update()`` would replace them, and it silently
+fails on #-escaped on-state names). ``Document.need_appearances()`` is never called (its
+getter writes /NeedAppearances false).
 """
 
 from __future__ import annotations
@@ -248,8 +254,13 @@ def _text_value(value: object) -> str:
     return str(value)
 
 
+def widget_kind(widget: pymupdf.Widget) -> FieldKind:
+    """The :class:`FieldKind` of a live widget."""
+    return _KIND_BY_TYPE.get(widget.field_type, FieldKind.UNKNOWN)
+
+
 def _info(doc: pymupdf.Document, page: pymupdf.Page, index: int, w: pymupdf.Widget) -> WidgetInfo:
-    kind = _KIND_BY_TYPE.get(w.field_type, FieldKind.UNKNOWN)
+    kind = widget_kind(w)
     xref = int(w.xref)
     token = ""
     if kind in (FieldKind.CHECKBOX, FieldKind.RADIO):
@@ -329,8 +340,8 @@ def resolve_widget(
     return None
 
 
-def field_pages(fitz_doc: pymupdf.Document, field_xref: int) -> list[int]:
-    """Indices of the pages showing a widget of this field (sorted)."""
+def _field_widget_xrefs(doc: pymupdf.Document, field_xref: int) -> set[int]:
+    """Xrefs of the widget annotations of a field (its terminal /Kids, or itself)."""
     widget_xrefs: set[int] = set()
     stack, seen = [field_xref], set()
     while stack:
@@ -338,17 +349,26 @@ def field_pages(fitz_doc: pymupdf.Document, field_xref: int) -> list[int]:
         if x in seen:
             continue
         seen.add(x)
-        kids = _kids(fitz_doc, x)
+        kids = _kids(doc, x)
         if kids:
             stack.extend(kids)
         else:
             widget_xrefs.add(x)
+    return widget_xrefs
+
+
+def _pages_showing(doc: pymupdf.Document, widget_xrefs: set[int]) -> list[int]:
     pages = []
-    for i in range(fitz_doc.page_count):
-        refs = {int(item[0]) for item in fitz_doc[i].annot_xrefs()}
+    for i in range(doc.page_count):
+        refs = {int(item[0]) for item in doc[i].annot_xrefs()}
         if refs & widget_xrefs:
             pages.append(i)
     return pages
+
+
+def field_pages(fitz_doc: pymupdf.Document, field_xref: int) -> list[int]:
+    """Indices of the pages showing a widget of this field (sorted)."""
+    return _pages_showing(fitz_doc, _field_widget_xrefs(fitz_doc, field_xref))
 
 
 def tab_order(widgets: Iterable[WidgetInfo]) -> list[WidgetInfo]:
@@ -389,3 +409,112 @@ def text_fits(text: str, font_size: float, width_pt: float, padding: float = 4.0
         pymupdf.get_text_length(line, fontname="helv", fontsize=font_size) <= available
         for line in text.splitlines() or [""]
     )
+
+
+# -- writing ---------------------------------------------------------------
+def _field_widgets(
+    doc: pymupdf.Document, page: pymupdf.Page, widget: pymupdf.Widget
+) -> tuple[int, list[tuple[pymupdf.Page, int]]]:
+    """(field xref, [(page, widget xref)]) of every widget of ``widget``'s field.
+
+    The pages are returned so that callers keep them alive while using their widgets.
+    Only scans the document when the field has several widgets.
+    """
+    field_xref = _field_xref(doc, int(widget.xref))
+    xrefs = _field_widget_xrefs(doc, field_xref)
+    xrefs.add(int(widget.xref))
+    if xrefs == {int(widget.xref)}:
+        return field_xref, [(page, int(widget.xref))]
+    out: list[tuple[pymupdf.Page, int]] = []
+    for i in _pages_showing(doc, xrefs):
+        p = page if i == page.number else doc[i]
+        refs = {int(item[0]) for item in p.annot_xrefs()}
+        out.extend((p, x) for x in sorted(refs & xrefs))
+    return field_xref, out
+
+
+_NAME_KEY = re.compile(r"/([^\s/<>\[\]()]+)")
+
+
+def _state_tokens(doc: pymupdf.Document, widget_xref: int) -> list[str]:
+    """Raw appearance state names (without "/") of a button widget's /AP /N (and /D)."""
+    tokens: list[str] = []
+    for key in ("AP/N", "AP/D"):
+        kind, value = _key(doc, widget_xref, key)
+        if kind == "xref":
+            m = _REF.match(value)
+            if not m or doc.xref_is_stream(int(m.group(1))):  # single appearance: no states
+                continue
+            value = doc.xref_object(int(m.group(1)), compressed=True)
+            kind = "dict" if value.lstrip().startswith("<<") else kind
+        if kind != "dict":
+            continue
+        # Top-level keys only: values are references or streams, never names.
+        for token in _NAME_KEY.findall(value):
+            if token not in tokens:
+                tokens.append(token)
+    return tokens
+
+
+def set_button_state(
+    fitz_doc: pymupdf.Document, page: pymupdf.Page, widget: pymupdf.Widget, on: bool | str
+) -> list[int]:
+    """Check/uncheck a checkbox or select a radio button; returns the affected pages.
+
+    ``on`` is ``True`` (this widget's on state), ``False`` / ``"Off"`` (field off) or the
+    decoded on-state name to select among the field's widgets. Writes /AS on every widget
+    of the field (the matching ones on, the others /Off) and /V on the field dictionary,
+    with the on-state token verbatim; the authored appearance streams are kept. A widget
+    without appearance states falls back to ``Widget.update()``.
+    """
+    if isinstance(on, bool):
+        token = _on_state_token(widget)
+        if on and not token:  # no appearance states: let MuPDF build them
+            widget.field_value = True
+            widget.update()
+            return [page.number]
+        target = decode_pdf_name(token) if on else ""
+    else:
+        target = "" if on in ("", "Off") else on
+    field_xref, members = _field_widgets(fitz_doc, page, widget)
+    chosen = ""
+    for _page, x in members:
+        match = ""
+        if target:
+            states = (t for t in _state_tokens(fitz_doc, x) if t != "Off")
+            match = next((t for t in states if decode_pdf_name(t) == target), "")
+        chosen = chosen or match
+        fitz_doc.xref_set_key(x, "AS", "/" + (match or "Off"))
+    if target and not chosen:
+        log.warning("no widget of field xref %s has the state %r", field_xref, target)
+    fitz_doc.xref_set_key(field_xref, "V", "/" + (chosen or "Off"))
+    return sorted({p.number for p, _x in members})
+
+
+def set_text_value(
+    fitz_doc: pymupdf.Document,
+    page: pymupdf.Page,
+    widget: pymupdf.Widget,
+    value: str,
+    font_size: float | None = None,
+) -> list[int]:
+    """Set a text/combo/list value and regenerate the appearance of each of its widgets.
+
+    ``font_size`` (0 = auto-size) rewrites the widgets' /DA; ``None`` keeps it. An empty
+    ``value`` clears the field: ``field_value = ""`` + ``update()`` leaves /V untouched,
+    so /V is reset on the field dictionary first (``()`` for text, removed for choices),
+    then every widget's appearance is regenerated empty. Returns the affected pages.
+    """
+    field_xref, members = _field_widgets(fitz_doc, page, widget)
+    if value == "":
+        is_text = widget.field_type == pymupdf.PDF_WIDGET_TYPE_TEXT
+        fitz_doc.xref_set_key(field_xref, "V", "()" if is_text else "null")
+    for p, x in members:
+        w = widget if x == int(widget.xref) else p.load_widget(x)
+        if w is None:
+            continue
+        w.field_value = value
+        if font_size is not None:
+            w.text_fontsize = font_size
+        w.update()
+    return sorted({p.number for p, _x in members})

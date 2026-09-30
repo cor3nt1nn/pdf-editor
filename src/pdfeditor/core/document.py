@@ -23,7 +23,15 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core.forms import WidgetInfo, read_widgets
+from pdfeditor.core.forms import (
+    FieldKind,
+    WidgetInfo,
+    read_widgets,
+    resolve_widget,
+    set_button_state,
+    set_text_value,
+    widget_kind,
+)
 from pdfeditor.core.geometry import fitz_from_qrect
 
 log = logging.getLogger(__name__)
@@ -61,6 +69,10 @@ class PasswordRequired(OpenError):  # noqa: N818 - public API name from the desi
 
 class SaveError(DocumentError):
     """The document could not be saved."""
+
+
+class FieldError(DocumentError):
+    """A form field could not be found (anymore) or cannot hold the given value."""
 
 
 class PdfDocument(QObject):
@@ -103,6 +115,7 @@ class PdfDocument(QObject):
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
         self._is_form = False
         self._can_fill_forms = False
+        self._form_edited = False
         self._read_form_state()
         # Connected first so that other slots see the refreshed caches.
         self.page_changed.connect(self._on_page_changed)
@@ -307,6 +320,63 @@ class PdfDocument(QObject):
         """(field name, rect in page space) for each form widget of page ``i``."""
         return [(w.name, QRectF(w.rect)) for w in self.widgets(i)]
 
+    @property
+    def form_edited(self) -> bool:
+        """A form field value was set (by :meth:`set_field_value`) since opening."""
+        return self._form_edited
+
+    def set_field_value(
+        self,
+        page: int,
+        xref: int,
+        value: str | bool,
+        *,
+        font_size: float | None = None,
+        name: str = "",
+        unrotated_rect: tuple[float, float, float, float] | None = None,
+    ) -> list[int]:
+        """Set the value of the field shown by widget ``xref`` on ``page``.
+
+        Text/combo/list: ``value`` is the string to store ("" clears the field);
+        ``font_size`` (0 = auto-size) rewrites the widgets' font size, ``None`` keeps it.
+        Checkbox/radio: ``True`` selects this widget's on state, ``False`` or ``"Off"``
+        turns the field off, another string selects the widget with that (decoded) on
+        state. The widget is re-resolved by ``name``/``unrotated_rect`` if its xref changed
+        (full saves renumber objects); without ``name`` the cached snapshot is used.
+
+        Emits ``page_changed`` for every page showing a widget of the field and returns
+        those pages. Raises :class:`FieldError` if the widget is gone or not fillable.
+        """
+        self._check_index(page)
+        if not name:
+            info = self.widget(page, xref)
+            if info is None:
+                raise FieldError(f"no widget xref {xref} on page {page}")
+            name, unrotated_rect = info.name, info.unrotated_rect
+        with self.lock:
+            found = resolve_widget(self.fitz, page, xref, name, unrotated_rect)
+            if found is None:
+                raise FieldError(f"form field {name!r} not found on page {page}")
+            fitz_page, widget = found
+            kind = widget_kind(widget)
+            try:
+                if kind in (FieldKind.CHECKBOX, FieldKind.RADIO):
+                    pages = set_button_state(self.fitz, fitz_page, widget, value)
+                elif kind in (FieldKind.TEXT, FieldKind.COMBO, FieldKind.LIST):
+                    if not isinstance(value, str):
+                        raise FieldError(f"form field {name!r} ({kind}) needs a string")
+                    pages = set_text_value(self.fitz, fitz_page, widget, value, font_size)
+                else:
+                    raise FieldError(f"form field {name!r} ({kind}) cannot be filled")
+            except FieldError:
+                raise
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise FieldError(str(exc)) from exc
+        self._form_edited = True
+        for i in pages:
+            self.page_changed.emit(i)
+        return pages
+
     def _clear_widget_cache(self, *_args: object) -> None:
         self._widget_cache.clear()
 
@@ -443,7 +513,7 @@ class PdfDocument(QObject):
         self._page_count = 0
         self._size_cache.clear()
         self._widget_cache.clear()
-        self._is_form = self._can_fill_forms = False
+        self._is_form = self._can_fill_forms = self._form_edited = False
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
