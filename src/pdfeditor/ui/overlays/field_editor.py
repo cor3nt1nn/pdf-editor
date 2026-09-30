@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import shiboken6
 from PySide6.QtCore import QEvent, QObject, QSizeF, Qt, QTimer, Signal
-from PySide6.QtGui import QFocusEvent, QFont, QKeyEvent, QTextCursor
+from PySide6.QtGui import QFocusEvent, QFont, QKeyEvent, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -38,6 +38,8 @@ MIN_FONT_PX = 9
 DEFAULT_FONT_PT = 10.0
 EDITOR_STYLE = "border: 1px solid rgb(0, 120, 215); padding: 0px; background: white;"
 
+_UNDO = QKeySequence.StandardKey.Undo
+_REDO = QKeySequence.StandardKey.Redo
 _ENTER_KEYS = (Qt.Key.Key_Return, Qt.Key.Key_Enter)
 _HANDLED_KEYS = (*_ENTER_KEYS, Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.Key.Key_Escape)
 #: Focus changes that must not commit: a popup (combo list, context menu, menu bar)
@@ -347,9 +349,7 @@ class FieldEditorOverlay(QObject):
         if editor is None or not shiboken6.isValid(editor):
             return False
         focus = QApplication.focusWidget()
-        return focus is not None and (
-            focus is editor or editor.isAncestorOf(focus)
-        )
+        return focus is not None and (focus is editor or editor.isAncestorOf(focus))
 
     def _teardown(self) -> None:
         editor = self._editor
@@ -419,6 +419,12 @@ class FieldEditorOverlay(QObject):
             if event.key() in _HANDLED_KEYS and not self._popup_open():
                 event.accept()
                 return True
+            # Ctrl+Z / Ctrl+Y undo the typing first (the text editor's own history);
+            # with nothing left to undo locally, let the window's Undo/Redo run (it
+            # commits this editor, then undoes the document).
+            for redo in (False, True):
+                if event.matches(_REDO if redo else _UNDO) and not self._local_history(redo):
+                    return True  # filtered but not accepted: the shortcut fires
             return False
         if etype == QEvent.Type.KeyPress:
             assert isinstance(event, QKeyEvent)
@@ -426,6 +432,18 @@ class FieldEditorOverlay(QObject):
         if etype == QEvent.Type.FocusOut:
             assert isinstance(event, QFocusEvent)
             self._focus_out(event)
+        return False
+
+    def _local_history(self, redo: bool) -> bool:
+        """The text editor has typing to undo (``redo``: to redo) of its own."""
+        editor = self._editor
+        if isinstance(editor, QComboBox):
+            editor = editor.lineEdit()  # None for a non-editable combo
+        if isinstance(editor, QLineEdit):
+            return editor.isRedoAvailable() if redo else editor.isUndoAvailable()
+        if isinstance(editor, QPlainTextEdit):
+            document = editor.document()
+            return document.isRedoAvailable() if redo else document.isUndoAvailable()
         return False
 
     def _popup_open(self) -> bool:
@@ -448,9 +466,7 @@ class FieldEditorOverlay(QObject):
             self.cancel()
             return True
         if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
-            backwards = key == Qt.Key.Key_Backtab or bool(
-                mods & Qt.KeyboardModifier.ShiftModifier
-            )
+            backwards = key == Qt.Key.Key_Backtab or bool(mods & Qt.KeyboardModifier.ShiftModifier)
             self.commit()
             self.navigate.emit(backwards)
             return True

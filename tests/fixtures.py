@@ -454,3 +454,68 @@ def make_dynamic_xfa_pdf(path: Path, single_stream: bool = False) -> Path:
     doc.save(path, deflate=True)
     doc.close()
     return path
+
+
+MANY_FIELDS_PER_PAGE = 50
+
+
+def make_many_fields_pdf(path: Path, count: int = 200) -> Path:
+    """``count`` single-line text widgets ("f000"...), 50 per A4 page in 2 columns."""
+    doc = pymupdf.open()
+    page = None
+    for n in range(count):
+        slot = n % MANY_FIELDS_PER_PAGE
+        if slot == 0:
+            page = doc.new_page(width=A4[0], height=A4[1])
+        assert page is not None
+        col, row = divmod(slot, MANY_FIELDS_PER_PAGE // 2)
+        x0, y0 = 40 + col * 280, 40 + row * 30
+        w = pymupdf.Widget()
+        w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+        w.field_name = f"f{n:03d}"
+        w.field_value = f"value {n}"
+        w.text_fontsize = 10
+        w.rect = pymupdf.Rect(x0, y0, x0 + 250, y0 + 20)
+        page.add_widget(w)
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+#: Widget names of :func:`make_odd_widgets_pdf` and their rects (fitz coordinates).
+ODD_RECTS = {
+    "ok": (72, 72, 250, 92),
+    "signature": (72, 110, 250, 150),
+    "push": (72, 170, 250, 190),
+    "no_rect": (72, 210, 250, 230),
+    "degenerate": (72, 250, 250, 270),
+    "combo_no_opt": (72, 290, 250, 310),
+    "edit_combo_no_opt": (72, 330, 250, 350),
+}
+
+
+def make_odd_widgets_pdf(path: Path) -> Path:
+    """One page with a normal text field and odd widgets: a signature field, a push
+    button, a widget without /Rect, one with a zero-size /Rect, and two combo boxes
+    (one editable) without /Opt. Built as text widgets, then rewritten by xref."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    for name, rect in ODD_RECTS.items():
+        w = pymupdf.Widget()
+        w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+        w.field_name = name
+        w.rect = pymupdf.Rect(rect)
+        page.add_widget(w)
+    xrefs = {w.field_name: w.xref for w in page.widgets()}
+    doc.xref_set_key(xrefs["signature"], "FT", "/Sig")
+    doc.xref_set_key(xrefs["push"], "FT", "/Btn")
+    doc.xref_set_key(xrefs["push"], "Ff", str(1 << 16))  # push button
+    doc.xref_set_key(xrefs["no_rect"], "Rect", "null")
+    doc.xref_set_key(xrefs["degenerate"], "Rect", "[72 250 72 250]")
+    doc.xref_set_key(xrefs["combo_no_opt"], "FT", "/Ch")
+    doc.xref_set_key(xrefs["combo_no_opt"], "Ff", str(1 << 17))
+    doc.xref_set_key(xrefs["edit_combo_no_opt"], "FT", "/Ch")
+    doc.xref_set_key(xrefs["edit_combo_no_opt"], "Ff", str((1 << 17) | (1 << 18)))
+    doc.save(path)
+    doc.close()
+    return path

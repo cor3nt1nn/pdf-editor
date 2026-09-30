@@ -144,6 +144,12 @@ class MainWindow(QMainWindow):
         self.act_redo.setShortcuts(
             [QKeySequence(QKeySequence.StandardKey.Redo), QKeySequence("Ctrl+Shift+Z")]
         )
+        # Commit an open field editor first, so that Undo undoes the value just typed
+        # (and the editor never shows a stale value): replace the stack's own slots.
+        self.act_undo.triggered.disconnect()
+        self.act_undo.triggered.connect(self.undo)
+        self.act_redo.triggered.disconnect()
+        self.act_redo.triggered.connect(self.redo)
         self.addAction(self.act_undo)
         self.addAction(self.act_redo)
         self.act_rotate_cw = self._action(
@@ -449,6 +455,16 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     # -- editing -------------------------------------------------------------------
+    def undo(self) -> None:
+        """Edit ▸ Undo: commit a pending field edit, then undo the last command (which
+        is that edit when the value changed)."""
+        self.document_view.commit_pending_edits()
+        self.undo_stack.undo()
+
+    def redo(self) -> None:
+        self.document_view.commit_pending_edits()
+        self.undo_stack.redo()
+
     def rotate_current_page(self, delta: int) -> None:
         doc = self.document_view.document
         page = self.page_view.current_page

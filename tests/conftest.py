@@ -87,3 +87,13 @@ def static_xfa_pdf(tmp_path):
 @pytest.fixture
 def dynamic_xfa_pdf(tmp_path):
     return fixtures.make_dynamic_xfa_pdf(tmp_path / "dynamic_xfa.pdf")
+
+
+@pytest.fixture
+def many_fields_pdf(tmp_path):
+    return fixtures.make_many_fields_pdf(tmp_path / "many_fields.pdf")
+
+
+@pytest.fixture
+def odd_widgets_pdf(tmp_path):
+    return fixtures.make_odd_widgets_pdf(tmp_path / "odd_widgets.pdf")

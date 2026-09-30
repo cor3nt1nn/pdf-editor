@@ -88,8 +88,11 @@ toolbar); other PDFs open with the hand tool.
   choice is remembered).
 - **Edit ▸ Auto-shrink Overflowing Text** (on by default, remembered): a single-line value
   too long for its box is written with an automatic font size so it fits.
-- Each field change is one Undo step; saving (Ctrl+S) appends the values to the file
-  (incremental save), including encrypted PDFs, which keep their encryption.
+- Each field change is one Undo step. While typing, Ctrl+Z undoes the typing first; Edit ▸
+  Undo validates the field being edited, then undoes the last change.
+- Saving (Ctrl+S) appends the values to the file (incremental save), including encrypted
+  PDFs, which keep their encryption. If a save fails (read-only or locked file), nothing is
+  lost: the values stay in the window and you can retry or use Save As.
 - Read-only and hidden fields, push buttons and signature fields cannot be edited.
 
 A banner above the pages explains forms that cannot be filled normally (close it with ×; it
@@ -113,15 +116,37 @@ Known limitations:
 
 ### Manual form checklist (Milestone 2)
 
-1. Open a LibreOffice/Word-made form: the Form Tool is active and fields are tinted blue.
-2. Type accented text (é à ç œ €) in a text field, press Tab: the value shows, the next field
-   (reading order, across pages) opens; the title shows `*`.
-3. Toggle checkboxes and a radio group: the check mark looks like the original; Ctrl+Z undoes
-   one change at a time.
-4. A long value in a small single-line field shrinks to fit (turn Auto-shrink off to compare).
-5. Save, reopen here and in Edge/Chrome/Adobe Reader: all values are shown.
-6. A dynamic XFA form shows the amber banner mentioning Adobe Acrobat Reader and no Form Tool;
-   an owner-locked form shows the permission banner.
+Run it on your own copy of a real form (e.g. a French Cerfa with ~94 text fields and 20
+checkboxes); keep the original untouched and work on a copy.
+
+1. **Open**: the Form Tool is active and every fillable field is tinted blue (on the Cerfa:
+   the ~94 text fields and the 20 checkboxes, on every page); push buttons and signature
+   fields are not tinted. View ▸ Highlight Form Fields hides/shows the tint.
+2. **Accents**: type `é à ç œ €` in a text field (and a name like "Françoise Lœuvre"),
+   press Enter: the value renders with the accents; the title shows `*`.
+3. **Tab order**: from the first field press Tab repeatedly: fields follow reading order (top
+   to bottom, left to right), the view scrolls to the next page after the last field of a
+   page, and Shift+Tab goes back; checkboxes get a dashed focus frame and Space toggles them.
+4. **Checkboxes**: toggle several checkboxes (click and Space): the tick mark looks exactly
+   like the form's original one (same ZapfDingbats tick, same size), checked and unchecked.
+   Radio buttons in a group exclude each other.
+5. **Auto-shrink**: type a long value in a small single-line field: it is written smaller so
+   it fits; with Edit ▸ Auto-shrink Overflowing Text off it keeps its size and is cut.
+6. **Undo/redo**: Ctrl+Z / Ctrl+Y undo and redo one field change at a time (checkbox, text,
+   drop-down). While typing in a field, Ctrl+Z first undoes the typing; Edit ▸ Undo (or Ctrl+Z
+   once there is no typing left to undo) validates the field, then undoes the last change.
+7. **Incremental save**: note the file size, press Ctrl+S: the save is immediate, the `*`
+   disappears and the file is slightly larger (the changes are appended, the original bytes
+   are kept). Ctrl+S again after one more change is just as fast.
+8. **Reopen**: close and reopen the file here: every value and checkbox is as you left it.
+9. **Other viewers**: open the saved file in Edge, Chrome and Adobe Acrobat Reader: all text
+   values (with accents) and checkboxes are shown, and Adobe Reader does not ask to save or
+   "repair" the file when you close it without changes.
+10. **Save failure**: make the file read-only (Properties ▸ Read-only) and press Ctrl+S: an
+    error offers Save As; cancel it: the title still shows `*` and all values are still there.
+    Clear Read-only and Ctrl+S saves normally.
+11. **Special forms**: a dynamic XFA form shows the amber banner mentioning Adobe Acrobat
+    Reader and no Form Tool; an owner-locked form shows the permission banner.
 
 ## License
 

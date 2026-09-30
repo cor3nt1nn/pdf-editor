@@ -19,6 +19,7 @@ getter writes /NeedAppearances false).
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -322,6 +323,22 @@ def widget_kind(widget: pymupdf.Widget) -> FieldKind:
     return _KIND_BY_TYPE.get(widget.field_type, FieldKind.UNKNOWN)
 
 
+#: Larger coordinates (points) mean a missing or corrupt /Rect (MuPDF's "infinite" rect).
+MAX_COORD = 1e6
+
+
+def _page_rect(raw: pymupdf.Rect, page: pymupdf.Page) -> QRectF:
+    """Widget rect in page space; empty (so the widget is not editable) for a missing,
+    invalid or degenerate /Rect."""
+    if (
+        not raw.is_valid
+        or raw.is_empty
+        or not all(math.isfinite(v) and abs(v) < MAX_COORD for v in raw)
+    ):
+        return QRectF()
+    return qrect_from_fitz(unrotated_to_page(raw, page.rotation_matrix))
+
+
 def _info(doc: pymupdf.Document, page: pymupdf.Page, index: int, w: pymupdf.Widget) -> WidgetInfo:
     kind = widget_kind(w)
     xref = int(w.xref)
@@ -350,7 +367,7 @@ def _info(doc: pymupdf.Document, page: pymupdf.Page, index: int, w: pymupdf.Widg
         annot_flags=_int(doc, xref, "F"),
         max_len=int(w.text_maxlen or 0) if kind is FieldKind.TEXT else 0,
         font_size=float(w.text_fontsize or 0),
-        rect=qrect_from_fitz(unrotated_to_page(raw, page.rotation_matrix)),
+        rect=_page_rect(raw, page),
         unrotated_rect=(raw.x0, raw.y0, raw.x1, raw.y1),
     )
 

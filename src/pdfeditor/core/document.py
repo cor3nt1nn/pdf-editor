@@ -489,6 +489,12 @@ class PdfDocument(QObject):
         return {"garbage": 3, "deflate": True, "encryption": pymupdf.PDF_ENCRYPT_KEEP}
 
     def _save_to(self, path: str, incremental: bool) -> None:
+        # A full write may renumber objects of the in-memory document, and an incremental
+        # write marks its changes as written even if writing the file then fails (a
+        # second incremental write of the same document produces a file with missing
+        # objects): either way it can no longer be the base of an incremental update
+        # until it is reloaded from the bytes on disk (which resets the flag).
+        self._needs_full_save = True
         with self.lock:
             try:
                 if incremental:
@@ -497,10 +503,6 @@ class PdfDocument(QObject):
                     data = self.fitz.tobytes(**self._full_save_kwargs())
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise SaveError(str(exc)) from exc
-        if not incremental:
-            # A full write may renumber objects of the in-memory document: it can no
-            # longer be the base of an incremental update until it is reloaded.
-            self._needs_full_save = True
         try:
             _write_atomically(path, data)
         except OSError as exc:
