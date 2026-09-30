@@ -5,9 +5,12 @@ Pure functions on ``pymupdf.Document``. Callers hold ``PdfDocument.lock``. Never
 full saves renumber xrefs); while using an ``Annot``, keep its ``Page`` referenced
 (deleting an annotation loaded from a temporary page crashes MuPDF).
 
-Identity is the annotation's ``/NM`` (a uuid4 written at creation; foreign FreeText
-annotations without a unique ``/NM`` get one when read), resolved again with
-:func:`resolve_annot`. Xrefs are never used as identity.
+Identity is the annotation's ``/NM`` (a uuid4 written at creation), resolved again with
+:func:`resolve_annot`. Reading never modifies the document: a foreign FreeText without
+a unique ``/NM`` is listed under a *synthetic* name (:func:`synthetic_name`,
+``"#xref:<scope>:<xref>"``) that is only valid for the current load of the document
+(``scope``; full saves renumber xrefs), and gets a real uuid4 ``/NM`` from
+:func:`claim_name` when it is first changed. Xrefs are never used as lasting identity.
 
 Geometry: callers work in *page space* (rotation applied, cropbox-relative, points).
 The unrotated rect stored in the file is ``page_to_unrotated(rect)`` and the text is
@@ -15,7 +18,9 @@ drawn with ``/Rotate`` = the page rotation at creation, so it reads upright on s
 
 Only FreeText annotations are handled. Text uses Helvetica (``/Helv``), no border, no
 fill; stamps are FreeText annotations showing one ZapfDingbats glyph
-(:data:`STAMP_GLYPHS`). Other subtypes (and widgets) are ignored.
+(:data:`STAMP_GLYPHS`). Other subtypes (and widgets) are ignored. Callout FreeText
+(/IT /FreeTextCallout) and those flagged ReadOnly or Locked are listed but
+:attr:`AnnotInfo.locked`: never changed or deleted; LockedContents keeps the text.
 """
 
 from __future__ import annotations
@@ -58,6 +63,14 @@ TEXT_PAD = 2.0
 DEFAULT_TEXT_WIDTH = 180.0
 DEFAULT_FONT_SIZE = 11.0
 BLACK: Color = (0.0, 0.0, 0.0)
+#: Annotation flags (PDF 32000 §12.5.3) making an annotation read-only for us.
+ANNOT_READ_ONLY = 64
+ANNOT_LOCKED = 128
+ANNOT_LOCKED_CONTENTS = 512
+#: /IT of a callout FreeText (its /CL line is not maintained here: not editable).
+CALLOUT_INTENT = "FreeTextCallout"
+#: Prefix of synthetic names (never a real /NM: such a /NM is treated as missing).
+SYNTHETIC_PREFIX = "#xref:"
 
 _TEXT_FONT = "helv"
 _STAMP_FONT = "zadb"
@@ -70,7 +83,8 @@ class AnnotInfo:
     page: int
     #: Xref of the annotation (stale after a full save; identity is ``name``).
     xref: int
-    #: The annotation's /NM.
+    #: The annotation's /NM, or a synthetic name (:func:`is_synthetic`) for a foreign
+    #: FreeText without a unique /NM.
     name: str
     kind: AnnotKind
     #: /Contents (line breaks normalised to "\n").
@@ -86,11 +100,20 @@ class AnnotInfo:
     rect: QRectF
     #: Raw /Rect (x0, y0, x1, y1) in unrotated page coordinates (``annot.rect``).
     unrotated_rect: tuple[float, float, float, float]
+    #: /F ReadOnly or Locked, or a callout (/IT /FreeTextCallout): never changed here.
+    locked: bool = False
+    #: /F LockedContents: the text cannot be edited (moving and resizing can).
+    locked_contents: bool = False
 
     @property
     def editable(self) -> bool:
         """The user can select, move and edit this annotation."""
-        return not self.hidden and not self.rect.isEmpty()
+        return not self.hidden and not self.locked and not self.rect.isEmpty()
+
+    @property
+    def text_editable(self) -> bool:
+        """The user can change the text of this (editable) annotation."""
+        return self.editable and not self.locked_contents
 
 
 @dataclass(frozen=True)
@@ -193,10 +216,12 @@ def _info(
     font, size, color = parse_da(_string_key(doc, xref, "DA"))
     if details is None:
         details = annot.info
-    text = str(details.get("content") or "")
+    text = str(details.get("content") or "").replace("\r\n", "\n").replace("\r", "\n")
     raw = pymupdf.Rect(annot.rect)
     rotate = _int_key(doc, xref, "Rotate") % 360 // 90 * 90
     flags = int(annot.flags or 0)
+    intent = _key(doc, xref, "IT")
+    callout = intent[0] == "name" and intent[1].lstrip("/") == CALLOUT_INTENT
     return AnnotInfo(
         page=index,
         xref=xref,
@@ -209,6 +234,8 @@ def _info(
         hidden=bool(flags & (ANNOT_HIDDEN | ANNOT_NO_VIEW)),
         rect=_page_rect(raw, page),
         unrotated_rect=(raw.x0, raw.y0, raw.x1, raw.y1),
+        locked=callout or bool(flags & (ANNOT_READ_ONLY | ANNOT_LOCKED)),
+        locked_contents=bool(flags & ANNOT_LOCKED_CONTENTS),
     )
 
 
@@ -217,14 +244,39 @@ def new_name() -> str:
     return str(uuid.uuid4())
 
 
+def synthetic_name(xref: int, scope: str = "") -> str:
+    """The in-memory name of a FreeText without a unique /NM (valid for ``scope``)."""
+    return f"{SYNTHETIC_PREFIX}{scope}:{xref}"
+
+
+def is_synthetic(name: str) -> bool:
+    """``name`` is a synthetic name (no /NM written yet)."""
+    return name.startswith(SYNTHETIC_PREFIX)
+
+
+def synthetic_parts(name: str) -> tuple[str, int] | None:
+    """(scope, xref) of a synthetic name, else None."""
+    if not is_synthetic(name):
+        return None
+    scope, _, xref = name[len(SYNTHETIC_PREFIX) :].rpartition(":")
+    try:
+        return scope, int(xref)
+    except ValueError:
+        return None
+
+
 # -- reading ---------------------------------------------------------------
 def read_annots(
-    fitz_doc: pymupdf.Document, page_index: int, *, include_hidden: bool = False
+    fitz_doc: pymupdf.Document,
+    page_index: int,
+    *,
+    include_hidden: bool = False,
+    scope: str = "",
 ) -> list[AnnotInfo]:
     """FreeText annotations of a page, in /Annots order; hidden ones skipped by default.
 
-    A FreeText annotation without /NM, or whose /NM repeats an earlier one of the page,
-    is given a fresh uuid4 /NM (this modifies the document).
+    Never modifies the document. A FreeText without /NM, whose /NM repeats an earlier
+    one of the page or looks synthetic, is listed under ``synthetic_name(xref, scope)``.
     """
     page = fitz_doc[page_index]  # keep the Page alive while its annots are used
     out: list[AnnotInfo] = []
@@ -237,11 +289,10 @@ def read_annots(
         if subtype != pymupdf.PDF_ANNOT_FREE_TEXT:
             continue
         try:
-            if not name or name in seen:
-                name = new_name()
-                _set_name(fitz_doc, xref, name)
-                log.info("assigned /NM %s to FreeText xref %s", name, xref)
-            seen.add(name)
+            if not name or name in seen or is_synthetic(name):
+                name = synthetic_name(xref, scope)
+            else:
+                seen.add(name)
             annot = page.load_annot(xref)
             info = _info(fitz_doc, page, page_index, annot, {**annot.info, "id": name})
         except Exception:  # one malformed annotation must not hide the others
@@ -256,14 +307,35 @@ def resolve_annot(
     fitz_doc: pymupdf.Document, page_index: int, name: str
 ) -> tuple[pymupdf.Page, pymupdf.Annot] | None:
     """The live FreeText annotation named ``name`` on a page, as ``(page, annot)`` — keep
-    the page referenced while using the annot — or None."""
+    the page referenced while using the annot — or None.
+
+    A synthetic name is resolved by its xref (the caller checks its scope).
+    """
     if not name:
         return None
     page = fitz_doc[page_index]
+    parts = synthetic_parts(name)
     for xref, subtype, nm in page.annot_xrefs():
-        if subtype == pymupdf.PDF_ANNOT_FREE_TEXT and nm == name:
+        if subtype != pymupdf.PDF_ANNOT_FREE_TEXT:
+            continue
+        if (xref == parts[1]) if parts is not None else (nm == name):
             return page, page.load_annot(xref)
     return None
+
+
+def claim_name(fitz_doc: pymupdf.Document, page_index: int, name: str) -> str:
+    """The lasting /NM of annotation ``name``: ``name`` itself, or for a synthetic name a
+    fresh uuid4 written to the annotation now. Raises ``LookupError`` if it is gone."""
+    if not is_synthetic(name):
+        return name
+    found = resolve_annot(fitz_doc, page_index, name)
+    if found is None:
+        raise LookupError(f"annotation {name!r} not found on page {page_index}")
+    _page, annot = found
+    real = new_name()
+    _set_name(fitz_doc, annot.xref, real)
+    log.info("assigned /NM %s to FreeText xref %s", real, annot.xref)
+    return real
 
 
 # -- writing ---------------------------------------------------------------
@@ -366,9 +438,11 @@ def update_annot(
     ``None`` keeps a property. ``rect`` is in page space. For a stamp resized without an
     explicit ``font_size`` the glyph is scaled to ``STAMP_FONT_RATIO x min(w, h)``.
     ``fit_height`` (text only) then sets the height to hug the wrapped text, keeping the
-    top edge and the width. Foreign annotations are normalised to Helvetica (stamps to
-    ZapfDingbats) and lose their rich text (/RC, /DS). Raises ``LookupError`` if the
-    annotation is gone.
+    top edge and the width, capped at the page edge (longer text is clipped). Foreign
+    annotations are normalised to Helvetica (stamps to ZapfDingbats) and lose their rich
+    text (/RC, /DS); /CL is always removed. The returned snapshot keeps ``name`` (even
+    synthetic). Raises ``LookupError`` if the annotation is gone, ``PermissionError`` if
+    it is :attr:`AnnotInfo.locked`.
     """
     found = resolve_annot(fitz_doc, page_index, name)
     if found is None:
@@ -376,6 +450,8 @@ def update_annot(
     page, annot = found
     xref = annot.xref
     current = _info(fitz_doc, page, page_index, annot)
+    if current.locked:
+        raise PermissionError(f"annotation {name!r} is locked")
     kind = current.kind
     if text is not None and text not in STAMP_CENTRE:
         kind = AnnotKind.TEXT  # a stamp given ordinary text becomes a text box
@@ -389,18 +465,37 @@ def update_annot(
     if text is not None:
         annot.set_info(content=text)
     if rect is not None:
-        annot.set_rect(page_to_unrotated(fitz_from_qrect(rect), page.derotation_matrix))
+        _set_rect(fitz_doc, annot, page_to_unrotated(fitz_from_qrect(rect), page.derotation_matrix))
     kwargs = {"fontsize": _pdf_size(size), "fontname": _fontname(kind), "text_color": rgb}
     if fit_height and kind is AnnotKind.TEXT:
         # Measure with a frame tall enough for every line, then hug the content.
         body = text if text is not None else current.text
         tall = fitted_height(len(body) + body.count("\n") + 2, size)
-        annot.set_rect(_with_frame_height(annot.rect, current.rotate, tall))
+        _set_rect(fitz_doc, annot, _with_frame_height(annot.rect, current.rotate, tall))
         annot.update(**kwargs)
         lines = _line_count(page, annot, current.rotate, size)
-        annot.set_rect(_with_frame_height(annot.rect, current.rotate, fitted_height(lines, size)))
+        fitted = _with_frame_height(annot.rect, current.rotate, fitted_height(lines, size))
+        _set_rect(fitz_doc, annot, _on_page(page, fitted))
     annot.update(**kwargs)
-    return _info(fitz_doc, page, page_index, page.load_annot(xref))
+    # Annot.set_rect() writes a callout line /CL (A1): drop it again.
+    fitz_doc.xref_set_key(xref, "CL", "null")
+    return _info(fitz_doc, page, page_index, page.load_annot(xref), {**annot.info, "id": name})
+
+
+def _set_rect(fitz_doc: pymupdf.Document, annot: pymupdf.Annot, rect: pymupdf.Rect) -> None:
+    """``annot.set_rect(rect)`` without the /CL it writes (A1)."""
+    annot.set_rect(rect)
+    fitz_doc.xref_set_key(annot.xref, "CL", "null")
+
+
+def _on_page(page: pymupdf.Page, rect: pymupdf.Rect) -> pymupdf.Rect:
+    """Unrotated ``rect`` cut to the page (a fitted box taller than the space left below
+    its top edge is capped: the text is then clipped), unless nothing would remain."""
+    bounds = page.rect * page.derotation_matrix  # the page in unrotated coordinates
+    clipped = pymupdf.Rect(rect) & bounds.normalize()
+    if clipped.is_empty or clipped.width < 1 or clipped.height < 1 or clipped == rect:
+        return rect
+    return clipped
 
 
 def delete_annot(fitz_doc: pymupdf.Document, page_index: int, name: str) -> bool:
@@ -409,6 +504,8 @@ def delete_annot(fitz_doc: pymupdf.Document, page_index: int, name: str) -> bool
     if found is None:
         return False
     page, annot = found
+    if _info(fitz_doc, page, page_index, annot).locked:
+        raise PermissionError(f"annotation {name!r} is locked")
     page.delete_annot(annot)
     return True
 

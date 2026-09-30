@@ -127,6 +127,8 @@ class PdfDocument(QObject):
         self._annot_cache: dict[int, list[AnnotInfo]] = {}
         # Snapping shapes by page (read without the lock, written under it).
         self._shapes_cache: dict[int, PageShapes] = {}
+        # Scope of synthetic annotation names: bumped whenever xrefs may change.
+        self._load_generation = 0
         self._is_form = False
         self._can_fill_forms = False
         self._can_annotate = False
@@ -458,20 +460,65 @@ class PdfDocument(QObject):
         """Visible FreeText annotations of page ``i`` (in /Annots order), cached like
         :meth:`widgets` (same drop rules).
 
-        Reading gives a /NM to FreeText annotations lacking a unique one (a silent
-        document change, no signal): identity is ``(page, name)``, never the xref.
+        Identity is ``(page, name)``. Reading never modifies the document: a FreeText
+        without a unique /NM has a synthetic name (``annotations.is_synthetic``) valid
+        until the next reload (save) or close; commands turn it into a real /NM with
+        :meth:`claim_annot_name` when they first change the annotation.
         """
         cached = self._annot_cache.get(i)
         if cached is None:
             self._check_index(i)
             with self.lock:
-                cached = annotations.read_annots(self.fitz, i)
+                cached = annotations.read_annots(self.fitz, i, scope=self._annot_scope())
             self._annot_cache[i] = cached
         return list(cached)
 
     def annot(self, page: int, name: str) -> AnnotInfo | None:
-        """The visible FreeText annotation ``name`` on ``page``, or None."""
-        return next((a for a in self.annots(page) if a.name == name), None)
+        """The visible FreeText annotation ``name`` on ``page``, or None.
+
+        A synthetic name of the current load also finds the annotation after it was
+        given a real /NM (the snapshot then carries the real name).
+        """
+        listed = self.annots(page)
+        found = next((a for a in listed if a.name == name), None)
+        if found is None:
+            xref = self._synthetic_xref(name)
+            if xref is not None:
+                found = next((a for a in listed if a.xref == xref), None)
+        return found
+
+    def _annot_scope(self) -> str:
+        return str(self._load_generation)
+
+    def _synthetic_xref(self, name: str) -> int | None:
+        """Xref of a synthetic name of the current load, else None."""
+        parts = annotations.synthetic_parts(name)
+        if parts is None or parts[0] != self._annot_scope():
+            return None
+        return parts[1]
+
+    def _check_name(self, page: int, name: str) -> None:
+        if annotations.is_synthetic(name) and self._synthetic_xref(name) is None:
+            raise AnnotError(f"annotation {name!r} not found on page {page} (stale name)")
+
+    def claim_annot_name(self, page: int, name: str) -> str:
+        """The lasting /NM of annotation ``name`` on ``page``: ``name`` itself, or, for a
+        synthetic name, a uuid4 written to the annotation now (no signal: the caller's
+        change that follows emits ``page_changed``). Raises :class:`AnnotError`."""
+        if not annotations.is_synthetic(name):
+            return name
+        self._check_index(page)
+        self._check_annotate()
+        self._check_name(page, name)
+        with self.lock:
+            try:
+                real = annotations.claim_name(self.fitz, page, name)
+            except LookupError as exc:
+                raise AnnotError(f"annotation {name!r} not found on page {page}") from exc
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise AnnotError(str(exc)) from exc
+        self._annot_cache.pop(page, None)
+        return real
 
     def _check_annotate(self) -> None:
         if not self._can_annotate:
@@ -507,10 +554,11 @@ class PdfDocument(QObject):
         """Change annotation ``name`` on ``page`` (see :func:`annotations.update_annot`;
         ``rect`` in page space) and return its new snapshot. Emits page_changed.
 
-        Raises :class:`AnnotError` if it is gone or cannot be changed.
+        Raises :class:`AnnotError` if it is gone or cannot be changed (locked).
         """
         self._check_index(page)
         self._check_annotate()
+        self._check_name(page, name)
         with self.lock:
             try:
                 info = annotations.update_annot(
@@ -533,10 +581,11 @@ class PdfDocument(QObject):
     def delete_annot(self, page: int, name: str) -> None:
         """Delete annotation ``name`` on ``page``. Emits page_changed.
 
-        Raises :class:`AnnotError` if it is gone.
+        Raises :class:`AnnotError` if it is gone or locked.
         """
         self._check_index(page)
         self._check_annotate()
+        self._check_name(page, name)
         with self.lock:
             try:
                 deleted = annotations.delete_annot(self.fitz, page, name)
@@ -581,6 +630,7 @@ class PdfDocument(QObject):
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
         self._annot_cache.clear()
+        self._load_generation += 1
         self._clear_shapes_cache()
         self._read_form_state()
 
@@ -673,6 +723,7 @@ class PdfDocument(QObject):
                         # stale even if writing the file (or the reload) fails.
                         self._widget_cache.clear()
                         self._annot_cache.clear()
+                        self._load_generation += 1
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise SaveError(str(exc)) from exc
         try:

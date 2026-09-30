@@ -365,7 +365,13 @@ def test_annotated_fixture_listing(ann: PdfDocument) -> None:
 
 def test_foreign_freetext_is_named_and_editable(ann: PdfDocument, tmp_path) -> None:
     foreign = ann.annots(0)[2]
-    uuid.UUID(foreign.name)  # assigned when read
+    assert annotations.is_synthetic(foreign.name)  # nothing written when read
+    assert _key(ann, foreign, "NM")[0] == "null"
+    real = ann.claim_annot_name(0, foreign.name)
+    uuid.UUID(real)
+    assert _key(ann, foreign, "NM") == ("string", real)
+    assert ann.annot(0, foreign.name).name == real  # the synthetic name still finds it
+    foreign = ann.annot(0, real)
     assert foreign.kind is AnnotKind.TEXT
     assert foreign.text == FOREIGN_TEXT
     assert foreign.color == FOREIGN_COLOR and foreign.font_size == FOREIGN_SIZE
@@ -397,8 +403,14 @@ def test_duplicate_names_are_made_unique(blank: PdfDocument) -> None:
     assert a.name == b.name == "dup"
     blank.page_changed.emit(0)
     names = [x.name for x in blank.annots(0)]
-    assert names[0] == "dup" and names[1] != "dup" and len(set(names)) == 2
+    assert names[0] == "dup" and annotations.is_synthetic(names[1])
     assert blank.annot(0, names[1]).text == "two"
+    assert blank.annot(0, "dup").text == "one"
+    # A synthetic name is only valid for the current load (xrefs may change on save).
+    blank.reloaded.emit()
+    assert blank.annot(0, names[1]) is None
+    with pytest.raises(AnnotError):
+        blank.update_annot(0, names[1], text="stale")
 
 
 def test_annots_cached_until_page_changed(ann: PdfDocument, monkeypatch) -> None:

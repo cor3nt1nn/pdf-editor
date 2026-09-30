@@ -7,7 +7,15 @@ from dataclasses import replace
 from PySide6.QtCore import QCoreApplication, QRectF
 from PySide6.QtGui import QUndoCommand
 
-from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec, Color, new_name, spec_from
+from pdfeditor.core.annotations import (
+    AnnotInfo,
+    AnnotKind,
+    AnnotSpec,
+    Color,
+    is_synthetic,
+    new_name,
+    spec_from,
+)
 from pdfeditor.core.document import PdfDocument
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 
@@ -163,6 +171,14 @@ class _ImmediateCommand(DocumentCommand):
         raise NotImplementedError
 
 
+def _claimed(doc: PdfDocument, info: AnnotInfo) -> AnnotInfo:
+    """``info`` under its lasting /NM (a synthetic name is claimed: the /NM is written
+    now, so undo/redo keep working across saves)."""
+    if not is_synthetic(info.name):
+        return info
+    return replace(info, name=doc.claim_annot_name(info.page, info.name))
+
+
 class AddAnnotCommand(_ImmediateCommand):
     """Create a text box or stamp from ``spec`` (one undo step).
 
@@ -261,6 +277,7 @@ class EditAnnotCommand(_ImmediateCommand):
         return self.info.name
 
     def _redo(self) -> None:
+        self.info = _claimed(self.doc, self.info)
         self.doc.update_annot(
             self.info.page,
             self.info.name,
@@ -300,6 +317,7 @@ class DeleteAnnotCommand(_ImmediateCommand):
         return self.info.name
 
     def _redo(self) -> None:
+        self.info = _claimed(self.doc, self.info)
         self.doc.delete_annot(self.info.page, self.info.name)
 
     def _undo(self) -> None:
