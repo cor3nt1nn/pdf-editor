@@ -13,8 +13,7 @@ from pdfeditor.ui.main_window import MainWindow
 from pdfeditor.ui.tools.base import ToolEvent
 
 ENCODING_MESSAGE = (
-    "Some characters cannot be displayed with this form’s font; they are stored but may "
-    "not print."
+    "Some characters cannot be displayed with this form’s font; they are stored but may not print."
 )
 
 

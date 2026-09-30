@@ -61,8 +61,12 @@ def _info(doc: PdfDocument, name: str, page: int = 0):
 def _assert_geom(overlay: FieldEditorOverlay, view, info) -> None:
     expected = view.page_rect_to_viewport(info.page, info.rect)
     got = overlay.editor.geometry()
-    for a, b in ((got.x(), expected.x()), (got.y(), expected.y()),
-                 (got.width(), expected.width()), (got.height(), expected.height())):
+    for a, b in (
+        (got.x(), expected.x()),
+        (got.y(), expected.y()),
+        (got.width(), expected.width()),
+        (got.height(), expected.height()),
+    ):
         assert abs(a - b) <= 2
 
 
