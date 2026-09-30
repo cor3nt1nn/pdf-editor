@@ -4,8 +4,10 @@ Free, open-source (AGPL-3.0) PDF editor for Windows, bilingual French/English.
 
 Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stamps, sign with an
 image of a handwritten signature. Milestone 1 is a fast, crisp PDF viewer with page rotation,
-undo/redo and saving; Milestone 2 (current) adds filling of standard PDF forms (AcroForm).
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/M2_PLAN.md](docs/M2_PLAN.md).
+undo/redo and saving; Milestone 2 adds filling of standard PDF forms (AcroForm); Milestone 3
+(current) adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md) and
+[docs/M3_PLAN.md](docs/M3_PLAN.md).
 
 ## Requirements
 
@@ -147,6 +149,97 @@ checkboxes); keep the original untouched and work on a copy.
     Clear Read-only and Ctrl+S saves normally.
 11. **Special forms**: a dynamic XFA form shows the amber banner mentioning Adobe Acrobat
     Reader and no Form Tool; an owner-locked form shows the permission banner.
+
+## Free text and stamps (Milestone 3)
+
+For flat forms (no fillable fields: Word exports, "Microsoft Print to PDF" copies, forms
+filled by hand before): type text anywhere and tick boxes with ✓ ✗ ● stamps. Text and
+stamps are standard PDF annotations (FreeText): other viewers show and print them, and they
+stay editable here after the file is reopened.
+
+| Key | Tool / action |
+|---|---|
+| **H** | Hand tool (pan) |
+| **F** | Form Tool (fill fillable fields) |
+| **T** | Text Tool |
+| **1** / **2** / **3** | ✓ check mark / ✗ cross / ● dot stamp |
+| **Delete** (or Backspace) | Delete the selected text or stamp (Edit ▸ Delete Annotation) |
+| **Alt** + click | Place without snapping, and over a form field |
+| **Ctrl+Enter** | Validate the text being typed (Enter is a new line; Escape cancels) |
+
+- **Text Tool**: click to open a text box and type; Ctrl+Enter, or a click elsewhere,
+  validates it (a click elsewhere also starts the next box there, for fast cell-by-cell
+  entry). The box snaps to what is under the pointer: inside a **table cell** it starts at
+  the cell's left edge (on the baseline for a one-line cell), on an **underline** ("Name:
+  ______") the text sits on the line. A dashed blue preview shows the target before you click.
+- **Stamps**: clicking in a **checkbox** (a drawn square or a ☐ glyph) or a small cell puts
+  the ✓ ✗ ● centred in it and sized to it; elsewhere a 12 pt stamp is centred on the click.
+- **Select, move, resize, edit**: with the Text or a stamp tool, click a text or stamp to
+  select it (frame with 8 handles); drag it to move it, drag a handle to resize it (a text
+  box's width; its height follows the text). Click a selected text again, or double-click
+  it, to edit it; emptying it deletes it. Escape deselects.
+- **Style**: the toolbar's font size box and colour button set the size and colour of new
+  text and change the selected one. Stamps use the current colour.
+- Each placement, edit, move, resize, style change and deletion is one Undo step (Ctrl+Z /
+  Ctrl+Y). Saving (Ctrl+S) appends them to the file, like form values.
+- With the Text or a stamp tool, clicking in a fillable **form field** creates nothing and the
+  status bar suggests the Form Tool (F); hold **Alt** to place text over the field anyway.
+- Documents whose security settings forbid annotations open with these tools disabled (the
+  status bar explains why).
+
+Known limitations:
+
+- Helvetica only (no bold, italic or alignment); integer font sizes (6–72 pt) in the toolbar;
+  the box being typed uses Arial, so line breaks may differ slightly from the saved text.
+- One selection at a time (no multi-selection, arrow-key nudge or copy/paste); the Hand and
+  Form tools cannot select annotations (press T).
+- Snapping only knows straight horizontal/vertical lines and rectangles drawn in the page and
+  ☐-like symbol characters: nothing on scanned images (OCR is planned for later) and no
+  snapping to underlines on pages rotated by 90° or 270°.
+- Text boxes made by other programs (e.g. Adobe Acrobat comments) can be moved and edited,
+  but editing them (or deleting then undoing) turns them into plain Helvetica text: rich text
+  and the original font are lost. Opening such a file may give their comments an internal
+  identifier (saved with the next save).
+- Rotating a page after placing text keeps the text rotated with the page.
+- The hover preview does not change when Alt is pressed or released until the mouse moves.
+- Flattening (turning text and stamps into page content on export) comes with Milestone 5.
+
+### Manual text and stamp checklist (Milestone 3)
+
+Run it on copies of your own samples: a form exported from Word (tables, "______" lines,
+☐ checkboxes) and a document printed with "Microsoft Print to PDF"; keep the originals.
+
+1. **Tools**: open the Word export: H, F, T, 1, 2, 3 switch tools (toolbar and Edit menu
+   follow); typing digits in the page box or in a text box does not switch tools.
+2. **Table cells**: with the Text Tool, hover over table cells (dashed preview of the cell),
+   click in one and type `Élève à Noël €`, then click the next cell and type again: each text
+   starts at its cell's left edge, sits well in the cell, and the accents are shown.
+3. **Underlines**: click just above or on a "Name: ______" line: the text sits on the line.
+   Alt+click places the text exactly at the pointer instead.
+4. **Checkboxes**: with ✓ (1), click in a drawn checkbox and in a ☐ character: the tick is
+   centred and fills the box. Do the same with ✗ (2) and ● (3). Click in an empty area:
+   a 12 pt stamp is centred on the pointer.
+5. **Print-to-PDF sample**: text and stamps can be placed (little or nothing snaps there
+   unless the page has drawn lines); the page text is unchanged.
+6. **Edit / move / resize / delete**: select a text, drag it, resize it with a side handle
+   (its height follows the text), double-click it and change the text, change its size and
+   colour from the toolbar, then press Delete. Undo (Ctrl+Z) every step back to the start
+   and Redo (Ctrl+Y) them again: each step is one undo, the text and stamps come back exactly.
+7. **Incremental save**: Ctrl+S: the `*` disappears and the file is slightly larger.
+8. **Other viewers**: open the saved file in Adobe Acrobat Reader, Edge and Chrome: every text
+   (with accents) and stamp is shown at the same place, and printing (or printing to PDF)
+   from each of them includes them.
+9. **Reopen**: close and reopen the file here: select, move and edit a text placed in the
+   previous session, save again, and check it once more in another viewer.
+10. **Rotated pages**: rotate a page (Ctrl+R), place text and a stamp: they read upright on
+    screen and in the other viewers; the editor stays horizontal.
+11. **Form fields**: on a fillable form, the Text Tool clicked in a field shows the "use the
+    Form tool (F)" message; Alt+click places text over it.
+12. **Permissions**: open a document whose security settings forbid comments/annotations:
+    the Text and stamp tools are disabled and the status bar explains why.
+13. **Save failure**: make the file read-only, add a text, Ctrl+S: an error offers Save As;
+    cancel it: the title still shows `*`, the text is still there and Undo still works.
+14. **Flatten**: not available yet (Milestone 5): texts and stamps stay editable annotations.
 
 ## License
 

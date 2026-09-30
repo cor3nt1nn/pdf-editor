@@ -182,17 +182,25 @@ def _kind(font: str, text: str) -> AnnotKind:
     return AnnotKind.TEXT
 
 
-def _info(doc: pymupdf.Document, page: pymupdf.Page, index: int, annot: pymupdf.Annot) -> AnnotInfo:
+def _info(
+    doc: pymupdf.Document,
+    page: pymupdf.Page,
+    index: int,
+    annot: pymupdf.Annot,
+    details: dict[str, str] | None = None,
+) -> AnnotInfo:
     xref = int(annot.xref)
     font, size, color = parse_da(_string_key(doc, xref, "DA"))
-    text = str(annot.info.get("content") or "")
+    if details is None:
+        details = annot.info
+    text = str(details.get("content") or "")
     raw = pymupdf.Rect(annot.rect)
     rotate = _int_key(doc, xref, "Rotate") % 360 // 90 * 90
     flags = int(annot.flags or 0)
     return AnnotInfo(
         page=index,
         xref=xref,
-        name=str(annot.info.get("id") or ""),
+        name=str(details.get("id") or ""),
         kind=_kind(font, text),
         text=text,
         font_size=size or DEFAULT_FONT_SIZE,
@@ -221,6 +229,10 @@ def read_annots(
     page = fitz_doc[page_index]  # keep the Page alive while its annots are used
     out: list[AnnotInfo] = []
     seen: set[str] = set()
+    # page.load_annot(xref) scans the page's annotation list from its start (quadratic:
+    # about 80 ms for 200 annotations). Do NOT walk it with page.first_annot/Annot.next
+    # instead: in PyMuPDF 1.28.2 that makes a FreeText without /AP (MuPDF-synthesised
+    # appearance) vanish from renders once another annotation is added to the page.
     for xref, subtype, name in page.annot_xrefs():
         if subtype != pymupdf.PDF_ANNOT_FREE_TEXT:
             continue
@@ -230,7 +242,8 @@ def read_annots(
                 _set_name(fitz_doc, xref, name)
                 log.info("assigned /NM %s to FreeText xref %s", name, xref)
             seen.add(name)
-            info = _info(fitz_doc, page, page_index, page.load_annot(xref))
+            annot = page.load_annot(xref)
+            info = _info(fitz_doc, page, page_index, annot, {**annot.info, "id": name})
         except Exception:  # one malformed annotation must not hide the others
             log.warning("skipping unreadable FreeText xref %s", xref, exc_info=True)
             continue

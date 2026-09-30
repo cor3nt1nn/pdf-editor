@@ -105,6 +105,16 @@ def annotated_pdf(tmp_path):
 
 
 @pytest.fixture
+def many_annots_pdf(tmp_path):
+    return fixtures.make_many_annots_pdf(tmp_path / "many_annots.pdf")
+
+
+@pytest.fixture
+def odd_annots_pdf(tmp_path):
+    return fixtures.make_odd_annots_pdf(tmp_path / "odd_annots.pdf")
+
+
+@pytest.fixture
 def word_form_pdf(tmp_path):
     return fixtures.make_word_form_pdf(tmp_path / "word_form.pdf")
 

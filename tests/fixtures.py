@@ -696,7 +696,71 @@ def make_annotated_pdf(path: Path) -> Path:
     return path
 
 
-# -- snapping (M3-T3) ---------------------------------------------------------------
+#: Number of FreeText annotations on the page of :func:`make_many_annots_pdf`.
+MANY_ANNOTS = 200
+
+
+def many_annots_name(n: int) -> str:
+    """/NM of annotation ``n`` of :func:`make_many_annots_pdf`."""
+    return f"many-{n:03d}"
+
+
+def many_annots_rect(n: int) -> Rect4:
+    """Y-down rect of annotation ``n`` of :func:`make_many_annots_pdf` (4 columns)."""
+    x0 = 40 + (n % 4) * 135
+    y0 = 40 + (n // 4) * 15
+    return (x0, y0, x0 + 125, y0 + 12)
+
+
+def make_many_annots_pdf(path: Path, n: int = MANY_ANNOTS) -> Path:
+    """One A4 page with ``n`` small FreeText annotations (Helvetica 8 pt), named by
+    :func:`many_annots_name`, laid out by :func:`many_annots_rect`."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    for i in range(n):
+        a = page.add_freetext_annot(
+            pymupdf.Rect(many_annots_rect(i)), f"note {i}", fontsize=8, border_width=0
+        )
+        doc.xref_set_key(a.xref, "NM", pymupdf.get_pdf_str(many_annots_name(i)))
+        doc.xref_set_key(a.xref, "CL", "null")
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+#: FreeText /NM -> y-down rect written by :func:`make_odd_annots_pdf` before the odd
+#: /Rect values replace it ("ok" keeps it).
+ODD_ANNOT_RECTS: dict[str, Rect4] = {
+    "ok": (72, 72, 250, 92),
+    "no_rect": (72, 110, 250, 130),
+    "huge": (72, 150, 250, 170),
+    "zero": (72, 190, 250, 210),
+    "far_negative": (72, 230, 250, 250),
+}
+
+
+def make_odd_annots_pdf(path: Path) -> Path:
+    """One A4 page with a normal FreeText ("ok") and odd ones: no /Rect, coordinates
+    beyond 1e6 pt, a zero-size /Rect and coordinates far below -1e6 pt."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    xrefs: dict[str, int] = {}
+    for name, rect in ODD_ANNOT_RECTS.items():
+        a = page.add_freetext_annot(pymupdf.Rect(rect), name, fontsize=11, border_width=0)
+        doc.xref_set_key(a.xref, "NM", pymupdf.get_pdf_str(name))
+        doc.xref_set_key(a.xref, "CL", "null")
+        xrefs[name] = a.xref
+    del page
+    doc.xref_set_key(xrefs["no_rect"], "Rect", "null")
+    doc.xref_set_key(xrefs["huge"], "Rect", "[1000000 1000000 2000000 2000010]")
+    doc.xref_set_key(xrefs["zero"], "Rect", "[72 632 72 632]")
+    doc.xref_set_key(xrefs["far_negative"], "Rect", "[-3000000 -3000000 -2000000 -1000000]")
+    doc.save(path)
+    doc.close()
+    return path
+
+
+# -- snapping (M3-T3)---------------------------------------------------------------
 _FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 MSGOTHIC_PATH = _FONT_DIR / "msgothic.ttc"
 SEGUISYM_PATH = _FONT_DIR / "seguisym.ttf"
