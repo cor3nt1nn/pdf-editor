@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
 from pdfeditor.core.forms import XfaKind
+from pdfeditor.ui.overlays.field_items import FieldLayer
 from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ class DocumentView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.page_view)
+        #: Form field highlights of the current document (the form tool reuses it).
+        self.field_layer = FieldLayer(self.page_view, self)
         self._document: PdfDocument | None = None
 
     @property
@@ -63,6 +66,7 @@ class DocumentView(QWidget):
         if document is not None:
             document.path_changed.connect(self.path_changed)
         self.page_view.set_document(document)
+        self.field_layer.set_document(document)  # after the view: its items need PageItems
         if old is not None:
             old.close()
         self.undo_stack.setClean()

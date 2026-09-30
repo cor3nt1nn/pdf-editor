@@ -254,69 +254,74 @@ Redémarrer maintenant ?</translation>
         <translation>&amp;Vignettes</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="198"/>
+        <location filename="../ui/main_window.py" line="199"/>
+        <source>Highlight Form &amp;Fields</source>
+        <translation>Surligner les &amp;champs de formulaire</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="205"/>
         <source>&amp;About PDF Editor…</source>
         <translation>À &amp;propos de PDF Editor…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="200"/>
+        <location filename="../ui/main_window.py" line="207"/>
         <source>Rotate</source>
         <translation>Pivoter</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="223"/>
+        <location filename="../ui/main_window.py" line="230"/>
         <source>&amp;File</source>
         <translation>&amp;Fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="228"/>
+        <location filename="../ui/main_window.py" line="235"/>
         <source>&amp;Edit</source>
         <translation>&amp;Édition</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="236"/>
+        <location filename="../ui/main_window.py" line="243"/>
         <source>&amp;View</source>
         <translation>&amp;Affichage</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="251"/>
+        <location filename="../ui/main_window.py" line="259"/>
         <source>&amp;Language</source>
         <translation>&amp;Langue</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="264"/>
+        <location filename="../ui/main_window.py" line="272"/>
         <source>&amp;Help</source>
         <translation>&amp;Aide</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="268"/>
+        <location filename="../ui/main_window.py" line="276"/>
         <source>Main toolbar</source>
         <translation>Barre d’outils principale</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="285"/>
+        <location filename="../ui/main_window.py" line="293"/>
         <source>Current page</source>
         <translation>Page actuelle</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="319"/>
+        <location filename="../ui/main_window.py" line="327"/>
         <source>{name}[*] — {app}</source>
         <translation>{name}[*] — {app}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="353"/>
+        <location filename="../ui/main_window.py" line="361"/>
         <source>Page {current} / {total}</source>
         <translation>Page {current} / {total}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="464"/>
-        <location filename="../ui/main_window.py" line="475"/>
+        <location filename="../ui/main_window.py" line="476"/>
+        <location filename="../ui/main_window.py" line="487"/>
         <source>Cannot open file</source>
         <translation>Impossible d’ouvrir le fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="465"/>
-        <location filename="../ui/main_window.py" line="476"/>
+        <location filename="../ui/main_window.py" line="477"/>
+        <location filename="../ui/main_window.py" line="488"/>
         <source>“{path}” could not be opened as a PDF document.
 
 {error}</source>
@@ -325,65 +330,65 @@ Redémarrer maintenant ?</translation>
 {error}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="477"/>
-        <location filename="../ui/main_window.py" line="501"/>
+        <location filename="../ui/main_window.py" line="489"/>
+        <location filename="../ui/main_window.py" line="513"/>
         <source>An unexpected error occurred.</source>
         <translation>Une erreur inattendue s’est produite.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="486"/>
+        <location filename="../ui/main_window.py" line="498"/>
         <source>The file was repaired while opening; saving will rewrite it completely.</source>
         <translation>Le fichier a été réparé à l’ouverture ; l’enregistrement le réécrira entièrement.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="493"/>
+        <location filename="../ui/main_window.py" line="505"/>
         <source>The file does not exist.</source>
         <translation>Le fichier n’existe pas.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="495"/>
+        <location filename="../ui/main_window.py" line="507"/>
         <source>The file could not be read. It may be locked by another program.</source>
         <translation>Le fichier n’a pas pu être lu. Il est peut-être verrouillé par un autre programme.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="497"/>
+        <location filename="../ui/main_window.py" line="509"/>
         <source>The file is empty.</source>
         <translation>Le fichier est vide.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="498"/>
+        <location filename="../ui/main_window.py" line="510"/>
         <source>The file is damaged or is not a PDF document.</source>
         <translation>Le fichier est endommagé ou n’est pas un document PDF.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="499"/>
+        <location filename="../ui/main_window.py" line="511"/>
         <source>The document has no pages.</source>
         <translation>Le document ne contient aucune page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="519"/>
+        <location filename="../ui/main_window.py" line="531"/>
         <source>The file “{name}” no longer exists. Use Save As to save a copy.</source>
         <translation>Le fichier « {name} » n’existe plus. Utilisez « Enregistrer sous » pour en enregistrer une copie.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="539"/>
+        <location filename="../ui/main_window.py" line="551"/>
         <source>Saved</source>
         <translation>Enregistré</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="552"/>
+        <location filename="../ui/main_window.py" line="564"/>
         <source>The document could not be saved and had to be closed.</source>
         <translation>Le document n’a pas pu être enregistré et a dû être fermé.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="575"/>
+        <location filename="../ui/main_window.py" line="587"/>
         <source>The document could not be saved as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>Le document n’a pas pu être enregistré sous « {name} ». Vérifiez que le dossier existe et que vous avez le droit d’y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="518"/>
-        <location filename="../ui/main_window.py" line="551"/>
-        <location filename="../ui/main_window.py" line="573"/>
+        <location filename="../ui/main_window.py" line="530"/>
+        <location filename="../ui/main_window.py" line="563"/>
+        <location filename="../ui/main_window.py" line="585"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
     </message>

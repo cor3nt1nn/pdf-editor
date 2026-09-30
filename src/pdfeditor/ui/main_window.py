@@ -195,6 +195,13 @@ class MainWindow(QMainWindow):
         # toggled (not triggered): also fires when the dock's own X button closes it.
         self.act_thumbnails.toggled.connect(self._on_thumbnails_toggled)
         self.addAction(self.act_thumbnails)
+        self.act_highlight_fields = self._action(
+            self.tr("Highlight Form &Fields"), None, None, "highlight_fields"
+        )
+        self.act_highlight_fields.setCheckable(True)
+        self.act_highlight_fields.setChecked(self.settings.highlight_fields)
+        self.document_view.field_layer.set_visible(self.settings.highlight_fields)
+        self.act_highlight_fields.toggled.connect(self._on_highlight_fields_toggled)
         self.act_about = self._action(self.tr("&About PDF Editor…"), None, self.show_about, "about")
         self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
         self.act_rotate_cw.setIconText(self.tr("Rotate"))
@@ -247,6 +254,7 @@ class MainWindow(QMainWindow):
         self.menu_view.addAction(self.act_next_page)
         self.menu_view.addSeparator()
         self.menu_view.addAction(self.act_thumbnails)
+        self.menu_view.addAction(self.act_highlight_fields)
         self.menu_view.addSeparator()
         self.menu_language = self.menu_view.addMenu(self.tr("&Language"))
         self.language_group = QActionGroup(self)
@@ -395,6 +403,10 @@ class MainWindow(QMainWindow):
 
     def _on_thumbnails_toggled(self, visible: bool) -> None:
         self.settings.thumbnails_visible = visible
+
+    def _on_highlight_fields_toggled(self, checked: bool) -> None:
+        self.settings.highlight_fields = checked
+        self.document_view.field_layer.set_visible(checked)
 
     def _on_clean_changed(self, _clean: bool) -> None:
         self._update_title()
