@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication
+from dataclasses import replace
+
+from PySide6.QtCore import QCoreApplication, QRectF
 from PySide6.QtGui import QUndoCommand
 
+from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec, Color, new_name, spec_from
 from pdfeditor.core.document import PdfDocument
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 
@@ -122,3 +125,182 @@ class SetFieldValueCommand(DocumentCommand):
         if self.font_size is not None and self.font_size != self.old_font_size:
             restore = self.old_font_size
         self._apply(self.old_value, restore)
+
+
+class _ImmediateCommand(DocumentCommand):
+    """A command that can be applied before it is pushed (see :meth:`apply_now`).
+
+    Subclasses implement ``_redo()`` / ``_undo()``.
+    """
+
+    def __init__(self, doc: PdfDocument, text: str) -> None:
+        super().__init__(doc, text)
+        self._applied = False
+
+    def apply_now(self) -> None:
+        """Apply the change immediately (raises :class:`AnnotError` if it fails, e.g. the
+        annotation is gone).
+
+        The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
+        failure is reported before anything reaches the undo stack.
+        """
+        self._redo()
+        self._applied = True
+
+    def redo(self) -> None:
+        if self._applied:
+            self._applied = False
+            return
+        self._redo()
+
+    def undo(self) -> None:
+        self._undo()
+
+    def _redo(self) -> None:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _undo(self) -> None:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+
+class AddAnnotCommand(_ImmediateCommand):
+    """Create a text box or stamp from ``spec`` (one undo step).
+
+    The /NM is fixed here (``spec.name``, or a new uuid4), so undo/redo cycles and saves
+    keep the same identity. The first redo creates the annotation (a text box's height
+    then hugs its text); later redos re-create the exact snapshot :attr:`info`.
+    """
+
+    def __init__(self, doc: PdfDocument, spec: AnnotSpec) -> None:
+        text = (
+            QCoreApplication.translate("Commands", "Add stamp")
+            if spec.kind is AnnotKind.STAMP
+            else QCoreApplication.translate("Commands", "Add text")
+        )
+        super().__init__(doc, text)
+        self.spec = replace(spec, name=spec.name or new_name())
+        # Snapshot of the created annotation (None before the first redo).
+        self.info: AnnotInfo | None = None
+
+    @property
+    def page(self) -> int:
+        return self.spec.page
+
+    @property
+    def name(self) -> str:
+        return self.spec.name
+
+    def _redo(self) -> None:
+        if self.info is None:
+            fit = self.spec.kind is AnnotKind.TEXT
+            self.info = self.doc.add_annot(self.spec, fit_height=fit)
+        else:
+            self.info = self.doc.add_annot(spec_from(self.info))
+
+    def _undo(self) -> None:
+        self.doc.delete_annot(self.spec.page, self.spec.name)
+
+
+class EditAnnotCommand(_ImmediateCommand):
+    """Change the text, style or rect (page space) of annotation ``info`` (one undo step).
+
+    ``None`` keeps a property. ``fit_height`` (default: ``text is not None``) makes a
+    text box's height hug its text after the change. Undo restores the text/colour that
+    were changed and always the old rect and font size (a text change refits the height,
+    a stamp resize rescales the glyph). The annotation is resolved by ``(page, name)`` on
+    every redo/undo, so the command survives saves; :class:`AnnotError` if it is gone.
+    """
+
+    def __init__(
+        self,
+        doc: PdfDocument,
+        info: AnnotInfo,
+        *,
+        text: str | None = None,
+        font_size: float | None = None,
+        color: Color | None = None,
+        rect: QRectF | None = None,
+        fit_height: bool | None = None,
+    ) -> None:
+        if text is None and font_size is None and color is None and rect is None:
+            raise ValueError("EditAnnotCommand needs at least one change")
+        super().__init__(doc, self._label(info, text, font_size, color, rect))
+        self.info = info
+        self.new_text = text
+        self.new_font_size = font_size
+        self.new_color = color
+        self.new_rect = QRectF(rect) if rect is not None else None
+        self.fit_height = (text is not None) if fit_height is None else fit_height
+
+    @staticmethod
+    def _label(
+        info: AnnotInfo,
+        text: str | None,
+        font_size: float | None,
+        color: Color | None,
+        rect: QRectF | None,
+    ) -> str:
+        if text is not None:
+            return QCoreApplication.translate("Commands", "Edit text")
+        if font_size is None and color is None and rect is not None:
+            same_size = (
+                abs(rect.width() - info.rect.width()) < 1e-6
+                and abs(rect.height() - info.rect.height()) < 1e-6
+            )
+            if same_size:
+                return QCoreApplication.translate("Commands", "Move annotation")
+            return QCoreApplication.translate("Commands", "Resize annotation")
+        return QCoreApplication.translate("Commands", "Change text style")
+
+    @property
+    def page(self) -> int:
+        return self.info.page
+
+    @property
+    def name(self) -> str:
+        return self.info.name
+
+    def _redo(self) -> None:
+        self.doc.update_annot(
+            self.info.page,
+            self.info.name,
+            text=self.new_text,
+            font_size=self.new_font_size,
+            color=self.new_color,
+            rect=self.new_rect,
+            fit_height=self.fit_height,
+        )
+
+    def _undo(self) -> None:
+        old = self.info
+        self.doc.update_annot(
+            old.page,
+            old.name,
+            text=old.text if self.new_text is not None else None,
+            font_size=old.font_size,
+            color=old.color if self.new_color is not None else None,
+            rect=QRectF(old.rect),
+        )
+
+
+class DeleteAnnotCommand(_ImmediateCommand):
+    """Delete annotation ``info``; undo re-creates it from the snapshot (same /NM, rect,
+    rotation and style; appended at the end of the page's /Annots)."""
+
+    def __init__(self, doc: PdfDocument, info: AnnotInfo) -> None:
+        super().__init__(doc, QCoreApplication.translate("Commands", "Delete annotation"))
+        self.info = info
+
+    @property
+    def page(self) -> int:
+        return self.info.page
+
+    @property
+    def name(self) -> str:
+        return self.info.name
+
+    def _redo(self) -> None:
+        self.doc.delete_annot(self.info.page, self.info.name)
+
+    def _undo(self) -> None:
+        self.doc.add_annot(spec_from(self.info))
