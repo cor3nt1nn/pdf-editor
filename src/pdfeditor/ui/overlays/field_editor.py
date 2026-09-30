@@ -3,6 +3,7 @@
 ``FieldEditorOverlay`` shows one Qt editor widget over a field, as a child of the
 PageView's viewport, and reports the result through signals. It never touches the
 document: the form tool listens to ``committed`` and pushes a ``SetFieldValueCommand``.
+The floating-widget machinery lives in :class:`FloatingEditorOverlay`.
 """
 
 from __future__ import annotations
@@ -10,12 +11,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import shiboken6
-from PySide6.QtCore import QEvent, QObject, QSizeF, Qt, QTimer, Signal
-from PySide6.QtGui import QFocusEvent, QFont, QKeyEvent, QKeySequence, QTextCursor
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QComboBox,
     QLineEdit,
     QListWidget,
@@ -25,6 +24,11 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.core.forms import FieldKind, WidgetInfo
+from pdfeditor.ui.overlays.floating_editor import (
+    MIN_FONT_PX,
+    FloatingEditorOverlay,
+    normalize_newlines,
+)
 
 if TYPE_CHECKING:
     from pdfeditor.core.document import PdfDocument
@@ -34,24 +38,8 @@ log = logging.getLogger(__name__)
 
 #: Field kinds the overlay can edit (checkboxes/radios toggle without an editor).
 EDITABLE_KINDS = (FieldKind.TEXT, FieldKind.COMBO, FieldKind.LIST)
-MIN_FONT_PX = 9
 DEFAULT_FONT_PT = 10.0
 EDITOR_STYLE = "border: 1px solid rgb(0, 120, 215); padding: 0px; background: white;"
-
-_UNDO = QKeySequence.StandardKey.Undo
-_REDO = QKeySequence.StandardKey.Redo
-_ENTER_KEYS = (Qt.Key.Key_Return, Qt.Key.Key_Enter)
-_HANDLED_KEYS = (*_ENTER_KEYS, Qt.Key.Key_Tab, Qt.Key.Key_Backtab, Qt.Key.Key_Escape)
-#: Focus changes that must not commit: a popup (combo list, context menu, menu bar)
-#: took focus, or the whole window was deactivated (focus comes back on reactivation).
-_IGNORED_FOCUS_REASONS = (
-    Qt.FocusReason.PopupFocusReason,
-    Qt.FocusReason.ActiveWindowFocusReason,
-)
-
-
-def _normalize_newlines(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class _ChoiceCombo(QComboBox):
@@ -78,7 +66,7 @@ class _ChoiceCombo(QComboBox):
         self.popup_active = False
 
 
-class FieldEditorOverlay(QObject):
+class FieldEditorOverlay(FloatingEditorOverlay):
     """One floating editor over a text, combo or list field of ``view``.
 
     ``open(info)`` shows a QLineEdit (text; ``setMaxLength`` when ``info.max_len > 0``),
@@ -98,8 +86,7 @@ class FieldEditorOverlay(QObject):
     emission time, even on a document change).
     """
 
-    committed = Signal(object, object)  # (WidgetInfo, str)
-    cancelled = Signal()
+    # committed(info: WidgetInfo, value: str) and cancelled() come from the base class.
     navigate = Signal(bool)  # backwards
 
     def __init__(
@@ -108,153 +95,24 @@ class FieldEditorOverlay(QObject):
         document: PdfDocument | None = None,
         parent: QObject | None = None,
     ) -> None:
-        super().__init__(parent if parent is not None else view)
-        self._view = view
-        self._viewport = view.viewport()
-        self._document: PdfDocument | None = None
-        self._info: WidgetInfo | None = None
-        self._editor: QWidget | None = None
-        self._page_size: QSizeF | None = None
-        self._page_rotation: int | None = None
-        self._hiding = False  # editor hidden because scrolled out of view
-        self._restore_focus = False
-        view.horizontalScrollBar().valueChanged.connect(self.reposition)
-        view.verticalScrollBar().valueChanged.connect(self.reposition)
-        view.zoom_changed.connect(self.reposition)
-        # The viewport's Resize reaches our filter before QGraphicsView re-aligns the
-        # scene, so reposition on the next event-loop turn.
-        self._resize_timer = QTimer(self)
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.setInterval(0)
-        self._resize_timer.timeout.connect(self.reposition)
-        self._viewport.installEventFilter(self)
-        if document is not None:
-            self.set_document(document)
+        super().__init__(view, document, parent)
 
     # -- state ----------------------------------------------------------------
     @property
-    def is_open(self) -> bool:
-        return self._info is not None
-
-    @property
     def current_info(self) -> WidgetInfo | None:
-        return self._info
-
-    @property
-    def editor(self) -> QWidget | None:
-        """The live editor widget while open (tests, focus handling)."""
-        return self._editor
-
-    @property
-    def document(self) -> PdfDocument | None:
-        return self._document
-
-    # -- document binding -------------------------------------------------------
-    def set_document(self, document: PdfDocument | None) -> None:
-        """Follow ``document``; a pending edit on the previous one is committed first."""
-        if document is self._document:
-            return
-        self.commit()
-        old = self._document
-        if old is not None:
-            try:
-                old.page_changed.disconnect(self._on_page_changed)
-                old.structure_changed.disconnect(self._commit_on_change)
-                old.path_changed.disconnect(self._commit_on_change)
-                old.reloaded.disconnect(self._commit_on_change)
-            except (RuntimeError, TypeError):
-                pass
-        self._document = document
-        if document is not None:
-            document.page_changed.connect(self._on_page_changed)
-            document.structure_changed.connect(self._commit_on_change)
-            document.path_changed.connect(self._commit_on_change)
-            document.reloaded.connect(self._commit_on_change)
+        return self._anchor
 
     # -- public API -------------------------------------------------------------
     def open(self, info: WidgetInfo) -> None:
         """Show an editor for ``info`` (a pending edit is committed first)."""
         if info.kind not in EDITABLE_KINDS:
             raise ValueError(f"no editor for {info.kind} fields")
-        if self.is_open:
-            self.commit()
-        if not 0 <= info.page < self._view.page_count:
-            raise ValueError(f"page {info.page} is not shown")
-        editor = self._create_editor(info)
-        self._info = info
-        self._editor = editor
-        doc = self._document
-        self._page_size = doc.page_size(info.page) if doc is not None else None
-        self._page_rotation = doc.page_rotation(info.page) if doc is not None else None
-        for w in (editor, *editor.findChildren(QWidget)):
-            w.installEventFilter(self)
-        self.reposition()  # shows the editor unless its field is out of view
-        if not editor.isHidden():
-            editor.setFocus(Qt.FocusReason.OtherFocusReason)
-        else:
-            self._restore_focus = True
-
-    def commit(self) -> bool:
-        """Close the editor and emit ``committed`` if the value changed.
-
-        Returns True when ``committed`` was emitted. A no-op when closed (so a focus-out
-        caused by closing never commits twice).
-        """
-        info = self._info
-        if info is None:
-            return False
-        if self._editor is None or not shiboken6.isValid(self._editor):
-            self._teardown()  # the view (and the editor with it) was destroyed
-            return False
-        value = self._editor_value()
-        self._teardown()
-        if value == self._initial_value(info):
-            return False
-        self.committed.emit(info, value)
-        return True
-
-    def cancel(self) -> None:
-        """Close the editor, discard the edit and emit ``cancelled``."""
-        if self._info is None:
-            return
-        self._teardown()
-        self.cancelled.emit()
-
-    def close(self) -> None:
-        """Close the editor silently (no commit, no signal)."""
-        if self._info is not None:
-            self._teardown()
-
-    def reposition(self, *_args: object) -> None:
-        """Move/resize the editor over its field; hide it while out of view."""
-        info, editor = self._info, self._editor
-        if info is None or editor is None or not self._alive():
-            return
-        view = self._view
-        if not 0 <= info.page < view.page_count:
-            return
-        rect = view.page_rect_to_viewport(info.page, info.rect)
-        editor.setGeometry(rect)
-        font = QFont(editor.font())
-        font.setPixelSize(self._font_px(info))
-        editor.setFont(font)
-        visible = rect.intersects(view.viewport().rect())
-        if visible and editor.isHidden():
-            editor.show()
-            if self._restore_focus:
-                self._restore_focus = False
-                editor.setFocus(Qt.FocusReason.OtherFocusReason)
-        elif not visible and not editor.isHidden():
-            self._restore_focus = self._has_focus()
-            self._hiding = True
-            try:
-                editor.hide()
-            finally:
-                self._hiding = False
+        self._open_anchor(info)
 
     # -- editor construction ------------------------------------------------------
-    def _font_px(self, info: WidgetInfo) -> int:
-        size = info.font_size or DEFAULT_FONT_PT
+    def _font_px(self) -> int:
+        info = self._anchor
+        size = (info.font_size if info is not None else 0) or DEFAULT_FONT_PT
         return max(MIN_FONT_PX, round(size * self._view.view_scale))
 
     def _create_editor(self, info: WidgetInfo) -> QWidget:
@@ -262,7 +120,7 @@ class FieldEditorOverlay(QObject):
         editor: QWidget
         if info.kind is FieldKind.TEXT and info.multiline:
             edit = QPlainTextEdit(parent)
-            edit.setPlainText(_normalize_newlines(info.value))
+            edit.setPlainText(normalize_newlines(info.value))
             edit.setTabChangesFocus(True)
             edit.setStyleSheet(EDITOR_STYLE)
             edit.moveCursor(QTextCursor.MoveOperation.End)
@@ -319,12 +177,11 @@ class FieldEditorOverlay(QObject):
         return -1
 
     # -- values ---------------------------------------------------------------------
-    @staticmethod
-    def _initial_value(info: WidgetInfo) -> str:
-        return _normalize_newlines(info.value) if info.multiline else info.value
+    def _initial_value(self, info: WidgetInfo) -> str:
+        return normalize_newlines(info.value) if info.multiline else info.value
 
     def _editor_value(self) -> str:
-        editor, info = self._editor, self._info
+        editor, info = self._editor, self._anchor
         assert editor is not None and info is not None
         if isinstance(editor, QPlainTextEdit):
             return editor.toPlainText()
@@ -346,27 +203,7 @@ class FieldEditorOverlay(QObject):
         return str(items[0].data(Qt.ItemDataRole.UserRole))
 
     # -- teardown ---------------------------------------------------------------------
-    def _has_focus(self) -> bool:
-        editor = self._editor
-        if editor is None or not shiboken6.isValid(editor):
-            return False
-        focus = QApplication.focusWidget()
-        return focus is not None and (focus is editor or editor.isAncestorOf(focus))
-
-    def _teardown(self) -> None:
-        editor = self._editor
-        had_focus = self._has_focus()
-        # Mark closed first: hiding the focused editor sends FocusOut, which must not
-        # commit again (re-entrancy guard).
-        self._info = None
-        self._editor = None
-        self._page_size = None
-        self._page_rotation = None
-        self._restore_focus = False
-        if editor is None or not shiboken6.isValid(editor):
-            return
-        for w in (editor, *editor.findChildren(QWidget)):
-            w.removeEventFilter(self)
+    def _before_teardown(self, editor: QWidget) -> None:
         if isinstance(editor, _ChoiceCombo):
             try:
                 editor.activated.disconnect(self._on_combo_activated)
@@ -374,89 +211,14 @@ class FieldEditorOverlay(QObject):
                 pass
             if editor.popup_active:
                 editor.hidePopup()
-        if had_focus and self._alive():
-            self._view.setFocus(Qt.FocusReason.OtherFocusReason)
-        editor.hide()
-        editor.deleteLater()
 
     # -- slots --------------------------------------------------------------------------
-    def _commit_on_change(self, *_args: object) -> None:
-        self.commit()
-
-    def _on_page_changed(self, i: int) -> None:
-        info = self._info
-        if info is None or i != info.page:
-            return
-        doc = self._document
-        size = rotation = None
-        if doc is not None and i < doc.page_count:
-            size, rotation = doc.page_size(i), doc.page_rotation(i)
-        if (
-            size is None
-            or self._page_size is None
-            or size != self._page_size
-            or rotation != self._page_rotation
-        ):
-            # Rotation (even of a square page) or a vanished page: the snapshot rect is
-            # stale. (UI rotations commit first, through ``DocumentView.push``.)
-            self.commit()
-        else:
-            self.reposition()
-
     def _on_combo_activated(self, _index: int) -> None:
         editor = self._editor
         if isinstance(editor, _ChoiceCombo) and editor.popup_active:
             self.commit()
 
     # -- events -------------------------------------------------------------------------
-    def _alive(self) -> bool:
-        # While the view is being destroyed its children still send events (FocusOut,
-        # Hide) that reach this filter; the PageView wrapper is then already invalid.
-        return shiboken6.isValid(self._view) and shiboken6.isValid(self._viewport)
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if not self._alive():
-            return False
-        etype = event.type()
-        if watched is self._viewport:
-            if etype == QEvent.Type.Resize and self._info is not None:
-                self._resize_timer.start()
-            return False
-        if self._info is None:
-            return False
-        if etype == QEvent.Type.ShortcutOverride:
-            # Keep window shortcuts (e.g. Escape, Return) from stealing our keys.
-            assert isinstance(event, QKeyEvent)
-            if event.key() in _HANDLED_KEYS and not self._popup_open():
-                event.accept()
-                return True
-            # Ctrl+Z / Ctrl+Y undo the typing first (the text editor's own history);
-            # with nothing left to undo locally, let the window's Undo/Redo run (it
-            # commits this editor, then undoes the document).
-            for redo in (False, True):
-                if event.matches(_REDO if redo else _UNDO) and not self._local_history(redo):
-                    return True  # filtered but not accepted: the shortcut fires
-            return False
-        if etype == QEvent.Type.KeyPress:
-            assert isinstance(event, QKeyEvent)
-            return self._key_press(event)
-        if etype == QEvent.Type.FocusOut:
-            assert isinstance(event, QFocusEvent)
-            self._focus_out(event)
-        return False
-
-    def _local_history(self, redo: bool) -> bool:
-        """The text editor has typing to undo (``redo``: to redo) of its own."""
-        editor = self._editor
-        if isinstance(editor, QComboBox):
-            editor = editor.lineEdit()  # None for a non-editable combo
-        if isinstance(editor, QLineEdit):
-            return editor.isRedoAvailable() if redo else editor.isUndoAvailable()
-        if isinstance(editor, QPlainTextEdit):
-            document = editor.document()
-            return document.isRedoAvailable() if redo else document.isUndoAvailable()
-        return False
-
     def _popup_open(self) -> bool:
         editor = self._editor
         return isinstance(editor, _ChoiceCombo) and editor.view().isVisible()
@@ -466,29 +228,12 @@ class FieldEditorOverlay(QObject):
             return False  # the combo popup handles its own keys
         key = event.key()
         mods = event.modifiers()
-        if key in _ENTER_KEYS:
-            if isinstance(self._editor, QPlainTextEdit) and not (
-                mods & Qt.KeyboardModifier.ControlModifier
-            ):
-                return False  # newline
-            self.commit()
-            return True
-        if key == Qt.Key.Key_Escape:
-            self.cancel()
-            return True
         if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             backwards = key == Qt.Key.Key_Backtab or bool(mods & Qt.KeyboardModifier.ShiftModifier)
             self.commit()
             self.navigate.emit(backwards)
             return True
-        return False
-
-    def _focus_out(self, event: QFocusEvent) -> None:
-        if self._hiding or event.reason() in _IGNORED_FOCUS_REASONS:
-            return
-        if self._popup_open() or self._has_focus():
-            return  # focus moved inside the editor (e.g. to an editable combo's line edit)
-        self.commit()
+        return super()._key_press(event)
 
 
 __all__ = ["EDITABLE_KINDS", "FieldEditorOverlay"]
