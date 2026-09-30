@@ -96,6 +96,17 @@ class SetFieldValueCommand(DocumentCommand):
         else:
             self.old_value = info.value
             self.new_value = new_value
+        self._applied = False
+
+    def apply_now(self) -> None:
+        """Apply the change immediately (raises :class:`FieldError` if the field is gone).
+
+        The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
+        failure is reported before anything reaches the undo stack (an exception raised
+        inside ``push`` would leave a broken command on the stack).
+        """
+        self.redo()
+        self._applied = True
 
     def _apply(self, value: str | bool, font_size: float | None) -> None:
         self.doc.set_field_value(
@@ -108,6 +119,9 @@ class SetFieldValueCommand(DocumentCommand):
         )
 
     def redo(self) -> None:
+        if self._applied:
+            self._applied = False
+            return
         self._apply(self.new_value, self.font_size)
 
     def undo(self) -> None:

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
 from pdfeditor.core.forms import XfaKind
+from pdfeditor.ui.overlays.field_editor import FieldEditorOverlay
 from pdfeditor.ui.overlays.field_items import FieldLayer
 from pdfeditor.ui.page_view import PageView
 
@@ -32,6 +33,9 @@ class DocumentView(QWidget):
         layout.addWidget(self.page_view)
         #: Form field highlights of the current document (the form tool reuses it).
         self.field_layer = FieldLayer(self.page_view, self)
+        #: The floating form field editor (driven by the form tool, which pushes the
+        #: commands for its ``committed`` values).
+        self.field_editor = FieldEditorOverlay(self.page_view, parent=self)
         self._document: PdfDocument | None = None
 
     @property
@@ -50,23 +54,37 @@ class DocumentView(QWidget):
 
     def open(self, path: str, password_cb: PasswordCallback | None = None) -> PdfDocument:
         """Open ``path`` replacing the current document. Raises OpenError/PasswordRequired."""
+        self.commit_pending_edits()
         document = PdfDocument.open(path, password_cb=password_cb)
         self._replace(document)
         return document
 
     def close_document(self) -> None:
+        self.commit_pending_edits()
         self._replace(None)
+
+    def commit_pending_edits(self) -> None:
+        """Commit an open field editor, so that ``is_dirty`` and saves include its value.
+
+        Called before saving, closing or replacing the document (and by ``MainWindow``
+        before it consults ``is_dirty``).
+        """
+        self.field_editor.commit()
 
     def _replace(self, document: PdfDocument | None) -> None:
         old = self._document
         if old is not None:
             old.path_changed.disconnect(self.path_changed)
+        # Pending edits were committed by the callers; anything left belongs to the old
+        # document and is dropped (its undo stack is being cleared).
+        self.field_editor.close()
         self.undo_stack.clear()
         self._document = document
         if document is not None:
             document.path_changed.connect(self.path_changed)
         self.page_view.set_document(document)
         self.field_layer.set_document(document)  # after the view: its items need PageItems
+        self.field_editor.set_document(document)
         if old is not None:
             old.close()
         self.undo_stack.setClean()
@@ -76,6 +94,7 @@ class DocumentView(QWidget):
         """Save in place. Raises SaveError."""
         if self._document is None:
             return
+        self.commit_pending_edits()
         self._prepare_save(self._document)
         self._document.save()
         self.undo_stack.setClean()
@@ -84,6 +103,7 @@ class DocumentView(QWidget):
         """Save under a new path and continue editing it. Raises SaveError."""
         if self._document is None:
             return
+        self.commit_pending_edits()
         self._prepare_save(self._document)
         self._document.save_as(path)
         self.undo_stack.setClean()
@@ -100,6 +120,7 @@ class DocumentView(QWidget):
 
     def shutdown(self) -> None:
         """Stop background rendering and close the document (application exit)."""
+        self.field_editor.close()  # pending edits were resolved by the window
         service = self.page_view.service
         service.stop()  # asks the worker to stop; waits up to 1 s
         if self._document is not None:

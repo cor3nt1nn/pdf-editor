@@ -5,7 +5,7 @@ from __future__ import annotations
 import bisect
 import logging
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QKeyEvent,
@@ -476,6 +476,18 @@ class PageView(QGraphicsView):
             tool.paint_overlay(painter)
 
     # -- events ---------------------------------------------------------------
+    def event(self, event: QEvent) -> bool:
+        # Tab/Shift+Tab never reach keyPressEvent (QWidget.event moves the focus first):
+        # offer them to the active tool (form field navigation).
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)
+            and self._forward("key_press", event)
+        ):
+            return True
+        return super().event(event)
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         current = self._current
         super().resizeEvent(event)

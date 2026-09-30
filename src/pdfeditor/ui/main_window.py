@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QMessageBox, QSp
 from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired
+from pdfeditor.core.forms import XfaKind
 from pdfeditor.core.settings import Settings
 from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.resources import app_icon, icon
@@ -27,6 +28,7 @@ from pdfeditor.ui import dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
 from pdfeditor.ui.tools.base import ToolManager
+from pdfeditor.ui.tools.form_tool import FormTool
 from pdfeditor.ui.tools.hand_tool import HandTool
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
@@ -157,6 +159,13 @@ class MainWindow(QMainWindow):
             "rotate_ccw",
         )
         self.act_hand_tool = self._action(self.tr("&Hand Tool"), None, None, "hand_tool")
+        self.act_form_tool = self._action(self.tr("&Form Tool"), None, None, "form_tool")
+        self.act_auto_shrink = self._action(
+            self.tr("Auto-shrink Overflowing Text"), None, None, "auto_shrink_text"
+        )
+        self.act_auto_shrink.setCheckable(True)
+        self.act_auto_shrink.setChecked(self.settings.auto_shrink_text)
+        self.act_auto_shrink.toggled.connect(self._on_auto_shrink_toggled)
         self.act_zoom_in = self._action(
             self.tr("Zoom &In"),
             [QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")],
@@ -217,6 +226,7 @@ class MainWindow(QMainWindow):
             (self.act_zoom_in, "zoom_in"),
             (self.act_zoom_out, "zoom_out"),
             (self.act_hand_tool, "hand"),
+            (self.act_form_tool, "form"),
             (self.act_thumbnails, "thumbnails"),
         ):
             act.setIcon(icon(name))
@@ -224,6 +234,9 @@ class MainWindow(QMainWindow):
     def _create_tools(self) -> None:
         self.tool_manager = ToolManager(self.page_view, self)
         self.tool_manager.register(HandTool(self), self.act_hand_tool)
+        self.form_tool = FormTool(self.document_view, self.settings, self)
+        self.form_tool.message.connect(self._show_message)
+        self.tool_manager.register(self.form_tool, self.act_form_tool)
 
     def _create_menus(self) -> None:
         bar = self.menuBar()
@@ -240,6 +253,9 @@ class MainWindow(QMainWindow):
         self.menu_edit.addAction(self.act_rotate_ccw)
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_hand_tool)
+        self.menu_edit.addAction(self.act_form_tool)
+        self.menu_edit.addSeparator()
+        self.menu_edit.addAction(self.act_auto_shrink)
         self.menu_view = bar.addMenu(self.tr("&View"))
         for act in (
             self.act_zoom_in,
@@ -284,6 +300,9 @@ class MainWindow(QMainWindow):
         tb.addAction(self.act_redo)
         tb.addSeparator()
         tb.addAction(self.act_rotate_cw)
+        tb.addSeparator()
+        tb.addAction(self.act_hand_tool)
+        tb.addAction(self.act_form_tool)
         tb.addSeparator()
         tb.addAction(self.act_prev_page)
         self.page_spin = QSpinBox(self)
@@ -347,6 +366,7 @@ class MainWindow(QMainWindow):
         ):
             act.setEnabled(has_doc)
         self.page_spin.setEnabled(has_doc)
+        self.act_form_tool.setEnabled(self._can_fill_forms())
         if has_doc:
             cur = self.page_view.current_page
             self.act_prev_page.setEnabled(cur > 0)
@@ -376,6 +396,17 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._update_actions()
         self._update_status()
+        # A fillable form opens with the form tool; anything else with the hand tool.
+        self.tool_manager.set_active("form" if self._can_fill_forms() else "hand")
+
+    def _can_fill_forms(self) -> bool:
+        doc = self.document_view.document
+        return (
+            doc is not None
+            and doc.is_form
+            and doc.can_fill_forms
+            and doc.xfa_kind is not XfaKind.DYNAMIC
+        )
 
     def _on_path_changed(self, _path: str) -> None:
         # Save As: same content under a new name; views and caches stay as they are.
@@ -407,6 +438,12 @@ class MainWindow(QMainWindow):
     def _on_highlight_fields_toggled(self, checked: bool) -> None:
         self.settings.highlight_fields = checked
         self.document_view.field_layer.set_visible(checked)
+
+    def _on_auto_shrink_toggled(self, checked: bool) -> None:
+        self.settings.auto_shrink_text = checked
+
+    def _show_message(self, text: str) -> None:
+        self.statusBar().showMessage(text, 10000)
 
     def _on_clean_changed(self, _clean: bool) -> None:
         self._update_title()
@@ -522,6 +559,8 @@ class MainWindow(QMainWindow):
         doc = self.document_view.document
         if doc is None:
             return False
+        # Before the modified-on-disk check: the pending value is part of what is saved.
+        self.document_view.commit_pending_edits()
         if doc.path is None:
             return self.save_as()
         if not file_exists(doc.path):
@@ -570,6 +609,7 @@ class MainWindow(QMainWindow):
         doc = self.document_view.document
         if doc is None:
             return False
+        self.document_view.commit_pending_edits()
         suggested = doc.path or os.path.join(self.settings.last_open_dir, "document.pdf")
         path = dialogs.get_save_path(self, suggested)
         if not path:
@@ -595,6 +635,7 @@ class MainWindow(QMainWindow):
 
     def maybe_save(self) -> bool:
         """If there are unsaved changes ask Save/Discard/Cancel. True = go ahead."""
+        self.document_view.commit_pending_edits()  # an open field editor counts
         if not self.document_view.is_dirty:
             return True
         answer = dialogs.confirm_save_changes(self, self.document_view.file_name)
