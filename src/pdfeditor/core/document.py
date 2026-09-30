@@ -28,6 +28,7 @@ from pdfeditor.core.forms import (
     WidgetInfo,
     XfaKind,
     detect_xfa,
+    field_button_state,
     read_widgets,
     resolve_widget,
     set_button_state,
@@ -376,7 +377,10 @@ class PdfDocument(QObject):
         Checkbox/radio: ``True`` selects this widget's on state, ``False`` or ``"Off"``
         turns the field off, another string selects the widget with that (decoded) on
         state. The widget is re-resolved by ``name``/``unrotated_rect`` if its xref changed
-        (full saves renumber objects); without ``name`` the cached snapshot is used.
+        (full saves renumber objects). Callers that keep a snapshot across saves (undo
+        commands, tools) **must** pass ``name`` and ``unrotated_rect``; without ``name``
+        ``xref`` is looked up in the current :meth:`widgets` snapshot, so it must come
+        from a snapshot taken after the last save.
 
         Emits ``page_changed`` for every page showing a widget of the field and returns
         those pages. Raises :class:`FieldError` if the widget is gone or not fillable.
@@ -410,6 +414,20 @@ class PdfDocument(QObject):
         for i in pages:
             self.page_changed.emit(i)
         return pages
+
+    def field_button_state(self, info: WidgetInfo) -> str:
+        """Decoded on state of ``info``'s checkbox/radio field over all its pages.
+
+        ``"Off"`` when no widget of the field is on (radio siblings may be on other pages
+        than ``info.page``). Raises :class:`FieldError` if the widget is gone.
+        """
+        self._check_index(info.page)
+        with self.lock:
+            found = resolve_widget(self.fitz, info.page, info.xref, info.name, info.unrotated_rect)
+            if found is None:
+                raise FieldError(f"form field {info.name!r} not found on page {info.page}")
+            fitz_page, widget = found
+            return field_button_state(self.fitz, fitz_page, widget)
 
     def _clear_widget_cache(self, *_args: object) -> None:
         self._widget_cache.clear()
@@ -500,7 +518,12 @@ class PdfDocument(QObject):
                 if incremental:
                     data = _incremental_bytes(self.fitz)
                 else:
-                    data = self.fitz.tobytes(**self._full_save_kwargs())
+                    try:
+                        data = self.fitz.tobytes(**self._full_save_kwargs())
+                    finally:
+                        # garbage=3 renumbers the in-memory objects: cached xrefs are
+                        # stale even if writing the file (or the reload) fails.
+                        self._widget_cache.clear()
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise SaveError(str(exc)) from exc
         try:

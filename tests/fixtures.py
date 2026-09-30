@@ -139,6 +139,8 @@ _CB_ON = b"q BT 0 g /ZaDb 9 Tf 1.5 2 Td (4) Tj ET Q"
 _CB_OFF = b"q 0.5 G 0.5 0.5 11 11 re S Q"
 
 Rect4 = tuple[float, float, float, float]
+#: Combo/list values stored by ``make_lo_form_pdf(prefill_choices=True)``.
+LO_PREFILLED = {"Civilité": "f", "Couleur": "Vert"}
 
 #: (page, name, kind, y-down unrotated rect) of every editable widget, in tab order.
 LO_EDITABLE: tuple[tuple[int, str, str, Rect4], ...] = (
@@ -176,6 +178,10 @@ def make_lo_form_pdf(
     rotate: int = 0,
     cropbox: bool = False,
     objstms: bool = True,
+    encryption: int = pymupdf.PDF_ENCRYPT_AES_256,
+    owner_only: bool = False,
+    need_appearances: bool = False,
+    prefill_choices: bool = False,
 ) -> Path:
     """A form shaped like LibreOffice exports (see ``LO_EDITABLE`` / ``LO_NOT_EDITABLE``).
 
@@ -183,7 +189,11 @@ def make_lo_form_pdf(
     ZaDb, no NeedAppearances, /Fields in scrambled order, /Annots bottom-first. Names use
     PDFDocEncoding accents; checkbox 1_3 has a #-escaped on-state token; 1_4 is checked;
     ``Sexe`` is a real radio group (parent + kids M/F); ``Nom`` has a kid on each page.
-    ``rotate``/``cropbox`` apply to page 1 only.
+    ``rotate``/``cropbox`` apply to page 1 only. ``encrypted`` uses ``encryption``
+    (user password ``PASSWORD``); ``owner_only`` sets only an owner password (opens
+    without one) with ``LO_PERMISSIONS`` (filling allowed). ``need_appearances`` sets
+    /NeedAppearances true; ``prefill_choices`` stores ``LO_PREFILLED`` in the combo and
+    list /V (their appearances are not generated).
     """
     rects = {(p, n, r[1]): r for p, n, _k, r in LO_EDITABLE + LO_NOT_EDITABLE}
 
@@ -286,14 +296,16 @@ def make_lo_form_pdf(
             0,
             rect_of(0, "Civilité", 340),
             "/FT/Ch/Ff 131072/F 4/DA(/Helv 8 Tf 0 g)/T(Civilit\\351)"
-            "/Opt[[(m)(Monsieur)][(f)(Madame)](Autre)]",
+            "/Opt[[(m)(Monsieur)][(f)(Madame)](Autre)]"
+            + (f"/V({LO_PREFILLED['Civilité']})" if prefill_choices else ""),
         )
     )
     fields.append(
         widget(
             0,
             rect_of(0, "Couleur", 370),
-            "/FT/Ch/F 4/DA(/Helv 8 Tf 0 g)/T(Couleur)/Opt[(Rouge)(Vert)(Bleu)]",
+            "/FT/Ch/F 4/DA(/Helv 8 Tf 0 g)/T(Couleur)/Opt[(Rouge)(Vert)(Bleu)]"
+            + (f"/V({LO_PREFILLED['Couleur']})" if prefill_choices else ""),
         )
     )
 
@@ -311,7 +323,9 @@ def make_lo_form_pdf(
     scrambled = fields[1::2] + fields[0::2]
     acro = obj(
         "<</Fields[" + " ".join(f"{x} 0 R" for x in reversed(scrambled)) + "]"
-        f"/DA(/Helv 0 Tf 0 g)/DR<</Font<</Helv {helv} 0 R/ZaDb {zadb} 0 R>>>>>>"
+        f"/DA(/Helv 0 Tf 0 g)/DR<</Font<</Helv {helv} 0 R/ZaDb {zadb} 0 R>>>>"
+        + ("/NeedAppearances true" if need_appearances else "")
+        + ">>"
     )
     doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"{acro} 0 R")
 
@@ -324,10 +338,14 @@ def make_lo_form_pdf(
         kwargs["use_objstms"] = 1
     if encrypted:
         kwargs.update(
-            encryption=pymupdf.PDF_ENCRYPT_AES_256,
+            encryption=encryption,
             user_pw=PASSWORD,
             owner_pw="owner-" + PASSWORD,
             permissions=LO_PERMISSIONS,
+        )
+    elif owner_only:
+        kwargs.update(
+            encryption=encryption, user_pw="", owner_pw=OWNER_PASSWORD, permissions=LO_PERMISSIONS
         )
     doc.save(path, **kwargs)
     doc.close()
@@ -516,6 +534,82 @@ def make_odd_widgets_pdf(path: Path) -> Path:
     doc.xref_set_key(xrefs["combo_no_opt"], "Ff", str(1 << 17))
     doc.xref_set_key(xrefs["edit_combo_no_opt"], "FT", "/Ch")
     doc.xref_set_key(xrefs["edit_combo_no_opt"], "Ff", str((1 << 17) | (1 << 18)))
+    doc.save(path)
+    doc.close()
+    return path
+
+
+#: (page, on-state, y-down rect) of the kids of :func:`make_multipage_radio_pdf`'s radio.
+MP_RADIO_KIDS: tuple[tuple[int, str, Rect4], ...] = (
+    (0, "A", (100, 100, 114, 114)),
+    (0, "B", (200, 100, 214, 114)),
+    (1, "C", (100, 100, 114, 114)),
+)
+MP_RADIO_NAME = "Choix"
+_FF_RADIO = 1 << 15
+_FF_NO_TOGGLE_TO_OFF = 1 << 14
+
+
+def make_multipage_radio_pdf(path: Path, *, no_toggle_off: bool = False) -> Path:
+    """Two A4 pages and one radio group ``Choix`` whose kids (``MP_RADIO_KIDS``) span
+    both pages; ``C`` (page 2) is selected. ``no_toggle_off`` sets NoToggleToOff."""
+    doc = pymupdf.open()
+    for _ in range(2):
+        doc.new_page(width=A4[0], height=A4[1])
+    pages = (doc.page_xref(0), doc.page_xref(1))
+
+    def obj(source: str) -> int:
+        x = doc.get_new_xref()
+        doc.update_object(x, source)
+        return x
+
+    zadb = obj("<</Type/Font/Subtype/Type1/BaseFont/ZapfDingbats>>")
+
+    def form(content: bytes, font: bool) -> int:
+        res = f"/Resources<</Font<</ZaDb {zadb} 0 R>>>>" if font else ""
+        x = obj(f"<</Type/XObject/Subtype/Form/BBox[0 0 14 14]{res}>>")
+        doc.update_stream(x, content)
+        return x
+
+    field = doc.get_new_xref()
+    annots: tuple[list[int], list[int]] = ([], [])
+    kids = []
+    for page, state, rect in MP_RADIO_KIDS:
+        on, off = form(_CB_ON, True), form(_CB_OFF, False)
+        current = state if state == "C" else "Off"
+        x = obj(
+            f"<</Type/Annot/Subtype/Widget/P {pages[page]} 0 R/Rect{_pdf_rect(rect)}"
+            f"/Parent {field} 0 R/F 4/DA(/ZaDb 0 Tf 0 g)/AS/{current}"
+            f"/AP<</N<</{state} {on} 0 R/Off {off} 0 R>>>>>>"
+        )
+        annots[page].append(x)
+        kids.append(x)
+    flags = _FF_RADIO | (_FF_NO_TOGGLE_TO_OFF if no_toggle_off else 0)
+    refs = " ".join(f"{x} 0 R" for x in kids)
+    doc.update_object(field, f"<</FT/Btn/Ff {flags}/T({MP_RADIO_NAME})/V/C/Kids[{refs}]>>")
+    for i, items in enumerate(annots):
+        doc.xref_set_key(pages[i], "Annots", "[" + " ".join(f"{x} 0 R" for x in items) + "]")
+    acro = obj(f"<</Fields[{field} 0 R]/DA(/Helv 0 Tf 0 g)/DR<</Font<</ZaDb {zadb} 0 R>>>>>>")
+    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"{acro} 0 R")
+    doc.save(path, deflate=True)
+    doc.close()
+    return path
+
+
+SQUARE_SIZE = 400.0
+SQUARE_FIELD_RECT = (50.0, 60.0, 250.0, 80.0)
+
+
+def make_square_form_pdf(path: Path) -> Path:
+    """One square page (``SQUARE_SIZE``) with one off-centre text field ``carre``."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=SQUARE_SIZE, height=SQUARE_SIZE)
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "carre"
+    w.text_fontsize = 10
+    w.rect = pymupdf.Rect(SQUARE_FIELD_RECT)
+    page.add_widget(w)
     doc.save(path)
     doc.close()
     return path

@@ -81,15 +81,8 @@ class SetFieldValueCommand(DocumentCommand):
         self.old_value: str | bool
         if info.kind in (FieldKind.CHECKBOX, FieldKind.RADIO):
             # Values are on-state names, so that undo re-selects the sibling radio button
-            # that was on before (siblings are looked up on the same page).
-            self.old_value = next(
-                (
-                    w.on_state
-                    for w in doc.widgets(info.page)
-                    if w.field_xref == info.field_xref and w.is_on
-                ),
-                "Off",
-            )
+            # that was on before (on any page of the field).
+            self.old_value = doc.field_button_state(info)
             if isinstance(new_value, bool):
                 new_value = info.on_state if new_value and info.on_state else new_value
             self.new_value = new_value

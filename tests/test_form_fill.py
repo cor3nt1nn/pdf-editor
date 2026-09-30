@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pymupdf
 import pytest
-from fixtures import LO_ESCAPED_TOKEN, PASSWORD, make_lo_form_pdf
+from fixtures import (
+    LO_ESCAPED_TOKEN,
+    LO_PREFILLED,
+    MP_RADIO_NAME,
+    PASSWORD,
+    make_lo_form_pdf,
+    make_multipage_radio_pdf,
+)
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QUndoStack
 
 from pdfeditor.core.commands import SetFieldValueCommand
 from pdfeditor.core.document import FieldError, PdfDocument
-from pdfeditor.core.forms import WidgetInfo
+from pdfeditor.core.forms import FF_NO_TOGGLE_TO_OFF, WidgetInfo, resolve_widget
 
 ACCENTED = "Élève : é à ç œ €"
 LONG_TEXT = "un texte beaucoup trop long pour tenir dans cette zone de saisie, vraiment"
@@ -233,6 +242,123 @@ def test_combo_and_list(qtbot, lo_doc: PdfDocument) -> None:
     assert _key(lo_doc, combo.xref, "V") == ("null", "null")
 
 
+def test_combo_appearance_shows_display_text(qtbot, lo_doc, lo_form_pdf) -> None:
+    combo = _by_name(lo_doc, "Civilité")
+    assert ("f", "Madame") in combo.choices
+    stack = QUndoStack()
+    stack.push(SetFieldValueCommand(lo_doc, combo, "f"))
+    assert _key(lo_doc, combo.xref, "V") == ("string", "f")
+    assert _by_name(lo_doc, "Civilité").value == "f"
+    assert b"(Madame)" in _ap_stream(lo_doc, combo.xref)
+    with lo_doc.lock:
+        shown = lo_doc.fitz[0].get_text(clip=pymupdf.Rect(combo.unrotated_rect)).strip()
+    assert shown == "Madame"
+    stack.push(SetFieldValueCommand(lo_doc, _by_name(lo_doc, "Civilité"), "Autre"))
+    assert _key(lo_doc, combo.xref, "V") == ("string", "Autre")  # export == display
+    stack.undo()
+    lo_doc.save(force_full=True)
+    reopened = PdfDocument.open(lo_form_pdf)
+    try:
+        pymupdf.TOOLS.mupdf_warnings()
+        info = _by_name(reopened, "Civilité")
+        assert info.value == "f"
+        with reopened.lock:
+            clip = pymupdf.Rect(info.unrotated_rect)
+            assert reopened.fitz[0].get_text(clip=clip).strip() == "Madame"
+        reopened.render(0, 1.0)
+        assert pymupdf.TOOLS.mupdf_warnings() == ""
+    finally:
+        reopened.close()
+
+
+def test_prefilled_choices_are_read(qtbot, tmp_path) -> None:
+    doc = PdfDocument.open(make_lo_form_pdf(tmp_path / "pre.pdf", prefill_choices=True))
+    try:
+        for name, value in LO_PREFILLED.items():
+            assert _by_name(doc, name).value == value
+        stack = QUndoStack()
+        stack.push(SetFieldValueCommand(doc, _by_name(doc, "Couleur"), "Bleu"))
+        stack.undo()
+        assert _by_name(doc, "Couleur").value == "Vert"
+    finally:
+        doc.close()
+
+
+def test_need_appearances_true_is_kept_and_values_render(qtbot, tmp_path) -> None:
+    path = make_lo_form_pdf(tmp_path / "na.pdf", need_appearances=True)
+    doc = PdfDocument.open(path)
+    try:
+        info = _by_name(doc, "Zone de texte 8_54")
+        doc.set_field_value(0, info.xref, "Valeur NA")
+        assert _dark_pixels(doc, 0, info.rect) > 50
+        doc.save()
+        doc.save(force_full=True)
+    finally:
+        doc.close()
+    reopened = PdfDocument.open(path)
+    try:
+        with reopened.lock:
+            catalog = reopened.fitz.pdf_catalog()
+            need = reopened.fitz.xref_get_key(catalog, "AcroForm/NeedAppearances")
+        assert need == ("bool", "true")
+        info = _by_name(reopened, "Zone de texte 8_54")
+        assert info.value == "Valeur NA"
+        assert "Valeur NA" in _page_text(reopened, 0)
+        assert _dark_pixels(reopened, 0, info.rect) > 50
+    finally:
+        reopened.close()
+
+
+# -- multi-page radio group --------------------------------------------------------
+@pytest.fixture
+def mp_radio(tmp_path):
+    d = PdfDocument.open(make_multipage_radio_pdf(tmp_path / "radio.pdf"))
+    yield d
+    d.close()
+
+
+def _kid(doc: PdfDocument, state: str) -> WidgetInfo:
+    return next(w for w in doc.all_widgets() if w.on_state == state)
+
+
+def test_multi_page_radio_state_and_undo(qtbot, mp_radio: PdfDocument) -> None:
+    a, c = _kid(mp_radio, "A"), _kid(mp_radio, "C")
+    assert a.page == 0 and c.page == 1 and c.is_on and not a.is_on
+    assert a.name == MP_RADIO_NAME and not a.flags & FF_NO_TOGGLE_TO_OFF
+    assert mp_radio.field_button_state(a) == "C"  # the choice is on another page
+    stack = QUndoStack()
+    command = SetFieldValueCommand(mp_radio, a, True)
+    assert command.old_value == "C"
+    stack.push(command)
+    assert _kid(mp_radio, "A").is_on and not _kid(mp_radio, "C").is_on
+    assert _key(mp_radio, a.field_xref, "V") == ("name", "/A")
+    stack.undo()  # C (page 2) is selected again, not the whole group turned off
+    assert _kid(mp_radio, "C").is_on and not _kid(mp_radio, "A").is_on
+    assert _key(mp_radio, a.field_xref, "V") == ("name", "/C")
+    stack.redo()
+    assert mp_radio.field_button_state(c) == "A"
+
+
+def test_field_button_state_falls_back_to_v(qtbot, mp_radio: PdfDocument) -> None:
+    c = _kid(mp_radio, "C")
+    with mp_radio.lock:
+        mp_radio.fitz.xref_set_key(c.xref, "AS", "/Off")
+    assert mp_radio.field_button_state(c) == "C"  # from /V
+    with mp_radio.lock:
+        mp_radio.fitz.xref_set_key(c.field_xref, "V", "/Off")
+    assert mp_radio.field_button_state(c) == "Off"
+
+
+def test_no_toggle_to_off_flag_is_read(qtbot, tmp_path) -> None:
+    doc = PdfDocument.open(make_multipage_radio_pdf(tmp_path / "r.pdf", no_toggle_off=True))
+    try:
+        widgets = doc.all_widgets()
+        assert len(widgets) == 3
+        assert all(w.flags & FF_NO_TOGGLE_TO_OFF for w in widgets)
+    finally:
+        doc.close()
+
+
 # -- saving ------------------------------------------------------------------------
 def _fill_some(doc: PdfDocument, stack: QUndoStack) -> None:
     stack.push(SetFieldValueCommand(doc, _by_name(doc, "Zone de texte 8_54"), ACCENTED))
@@ -256,31 +382,58 @@ def _check_filled(path, password: str | None = None) -> None:
         doc.close()
 
 
-@pytest.mark.parametrize("encrypted", [False, True])
-def test_incremental_save_persists_values(qtbot, tmp_path, encrypted: bool) -> None:
-    path = make_lo_form_pdf(tmp_path / "form.pdf", encrypted=encrypted)
-    password = PASSWORD if encrypted else None
+SAVE_VARIANTS = {
+    "plain": {},
+    "no_objstms": {"objstms": False},
+    "aes256": {"encrypted": True},
+    "aes128": {"encrypted": True, "encryption": pymupdf.PDF_ENCRYPT_AES_128},
+    "rc4_128": {"encrypted": True, "encryption": pymupdf.PDF_ENCRYPT_RC4_128},
+    "owner_only": {"owner_only": True},
+}
+
+
+@pytest.mark.parametrize("full", [False, True], ids=["incremental", "full"])
+@pytest.mark.parametrize("variant", list(SAVE_VARIANTS))
+def test_save_persists_values(qtbot, tmp_path, variant: str, full: bool) -> None:
+    kwargs = SAVE_VARIANTS[variant]
+    path = make_lo_form_pdf(tmp_path / "form.pdf", **kwargs)
+    password = PASSWORD if kwargs.get("encrypted") else None
     size_before = path.stat().st_size
     original = path.read_bytes()
     doc = PdfDocument.open(path, password=password)
     try:
+        assert doc.can_fill_forms  # owner_only: opens without a password, filling allowed
+        assert doc.is_encrypted == bool(password)
         assert doc.can_save_incrementally()
         _fill_some(doc, QUndoStack())
-        doc.save()
+        doc.save(force_full=full)
         data = path.read_bytes()
-        assert len(data) > size_before and data.startswith(original)  # appended update
+        if not full:
+            assert len(data) > size_before and data.startswith(original)  # appended update
         pymupdf.TOOLS.mupdf_warnings()
         doc.render(0, 1.0)
         assert pymupdf.TOOLS.mupdf_warnings() == ""
     finally:
         doc.close()
+    raw = pymupdf.open(path)
+    try:
+        assert bool(raw.needs_pass) == bool(password)  # encryption kept
+        if variant == "owner_only":  # still owner-protected: modifying is not allowed
+            assert (raw.metadata or {}).get("encryption")
+            assert not raw.permissions & pymupdf.PDF_PERM_MODIFY
+    finally:
+        raw.close()
     _check_filled(path, password)
 
 
 def test_command_undoes_after_full_save(qtbot, lo_doc: PdfDocument, lo_form_pdf) -> None:
     stack = QUndoStack()
     _fill_some(lo_doc, stack)
-    lo_doc.save(force_full=True)  # garbage=3: objects may be renumbered
+    before = [(w.name, w.xref) for w in lo_doc.widgets(0)]
+    lo_doc.save(force_full=True)  # garbage=3: objects are renumbered
+    after = [(w.name, w.xref) for w in lo_doc.widgets(0)]
+    assert [n for n, _x in after] == [n for n, _x in before]
+    assert after != before  # the commands really hold stale xrefs
     _check_filled(lo_form_pdf)
     stack.undo()
     stack.undo()
@@ -302,6 +455,18 @@ def test_stale_xref_is_resolved_by_name_and_rect(qtbot, lo_doc: PdfDocument) -> 
     assert pages == [0]
     assert _by_name(lo_doc, "Zone de texte 8_54").value == "abc"
     assert _by_name(lo_doc, "Couleur").value == ""
+
+
+def test_stale_xref_of_a_same_name_sibling_is_resolved_by_rect(qtbot, lo_doc) -> None:
+    male, female = (_by_name(lo_doc, "Sexe", index=i) for i in (0, 1))
+    with lo_doc.lock:
+        found = resolve_widget(lo_doc.fitz, 0, female.xref, "Sexe", male.unrotated_rect)
+        assert found is not None and found[1].xref == male.xref
+    stack = QUndoStack()
+    stale = dataclasses.replace(male, xref=female.xref)  # the xref names the sibling
+    stack.push(SetFieldValueCommand(lo_doc, stale, True))
+    assert _key(lo_doc, male.xref, "AS")[1] == "/" + male.on_state
+    assert _key(lo_doc, female.xref, "AS") == ("name", "/Off")
 
 
 def test_rotated_cropped_fill_renders_inside_widget(qtbot, tmp_path) -> None:

@@ -580,21 +580,47 @@ def set_text_value(
 ) -> list[int]:
     """Set a text/combo/list value and regenerate the appearance of each of its widgets.
 
+    A combo/list ``value`` is the export value; when its display text differs, the
+    appearance shows the display text and /V holds the export value.
     ``font_size`` (0 = auto-size) rewrites the widgets' /DA; ``None`` keeps it. An empty
     ``value`` clears the field: ``field_value = ""`` + ``update()`` leaves /V untouched,
     so /V is reset on the field dictionary first (``()`` for text, removed for choices),
     then every widget's appearance is regenerated empty. Returns the affected pages.
     """
     field_xref, members = _field_widgets(fitz_doc, page, widget)
+    is_text = widget.field_type == pymupdf.PDF_WIDGET_TYPE_TEXT
     if value == "":
-        is_text = widget.field_type == pymupdf.PDF_WIDGET_TYPE_TEXT
         fitz_doc.xref_set_key(field_xref, "V", "()" if is_text else "null")
+    # Choice whose export value differs from its display text: ``update()`` draws the
+    # value it is given, so draw the display text, then store the export value in /V.
+    shown = value
+    if not is_text and value:
+        shown = next((d for e, d in _choices(widget) if e == value), value)
     for p, x in members:
         w = widget if x == int(widget.xref) else p.load_widget(x)
         if w is None:
             continue
-        w.field_value = value
+        w.field_value = shown
         if font_size is not None:
             w.text_fontsize = font_size
         w.update()
+    if shown != value:
+        fitz_doc.xref_set_key(field_xref, "V", pymupdf.get_pdf_str(value))
     return sorted({p.number for p, _x in members})
+
+
+def field_button_state(
+    fitz_doc: pymupdf.Document, page: pymupdf.Page, widget: pymupdf.Widget
+) -> str:
+    """Decoded on state of a checkbox/radio field across **all** its pages ("Off").
+
+    The /AS of the first widget of the field that is on (radio kids may sit on other
+    pages than ``widget``), else the field's decoded /V, else ``"Off"``.
+    """
+    field_xref, members = _field_widgets(fitz_doc, page, widget)
+    for _p, x in members:
+        state = _name(fitz_doc, x, "AS")
+        if state and state != "Off":
+            return decode_pdf_name(state)
+    value = _name(fitz_doc, field_xref, "V")
+    return decode_pdf_name(value) if value else "Off"
