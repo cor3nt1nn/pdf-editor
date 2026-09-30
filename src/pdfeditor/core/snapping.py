@@ -1,12 +1,13 @@
 """Snapping of text and stamps to the cells, underlines and checkboxes of flat forms (M3).
 
 :func:`scan_page` (caller holds ``PdfDocument.lock``) extracts the axis-aligned vector
-shapes of a page's *content* (``Page.get_cdrawings``) and the checkbox-like glyphs of its
-text (``☐`` & co., Wingdings/Webdings), mapped to page space (rotation applied,
-cropbox-relative, points). Everything else is pure geometry on the resulting
-:class:`PageShapes`: :func:`snap` finds what a click targets, :func:`text_placement` and
-:func:`stamp_placement` turn a :class:`Snap` into the page-space rect of a new text box
-or the centre and size of a new stamp.
+shapes of a page (MuPDF's line-art device, like ``Page.get_cdrawings``, minus the paths
+lying inside annotation or widget rects: those are appearances) and the checkbox-like
+glyphs of its content text (``☐`` & co., Wingdings/Webdings), in page space (rotation
+applied, cropbox-relative, points), clipped to the page. Everything else is pure
+geometry on the resulting :class:`PageShapes`: :func:`snap` finds what a click targets,
+:func:`text_placement` and :func:`stamp_placement` turn a :class:`Snap` into the
+page-space rect of a new text box or the centre and size of a new stamp.
 
 Snap order (:func:`snap`):
 
@@ -14,8 +15,10 @@ Snap order (:func:`snap`):
 2. a checkbox-sized box or glyph box within ``tolerance`` → ``BOX`` (nearest);
 3. the smaller of the smallest box containing the point and the cell reconstructed by
    casting rays to the nearest horizontal/vertical segments (each of which must run
-   along the whole side of the cell) → ``CELL`` (``BOX`` if the result is
-   checkbox-sized);
+   along the whole side of the cell; a cell covering ``PAGE_FRAME_RATIO`` of the page
+   is a page border and is rejected; a cell bounded only by edges of boxes containing
+   the point is the overlap of those boxes and loses to the smallest of them) →
+   ``CELL`` (``BOX`` if the result is checkbox-sized);
 4. the nearest horizontal segment spanning the point's x with its position within
    ``[y - 4, y + 24]`` → ``UNDERLINE`` (zero-height rect at the segment);
 5. ``NONE``.
@@ -45,11 +48,14 @@ Box = tuple[float, float, float, float]
 THIN = 2.5
 #: Segments shorter than this (points) are ignored.
 MIN_SEGMENT = 6.0
-#: Boxes with a side longer than this (points) are ignored (page frames, backgrounds).
-MAX_BOX_SIDE = 800.0
-#: Boxes covering at least this fraction of the page's width *and* height are page
-#: frames or backgrounds: ignored, edges included.
+#: Boxes and ray-cast cells covering at least this fraction of the page's width *and*
+#: height are page frames or backgrounds: ignored (a frame box's edges included).
 PAGE_FRAME_RATIO = 0.75
+#: Shapes are clipped to the page grown by this margin (points); shapes entirely outside
+#: are dropped (bleed, huge or far-away rules would otherwise flood the spatial indexes).
+CLIP_MARGIN = 1.0
+#: Paths within an annotation's rect grown by this margin (points) are its appearance.
+ANNOT_MARGIN = 1.0
 #: Smallest side of a box or reconstructed cell (points).
 MIN_BOX_SIDE = 4.0
 #: Checkbox size limits (:func:`is_checkbox_size`).
@@ -60,10 +66,15 @@ CHECKBOX_MAX_ASPECT = 1.6
 GLYPH_BOX_RATIO = 0.72
 #: Height of a checkbox glyph's centre above the baseline = ratio x font size.
 GLYPH_RISE = 0.35
-#: Unicode checkbox-like glyphs (☐ ☑ ☒ □ ■ ▢ ◻ ◼ ◯ ○).
-CHECKBOX_CHARS = frozenset("☐☑☒□■▢◻◼◯○")
+#: Unicode checkbox-like glyphs (☐ ☑ ☒ □ ▢ ◻ ◼ ◯). ■ and ○ are left out: they are far
+#: more often bullets than boxes.
+CHECKBOX_CHARS = frozenset("☐☑☒□▢◻◼◯")
 #: Symbol fonts whose glyphs have no usable Unicode (MuPDF yields "\x00" or PUA codes).
 SYMBOL_FONTS = ("wingdings", "webdings")
+#: Wingdings box codes (low byte of MuPDF's char, often U+F0xx): o p q r (boxes), x (☒),
+#: 0xA8 (◻), 0xFD (☒), 0xFE (☑). A Wingdings char with a known code must be one of these
+#: (n = ■ and the round bullets are not boxes); an unknown code ("\x00") is kept.
+WINGDINGS_BOX_CODES = frozenset((0x6F, 0x70, 0x71, 0x72, 0x78, 0xA8, 0xFD, 0xFE))
 GLYPH_MIN_ASPECT = 0.7
 GLYPH_MAX_ASPECT = 1.4
 #: Underline search window below/above the click (points).
@@ -121,6 +132,8 @@ class PageShapes:
     v_segments: tuple[Segment, ...] = ()
     #: Visible squares of checkbox glyphs.
     glyph_boxes: tuple[Box, ...] = ()
+    #: (width, height) of the page; (0, 0) = unknown (no page-frame test on cells).
+    page_size: tuple[float, float] = (0.0, 0.0)
 
     @cached_property
     def _box_grid(self) -> dict[tuple[int, int], list[Box]]:
@@ -140,27 +153,122 @@ EMPTY_SHAPES = PageShapes()
 
 # -- scanning (pymupdf) ---------------------------------------------------------------
 def scan_page(page: pymupdf.Page) -> PageShapes:
-    """Shapes of ``page``'s content in page space. Caller holds the document lock.
+    """Shapes of ``page`` in page space. Caller holds the document lock.
 
-    Vector paths come from ``get_cdrawings()`` (unrotated coordinates, mapped with the
-    page's rotation matrix); glyphs from a text page of the page's display list without
-    annotations (already in page space).
+    Vector paths come from MuPDF's line-art device run on the page as displayed
+    (:func:`_drawings`; the document is not modified); paths inside the rect of an
+    annotation or widget are its appearance and skipped (:func:`_annot_rects`). Glyphs
+    come from a text page of the page's display list without annotations (already in
+    page space). Everything is clipped to the page (``CLIP_MARGIN``).
     """
-    rotation = int(page.rotation) % 360
-    matrix = tuple(page.rotation_matrix) if rotation else None
     page_size = (float(page.rect.width), float(page.rect.height))
+    drawings, matrix = _drawings(page)
+    annot_rects = _annot_rects(page)
     boxes: set[Box] = set()
     h: set[Segment] = set()
     v: set[Segment] = set()
-    for path in page.get_cdrawings():
+    for path in drawings:
+        if annot_rects and _in_annot(path, matrix, annot_rects):
+            continue
         _scan_path(path, matrix, page_size, boxes, h, v)
-    glyphs = _scan_glyphs(page)
+    glyphs = {g for g in (_clip(b, page_size) for b in _scan_glyphs(page)) if g is not None}
     return PageShapes(
         boxes=tuple(sorted(boxes)),
         h_segments=tuple(sorted(h)),
         v_segments=tuple(sorted(v)),
         glyph_boxes=tuple(sorted(glyphs)),
+        page_size=page_size,
     )
+
+
+def _drawings(page: pymupdf.Page) -> tuple[list[dict], tuple[float, ...] | None]:
+    """(paths, matrix mapping them to page space, or None when already in page space).
+
+    ``Page.get_cdrawings()`` temporarily sets /Rotate to 0 on a rotated page, which
+    marks the page object as changed (the next save would rewrite it), so PyMuPDF's C++
+    helper behind it is called directly on the page as displayed: coordinates are then
+    already in page space, but on rotated pages rectangles come out as four ``l`` items
+    (see :func:`_loop_rect`). Falls back to ``get_cdrawings()`` if the helper is missing.
+    """
+    helper = getattr(getattr(pymupdf, "extra", None), "get_cdrawings", None)
+    if helper is not None:
+        try:
+            return list(helper(pymupdf.mupdf.FzPage(page.this), None, None, None)), None
+        except Exception:  # pragma: no cover - internal API changed
+            log.debug("pymupdf.extra.get_cdrawings failed", exc_info=True)
+    rotation = int(page.rotation) % 360  # pragma: no cover - fallback
+    return page.get_cdrawings(), tuple(page.rotation_matrix) if rotation else None
+
+
+def _annot_rects(page: pymupdf.Page) -> list[Box]:
+    """Page-space rects (grown by ``ANNOT_MARGIN``) of the page's visible annotations and
+    widgets, read from their /Rect (``load_annot`` would be quadratic)."""
+    try:
+        xrefs = page.annot_xrefs()
+    except Exception:
+        return []
+    if not xrefs:
+        return []
+    doc = page.parent
+    mupdf = pymupdf.mupdf
+    mediabox, ctm = mupdf.FzRect(), mupdf.FzMatrix()
+    # PDF space -> page space (Page.transformation_matrix ignores the cropbox offset on
+    # rotated pages).
+    mupdf.pdf_page_transform(pymupdf._as_pdf_page(page.this), mediabox, ctm)
+    matrix = pymupdf.Matrix(ctm.a, ctm.b, ctm.c, ctm.d, ctm.e, ctm.f)
+    m = ANNOT_MARGIN
+    rects: list[Box] = []
+    for xref, _subtype, _name in xrefs:
+        try:
+            flags_kind, flags = doc.xref_get_key(xref, "F")
+            if flags_kind == "int" and int(flags) & (2 | 32):  # Hidden, NoView
+                continue
+            kind, value = doc.xref_get_key(xref, "Rect")
+            if kind != "array":
+                continue
+            nums = [float(n) for n in value.strip("[] ").split()]
+            if len(nums) != 4 or not all(math.isfinite(n) for n in nums):
+                continue
+            r = (pymupdf.Rect(nums) * matrix).normalize()
+        except Exception:  # malformed annotation: its appearance counts as content
+            continue
+        rects.append((r.x0 - m, r.y0 - m, r.x1 + m, r.y1 + m))
+    return rects
+
+
+def _in_annot(path: dict, matrix: tuple[float, ...] | None, annot_rects: list[Box]) -> bool:
+    rect = path.get("rect")
+    if rect is None:
+        return False
+    x0, y0, x1, y1 = _map(tuple(rect), matrix)  # type: ignore[arg-type]
+    return any(a[0] <= x0 and a[1] <= y0 and x1 <= a[2] and y1 <= a[3] for a in annot_rects)
+
+
+def _clip(box: Box, page_size: tuple[float, float]) -> Box | None:
+    """``box`` clipped to the page grown by ``CLIP_MARGIN``; None if entirely outside."""
+    m = CLIP_MARGIN
+    x0, y0 = max(box[0], -m), max(box[1], -m)
+    x1, y1 = min(box[2], page_size[0] + m), min(box[3], page_size[1] + m)
+    if x0 > x1 or y0 > y1:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _loop_rect(items: list) -> Box | None:
+    """Bounding rect of a path made of exactly four axis-aligned ``l`` items forming a
+    closed loop (how the line-art device reports a rectangle on a rotated page)."""
+    if len(items) != 4 or any(item[0] != "l" for item in items):
+        return None
+    for i, item in enumerate(items):
+        (xa, ya), (xb, yb) = item[1], item[2]
+        if abs(xa - xb) > _EPS and abs(ya - yb) > _EPS:
+            return None  # slanted
+        nx, ny = items[(i + 1) % 4][1]
+        if abs(xb - nx) > _EPS or abs(yb - ny) > _EPS:
+            return None  # not a closed loop
+    xs = [item[1][0] for item in items]
+    ys = [item[1][1] for item in items]
+    return (min(xs), min(ys), max(xs), max(ys))
 
 
 def _map(rect: Box, matrix: tuple[float, ...] | None) -> Box:
@@ -194,7 +302,11 @@ def _scan_path(
     filled = "f" in kind
     if filled and not stroked and _is_white(path.get("fill")):
         return  # invisible (white background or mask)
-    for item in path.get("items", ()):
+    items = list(path.get("items", ()))
+    loop = _loop_rect(items)
+    if loop is not None:
+        items = [("re", loop)]
+    for item in items:
         op = item[0]
         if op == "re":
             rect: Box | None = tuple(item[1])  # type: ignore[assignment]
@@ -203,18 +315,22 @@ def _scan_path(
         elif op == "l":
             if stroked:
                 (xa, ya), (xb, yb) = item[1], item[2]
-                _add_rule(_map((xa, ya, xb, yb), matrix), h, v)
+                line = _clip(_map((xa, ya, xb, yb), matrix), page_size)
+                if line is not None:
+                    _add_rule(line, h, v)
             continue
         else:
             continue
         if rect is None:
             continue
-        r = _map(rect, matrix)
+        r = _clip(_map(rect, matrix), page_size)
+        if r is None:
+            continue
         w, ht = r[2] - r[0], r[3] - r[1]
         if min(w, ht) <= THIN:
             _add_rule(r, h, v)
             continue
-        if min(w, ht) < MIN_BOX_SIDE or max(w, ht) > MAX_BOX_SIDE:
+        if min(w, ht) < MIN_BOX_SIDE:
             continue
         if w >= PAGE_FRAME_RATIO * page_size[0] and ht >= PAGE_FRAME_RATIO * page_size[1]:
             continue
@@ -284,6 +400,8 @@ def glyph_boxes(rawdict: dict) -> set[Box]:
                         pass
                     elif not (symbol and ht > 0 and GLYPH_MIN_ASPECT <= w / ht <= GLYPH_MAX_ASPECT):
                         continue
+                    elif "wingdings" in font and not _wingdings_box(char["c"]):
+                        continue
                     half = GLYPH_BOX_RATIO * size / 2
                     ox, oy = char.get("origin", (x0, y1))
                     # "Up" (towards the ascender) is dir rotated by -90° in y-down space.
@@ -294,6 +412,12 @@ def glyph_boxes(rawdict: dict) -> set[Box]:
                         cx, cy = ox + math.copysign(rise, dy), (y0 + y1) / 2
                     glyphs.add(_round((cx - half, cy - half, cx + half, cy + half)))
     return glyphs
+
+
+def _wingdings_box(c: str) -> bool:
+    """A Wingdings char may be a box: its code is unknown ("\\x00") or a box code."""
+    code = ord(c[0]) if c else 0
+    return code == 0 or (code & 0xFF) in WINGDINGS_BOX_CODES
 
 
 # -- spatial indexes --------------------------------------------------------------------
@@ -396,14 +520,36 @@ def _ray_cell(shapes: PageShapes, x: float, y: float) -> Box | None:
     if top is None or bottom is None or left is None or right is None:
         return None
     x0, y0, x1, y1 = left.position, top.position, right.position, bottom.position
-    if min(x1 - x0, y1 - y0) < MIN_BOX_SIDE or max(x1 - x0, y1 - y0) > MAX_BOX_SIDE:
+    if min(x1 - x0, y1 - y0) < MIN_BOX_SIDE:
         return None
+    pw, ph = shapes.page_size
+    if pw > 0 and x1 - x0 >= PAGE_FRAME_RATIO * pw and y1 - y0 >= PAGE_FRAME_RATIO * ph:
+        return None  # a page border drawn as four rules
     # Each side must run along the whole cell: rays hitting unrelated rules (the edges
     # of two separate boxes, say) do not make a cell.
     for seg, lo, hi in ((top, x0, x1), (bottom, x0, x1), (left, y0, y1), (right, y0, y1)):
         if seg.start > lo + ENCLOSE_SLACK or seg.end < hi - ENCLOSE_SLACK:
             return None
     return (x0, y0, x1, y1)
+
+
+def _on_edge(box: Box, cell: Box, side: int) -> bool:
+    """Side ``side`` (0 left, 1 top, 2 right, 3 bottom) of ``cell`` lies on an edge of
+    ``box`` parallel to it."""
+    lo, hi = (box[0], box[2]) if side in (0, 2) else (box[1], box[3])
+    return abs(cell[side] - lo) <= ENCLOSE_SLACK or abs(cell[side] - hi) <= ENCLOSE_SLACK
+
+
+def _box_overlap(cell: Box, inside: list[Box]) -> bool:
+    """``cell`` is the overlap of drawn boxes containing the point rather than a drawn
+    cell: none of them is the cell and every side of it lies on an edge of one of them."""
+    if not inside:
+        return False
+    if any(
+        all(abs(a - b) <= ENCLOSE_SLACK for a, b in zip(cell, box, strict=True)) for box in inside
+    ):
+        return False
+    return all(any(_on_edge(box, cell, side) for box in inside) for side in range(4))
 
 
 def snap(shapes: PageShapes, point: QPointF, *, tolerance: float = 6.0) -> Snap:
@@ -423,7 +569,11 @@ def snap(shapes: PageShapes, point: QPointF, *, tolerance: float = 6.0) -> Snap:
         return Snap(SnapKind.BOX, _qrect(min(close)[2]))
     best = min(inside, key=_area) if inside else None
     cell = _ray_cell(shapes, x, y)
-    if cell is not None and (best is None or _area(cell) < _area(best) - _EPS):
+    if (
+        cell is not None
+        and (best is None or _area(cell) < _area(best) - _EPS)
+        and not _box_overlap(cell, inside)
+    ):
         best = cell
     if best is not None:
         kind = (
@@ -455,6 +605,7 @@ def text_placement(
     font_size: float,
     default_width: float,
     page_width: float,
+    page_height: float | None = None,
 ) -> QRectF:
     """Page-space rect of a new one-line text box (see ``annotations.text_rect``).
 
@@ -462,27 +613,41 @@ def text_placement(
     rect.bottom − 2 for cells shorter than 2.4 × font size, else rect.top + 2 + 0.8 × font
     size. ``UNDERLINE``: left = rect.left + 2, baseline = rule − 2, width = min(default,
     rule end − left). ``NONE``: starts at the click with capitals centred on it, width
-    ``default_width`` kept inside the page.
+    ``default_width`` kept inside the page. Left and right always stay within
+    ``[0, page_width]``; given ``page_height``, the box is also shifted vertically to
+    stay on the page.
     """
     fs = font_size
     kind, rect = snap_result.kind, snap_result.rect
     if kind in (SnapKind.BOX, SnapKind.CELL) and rect is not None:
-        left = rect.left() + CELL_PAD
-        width = max(rect.width() - 2 * CELL_PAD, 1.0)
         if rect.height() < SHORT_CELL_RATIO * fs:
             baseline = rect.bottom() - CELL_PAD
         else:
             baseline = rect.top() + CELL_PAD + BASELINE_RATIO * fs
-        return text_rect(left, baseline, width, fs)
-    if kind is SnapKind.UNDERLINE and rect is not None:
-        left = rect.left() + CELL_PAD
-        width = max(min(default_width, rect.right() - left), 1.0)
-        return text_rect(left, rect.bottom() - CELL_PAD, width, fs)
-    left = click.x()
-    width = min(default_width, max(page_width - left, min(default_width, MIN_TEXT_WIDTH)))
-    if left + width > page_width:
-        left = max(0.0, page_width - width)
-    return text_rect(left, click.y() + CLICK_BASELINE_RATIO * fs, width, fs)
+        out = _within_width(
+            rect.left() + CELL_PAD, rect.right() - CELL_PAD, baseline, fs, page_width
+        )
+    elif kind is SnapKind.UNDERLINE and rect is not None:
+        left = max(rect.left(), 0.0) + CELL_PAD
+        right = min(left + default_width, rect.right())
+        out = _within_width(left, right, rect.bottom() - CELL_PAD, fs, page_width)
+    else:
+        left = click.x()
+        width = min(default_width, max(page_width - left, min(default_width, MIN_TEXT_WIDTH)))
+        if left + width > page_width:
+            left = max(0.0, page_width - width)
+        out = text_rect(left, click.y() + CLICK_BASELINE_RATIO * fs, width, fs)
+    if page_height is not None and out.height() <= page_height:
+        out.translate(0.0, max(0.0, -out.top()) - max(0.0, out.bottom() - page_height))
+    return out
+
+
+def _within_width(
+    left: float, right: float, baseline: float, fs: float, page_width: float
+) -> QRectF:
+    left = min(max(left, 0.0), max(page_width - 1.0, 0.0))
+    right = min(right, page_width)
+    return text_rect(left, baseline, max(right - left, 1.0), fs)
 
 
 def stamp_placement(

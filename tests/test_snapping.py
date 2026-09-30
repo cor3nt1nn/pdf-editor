@@ -41,6 +41,8 @@ SCAN_BUDGET = 0.100
 SNAP_BUDGET = 0.200
 FS = 11.0
 PAGE_W = A4[0]
+#: pymupdf.open().new_page() default size.
+A4_LETTER_W, A4_LETTER_H = 595.0, 842.0
 
 needs_symbol_fonts = pytest.mark.skipif(
     not SYMBOL_FONTS_AVAILABLE, reason="MS Gothic / Segoe UI Symbol not installed"
@@ -140,7 +142,8 @@ def test_scan_ignores_annotation_text(tmp_path):
     doc = pymupdf.open()
     page = doc.new_page()
     page.add_freetext_annot(pymupdf.Rect(100, 100, 200, 130), "☐ ☐", fontsize=12)
-    assert snapping.scan_page(page) == PageShapes(boxes=(), h_segments=(), v_segments=())
+    s = snapping.scan_page(page)
+    assert s == PageShapes(page_size=(A4_LETTER_W, A4_LETTER_H))
     doc.close()
 
 
@@ -407,14 +410,17 @@ def test_page_shapes_cache(word_doc, tmp_path):
     rotated = word_doc.page_shapes(0)
     assert rotated is not first and rotated.boxes != first.boxes
     word_doc.set_page_rotation(0, 0)
-    assert word_doc.page_shapes(0) is first  # cached by (page, rotation)
-    # Annotations are not part of the scan: adding one keeps the cache.
+    back = word_doc.page_shapes(0)
+    assert back is not rotated and back == first  # page_changed drops the page's entry
+    # Annotation appearances are not part of the scan, but page_changed drops the cache.
     spec = AnnotSpec(0, AnnotKind.TEXT, "hello", FS, (0, 0, 0), QRectF(300, 600, 100, 16))
     word_doc.add_annot(spec)
-    assert word_doc.page_shapes(0) is first
+    fresh = word_doc.page_shapes(0)
+    assert fresh is not back and fresh == first
+    assert word_doc.page_shapes(0) is fresh
     word_doc.structure_changed.emit()
     again = word_doc.page_shapes(0)
-    assert again is not first and again == first
+    assert again is not fresh and again == first
     word_doc.save_as(tmp_path / "saved.pdf")  # reloaded
     assert word_doc.page_shapes(0) is not again
     assert word_doc.page_shapes(0) == first
