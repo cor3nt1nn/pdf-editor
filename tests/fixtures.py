@@ -613,3 +613,83 @@ def make_square_form_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- FreeText annotations (M3) ----------------------------------------------------
+#: /NM, text and y-down rect of our own FreeText on page 1 of :func:`make_annotated_pdf`.
+ANNOT_TEXT_NAME = "0f7c1c2e-6a57-4d0e-9b1a-3c2f5e8d9a01"
+ANNOT_TEXT = "Élève : é à ç €"
+ANNOT_TEXT_RECT: Rect4 = (100, 100, 300, 116)
+#: /NM and y-down rect of the ✓ stamp (ZapfDingbats "4", 10.8 pt) on page 1.
+ANNOT_STAMP_NAME = "6d1f0b53-2c9e-4f7a-8e44-0b7d9f1a2c33"
+ANNOT_STAMP_RECT: Rect4 = (100, 150, 112, 162)
+#: Adobe-style FreeText (no /NM, no /AP, /DA /Arial, /DS, /RC) on page 1.
+FOREIGN_TEXT = "Adobe style é"
+FOREIGN_RECT: Rect4 = (100, 200, 300, 230)
+FOREIGN_COLOR = (0.0, 0.0, 1.0)
+FOREIGN_SIZE = 12.0
+#: Hidden FreeText (/F 6) on page 1: never listed.
+HIDDEN_ANNOT_NAME = "hidden-freetext"
+HIDDEN_RECT: Rect4 = (100, 250, 300, 270)
+HIGHLIGHT_RECT: Rect4 = (100, 300, 300, 320)
+ANNOT_WIDGET_NAME = "champ"
+#: /NM, text and page-space rect of the FreeText on page 2 (/Rotate 90, created rotate=90).
+ROTATED_ANNOT_NAME = "9a3e5b7c-1d2f-4e6a-8b0c-2d4f6a8c0e12"
+ROTATED_ANNOT_TEXT = "Rotated text"
+ROTATED_ANNOT_RECT: Rect4 = (100, 100, 300, 116)
+
+
+def make_annotated_pdf(path: Path) -> Path:
+    """Two A4 pages. Page 1: our FreeText (accents, uuid /NM), a ✓ stamp, a foreign
+    Adobe-style FreeText, a hidden FreeText, a Highlight and a text widget. Page 2
+    (/Rotate 90): a FreeText created upright (rotate=90) at ``ROTATED_ANNOT_RECT``."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    page.insert_text((72, 60), "Annotated", fontsize=14)
+
+    def ours(p: pymupdf.Page, rect: Rect4, text: str, name: str, **kw) -> int:
+        a = p.add_freetext_annot(pymupdf.Rect(rect), text, border_width=0, **kw)
+        doc.xref_set_key(a.xref, "NM", pymupdf.get_pdf_str(name))
+        doc.xref_set_key(a.xref, "CL", "null")
+        return a.xref
+
+    ours(page, ANNOT_TEXT_RECT, ANNOT_TEXT, ANNOT_TEXT_NAME, fontsize=11, fontname="helv")
+    ours(page, ANNOT_STAMP_RECT, "4", ANNOT_STAMP_NAME, fontsize=10.8, fontname="zadb")
+    hidden = ours(page, HIDDEN_RECT, "hidden", HIDDEN_ANNOT_NAME, fontsize=11, fontname="helv")
+    doc.xref_set_key(hidden, "F", "6")
+    page.add_highlight_annot(pymupdf.Rect(HIGHLIGHT_RECT))
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = ANNOT_WIDGET_NAME
+    w.rect = pymupdf.Rect(100, 350, 300, 370)
+    page.add_widget(w)
+
+    page_ref = doc.page_xref(0)
+    foreign = doc.get_new_xref()
+    r, g, b = FOREIGN_COLOR
+    doc.update_object(
+        foreign,
+        f"<</Type/Annot/Subtype/FreeText/Rect{_pdf_rect(FOREIGN_RECT)}/P {page_ref} 0 R/F 4"
+        f"/Contents{pymupdf.get_pdf_str(FOREIGN_TEXT)}"
+        f"/DA({r:g} {g:g} {b:g} rg /Arial {FOREIGN_SIZE:g} Tf)"
+        f"/DS(font: Arial {FOREIGN_SIZE:g}pt; color:#0000FF)"
+        f"/RC(<body><p>Adobe style</p></body>)>>",
+    )
+    annots = doc.xref_get_key(page_ref, "Annots")[1].strip()
+    doc.xref_set_key(page_ref, "Annots", annots[:-1] + f" {foreign} 0 R]")
+
+    page2 = doc.new_page(width=A4[0], height=A4[1])
+    page2.set_rotation(90)
+    unrotated = (pymupdf.Rect(ROTATED_ANNOT_RECT) * page2.derotation_matrix).normalize()
+    ours(
+        page2,
+        tuple(unrotated),
+        ROTATED_ANNOT_TEXT,
+        ROTATED_ANNOT_NAME,
+        fontsize=11,
+        fontname="helv",
+        rotate=90,
+    )
+    doc.save(path)
+    doc.close()
+    return path

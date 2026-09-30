@@ -23,6 +23,8 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
+from pdfeditor.core import annotations
+from pdfeditor.core.annotations import AnnotInfo, AnnotSpec
 from pdfeditor.core.forms import (
     FieldKind,
     WidgetInfo,
@@ -79,6 +81,10 @@ class FieldError(DocumentError):
     """A form field could not be found (anymore) or cannot hold the given value."""
 
 
+class AnnotError(DocumentError):
+    """An annotation could not be found (anymore), created or changed."""
+
+
 class PdfDocument(QObject):
     """Qt-facing wrapper around a PyMuPDF document."""
 
@@ -117,8 +123,10 @@ class PdfDocument(QObject):
         self._page_count = int(fitz_doc.page_count)
         self._size_cache: dict[int, QSizeF] = {}
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
+        self._annot_cache: dict[int, list[AnnotInfo]] = {}
         self._is_form = False
         self._can_fill_forms = False
+        self._can_annotate = False
         self._xfa_kind = XfaKind.NONE
         self._form_edited = False
         self._read_form_state()
@@ -126,6 +134,7 @@ class PdfDocument(QObject):
         self.page_changed.connect(self._on_page_changed)
         self.structure_changed.connect(self._on_structure_changed)
         self.path_changed.connect(self._clear_widget_cache)
+        self.path_changed.connect(self._clear_annot_cache)
         self.reloaded.connect(self._on_reloaded)
 
     # -- opening -----------------------------------------------------------
@@ -249,6 +258,14 @@ class PdfDocument(QObject):
         return self._can_fill_forms
 
     @property
+    def can_annotate(self) -> bool:
+        """The permissions allow adding and changing annotations (text, stamps).
+
+        ``permissions & PDF_PERM_ANNOTATE`` (computed on open and after each reload).
+        """
+        return self._can_annotate
+
+    @property
     def xfa_kind(self) -> XfaKind:
         """XFA flavour of the form (computed on open, after each reload and by
         :meth:`strip_xfa`)."""
@@ -271,7 +288,7 @@ class PdfDocument(QObject):
         with self.lock:
             doc = self._doc
             if doc is None:
-                self._is_form = self._can_fill_forms = False
+                self._is_form = self._can_fill_forms = self._can_annotate = False
                 self._xfa_kind = XfaKind.NONE
                 return
             self._is_form = bool(doc.is_form_pdf)
@@ -282,6 +299,7 @@ class PdfDocument(QObject):
                 self._xfa_kind = XfaKind.NONE
             perms = int(doc.permissions)
         self._can_fill_forms = bool(perms & (pymupdf.PDF_PERM_FORM | pymupdf.PDF_PERM_ANNOTATE))
+        self._can_annotate = bool(perms & pymupdf.PDF_PERM_ANNOTATE)
 
     @property
     def was_repaired(self) -> bool:
@@ -432,8 +450,105 @@ class PdfDocument(QObject):
     def _clear_widget_cache(self, *_args: object) -> None:
         self._widget_cache.clear()
 
+    # -- annotations (FreeText text boxes and stamps) ----------------------
+    def annots(self, i: int) -> list[AnnotInfo]:
+        """Visible FreeText annotations of page ``i`` (in /Annots order), cached like
+        :meth:`widgets` (same drop rules).
+
+        Reading gives a /NM to FreeText annotations lacking a unique one (a silent
+        document change, no signal): identity is ``(page, name)``, never the xref.
+        """
+        cached = self._annot_cache.get(i)
+        if cached is None:
+            self._check_index(i)
+            with self.lock:
+                cached = annotations.read_annots(self.fitz, i)
+            self._annot_cache[i] = cached
+        return list(cached)
+
+    def annot(self, page: int, name: str) -> AnnotInfo | None:
+        """The visible FreeText annotation ``name`` on ``page``, or None."""
+        return next((a for a in self.annots(page) if a.name == name), None)
+
+    def _check_annotate(self) -> None:
+        if not self._can_annotate:
+            raise AnnotError("annotations are not permitted by this document")
+
+    def add_annot(self, spec: AnnotSpec, *, fit_height: bool = False) -> AnnotInfo:
+        """Create a FreeText annotation (``spec.name`` "" = new uuid4). Emits page_changed.
+
+        ``fit_height``: a text box's height then hugs its wrapped text; otherwise
+        ``spec.rect`` is used as is. Raises :class:`AnnotError`.
+        """
+        self._check_index(spec.page)
+        self._check_annotate()
+        with self.lock:
+            try:
+                info = annotations.create_annot(self.fitz, spec.page, spec, fit_height=fit_height)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise AnnotError(str(exc)) from exc
+        self.page_changed.emit(spec.page)
+        return info
+
+    def update_annot(
+        self,
+        page: int,
+        name: str,
+        *,
+        text: str | None = None,
+        font_size: float | None = None,
+        color: tuple[float, float, float] | None = None,
+        rect: QRectF | None = None,
+        fit_height: bool = False,
+    ) -> AnnotInfo:
+        """Change annotation ``name`` on ``page`` (see :func:`annotations.update_annot`;
+        ``rect`` in page space) and return its new snapshot. Emits page_changed.
+
+        Raises :class:`AnnotError` if it is gone or cannot be changed.
+        """
+        self._check_index(page)
+        self._check_annotate()
+        with self.lock:
+            try:
+                info = annotations.update_annot(
+                    self.fitz,
+                    page,
+                    name,
+                    text=text,
+                    font_size=font_size,
+                    color=color,
+                    rect=rect,
+                    fit_height=fit_height,
+                )
+            except LookupError as exc:
+                raise AnnotError(f"annotation {name!r} not found on page {page}") from exc
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise AnnotError(str(exc)) from exc
+        self.page_changed.emit(page)
+        return info
+
+    def delete_annot(self, page: int, name: str) -> None:
+        """Delete annotation ``name`` on ``page``. Emits page_changed.
+
+        Raises :class:`AnnotError` if it is gone.
+        """
+        self._check_index(page)
+        self._check_annotate()
+        with self.lock:
+            try:
+                deleted = annotations.delete_annot(self.fitz, page, name)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise AnnotError(str(exc)) from exc
+        if not deleted:
+            raise AnnotError(f"annotation {name!r} not found on page {page}")
+        self.page_changed.emit(page)
+
+    def _clear_annot_cache(self, *_args: object) -> None:
+        self._annot_cache.clear()
+
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
+        self._annot_cache.clear()
         self._read_form_state()
 
     def render(self, i: int, scale: float, clip: QRectF | None = None) -> QImage:
@@ -524,6 +639,7 @@ class PdfDocument(QObject):
                         # garbage=3 renumbers the in-memory objects: cached xrefs are
                         # stale even if writing the file (or the reload) fails.
                         self._widget_cache.clear()
+                        self._annot_cache.clear()
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise SaveError(str(exc)) from exc
         try:
@@ -572,18 +688,21 @@ class PdfDocument(QObject):
         self._page_count = 0
         self._size_cache.clear()
         self._widget_cache.clear()
-        self._is_form = self._can_fill_forms = self._form_edited = False
+        self._annot_cache.clear()
+        self._is_form = self._can_fill_forms = self._can_annotate = self._form_edited = False
         self._xfa_kind = XfaKind.NONE
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
         self._widget_cache.pop(i, None)
+        self._annot_cache.pop(i, None)
 
     def _on_structure_changed(self) -> None:
         with self.lock:
             self._page_count = int(self._doc.page_count) if self._doc is not None else 0
         self._size_cache.clear()
         self._widget_cache.clear()
+        self._annot_cache.clear()
 
 
 def pdf_library_versions() -> list[tuple[str, str]]:

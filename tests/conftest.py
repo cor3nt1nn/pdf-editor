@@ -97,3 +97,8 @@ def many_fields_pdf(tmp_path):
 @pytest.fixture
 def odd_widgets_pdf(tmp_path):
     return fixtures.make_odd_widgets_pdf(tmp_path / "odd_widgets.pdf")
+
+
+@pytest.fixture
+def annotated_pdf(tmp_path):
+    return fixtures.make_annotated_pdf(tmp_path / "annotated.pdf")
