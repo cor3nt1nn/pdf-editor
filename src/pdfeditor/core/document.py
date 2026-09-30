@@ -26,10 +26,13 @@ from PySide6.QtGui import QImage
 from pdfeditor.core.forms import (
     FieldKind,
     WidgetInfo,
+    XfaKind,
+    detect_xfa,
     read_widgets,
     resolve_widget,
     set_button_state,
     set_text_value,
+    strip_xfa,
     widget_kind,
 )
 from pdfeditor.core.geometry import fitz_from_qrect
@@ -115,6 +118,7 @@ class PdfDocument(QObject):
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
         self._is_form = False
         self._can_fill_forms = False
+        self._xfa_kind = XfaKind.NONE
         self._form_edited = False
         self._read_form_state()
         # Connected first so that other slots see the refreshed caches.
@@ -243,13 +247,38 @@ class PdfDocument(QObject):
         """
         return self._can_fill_forms
 
+    @property
+    def xfa_kind(self) -> XfaKind:
+        """XFA flavour of the form (computed on open, after each reload and by
+        :meth:`strip_xfa`)."""
+        return self._xfa_kind
+
+    def strip_xfa(self) -> bool:
+        """Remove the /XFA entry so viewers use the AcroForm fields; True if one was removed.
+
+        Done at save time when a static XFA form was edited (the XFA datasets would
+        otherwise keep the old values in XFA-aware viewers). Not undoable.
+        """
+        with self.lock:
+            removed = strip_xfa(self.fitz) is not None
+            self._xfa_kind = detect_xfa(self.fitz)
+        if removed:
+            log.info("removed XFA from %s", self._path)
+        return removed
+
     def _read_form_state(self) -> None:
         with self.lock:
             doc = self._doc
             if doc is None:
                 self._is_form = self._can_fill_forms = False
+                self._xfa_kind = XfaKind.NONE
                 return
             self._is_form = bool(doc.is_form_pdf)
+            try:
+                self._xfa_kind = detect_xfa(doc)
+            except Exception:  # malformed AcroForm: treat as plain PDF
+                log.warning("could not inspect XFA", exc_info=True)
+                self._xfa_kind = XfaKind.NONE
             perms = int(doc.permissions)
         self._can_fill_forms = bool(perms & (pymupdf.PDF_PERM_FORM | pymupdf.PDF_PERM_ANNOTATE))
 
@@ -322,7 +351,12 @@ class PdfDocument(QObject):
 
     @property
     def form_edited(self) -> bool:
-        """A form field value was set (by :meth:`set_field_value`) since opening."""
+        """A form field value was set (by :meth:`set_field_value`) since opening.
+
+        Not reset by saves (only by :meth:`close`): it means "this session filled the
+        form". The only save-time consumer, stripping static XFA, is a no-op once the XFA
+        is gone (``xfa_kind`` is then ``NONE``).
+        """
         return self._form_edited
 
     def set_field_value(
@@ -514,6 +548,7 @@ class PdfDocument(QObject):
         self._size_cache.clear()
         self._widget_cache.clear()
         self._is_form = self._can_fill_forms = self._form_edited = False
+        self._xfa_kind = XfaKind.NONE
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)

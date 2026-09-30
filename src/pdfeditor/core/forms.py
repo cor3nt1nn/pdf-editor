@@ -223,6 +223,69 @@ def acroform_xref(fitz_doc: pymupdf.Document) -> int:
     return _ref(fitz_doc, fitz_doc.pdf_catalog(), "AcroForm")
 
 
+# -- XFA -------------------------------------------------------------------
+_DYNAMIC_RENDER = re.compile(rb"<dynamicRender>\s*required\s*</dynamicRender>")
+_XFA_PACKET = re.compile(r"\(([^)]*)\)\s*(\d+)\s+\d+\s+R")
+
+
+def _xfa_streams(doc: pymupdf.Document, value: tuple[str, str]) -> list[bytes]:
+    """Streams holding the XFA config: the ``config`` packets of an /XFA array (every
+    packet if none is named so), or the single /XFA stream."""
+    kind, raw = value
+    xrefs: list[int] = []
+    if kind == "array":
+        packets = _XFA_PACKET.findall(raw)
+        xrefs = [int(x) for name, x in packets if name == "config"]
+        xrefs = xrefs or [int(x) for _name, x in packets]
+    elif kind == "xref":
+        m = _REF.match(raw)
+        xrefs = [int(m.group(1))] if m else []
+    out: list[bytes] = []
+    for x in xrefs:
+        try:
+            if doc.xref_is_stream(x):
+                out.append(doc.xref_stream(x) or b"")
+        except Exception:  # unreadable packet: ignore
+            log.warning("unreadable XFA packet xref %s", x, exc_info=True)
+    return out
+
+
+def detect_xfa(fitz_doc: pymupdf.Document) -> XfaKind:
+    """Classify the document's XFA forms.
+
+    ``NONE``: no /AcroForm /XFA. ``DYNAMIC``: the config says
+    ``<dynamicRender>required</dynamicRender>``, or there are no AcroForm fields (nothing
+    to fill without an XFA engine). ``STATIC``: XFA over a usable AcroForm.
+    """
+    value = _key(fitz_doc, fitz_doc.pdf_catalog(), "AcroForm/XFA")
+    if value[0] == "null":
+        return XfaKind.NONE
+    if any(_DYNAMIC_RENDER.search(s) for s in _xfa_streams(fitz_doc, value)):
+        return XfaKind.DYNAMIC
+    if not fitz_doc.is_form_pdf:  # False (no AcroForm) or 0 fields
+        return XfaKind.DYNAMIC
+    return XfaKind.STATIC
+
+
+def strip_xfa(fitz_doc: pymupdf.Document) -> str | None:
+    """Remove /XFA from the AcroForm; returns its previous raw value, or None if absent.
+
+    With an indirect AcroForm the key is set on the AcroForm object itself: the path form
+    ``xref_set_key(catalog, "AcroForm/XFA", "null")`` writes a literal
+    ``fitz: replace me!`` through the reference (PyMuPDF 1.28 bug, F12).
+    """
+    catalog = fitz_doc.pdf_catalog()
+    kind, value = _key(fitz_doc, catalog, "AcroForm/XFA")
+    if kind == "null":
+        return None
+    acro = acroform_xref(fitz_doc)
+    if acro:
+        fitz_doc.xref_set_key(acro, "XFA", "null")
+    else:
+        fitz_doc.xref_set_key(catalog, "AcroForm/XFA", "null")
+    return value
+
+
 # -- reading ---------------------------------------------------------------
 def _choices(widget: pymupdf.Widget) -> tuple[tuple[str, str], ...]:
     out: list[tuple[str, str]] = []

@@ -10,6 +10,7 @@ from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
+from pdfeditor.core.forms import XfaKind
 from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,7 @@ class DocumentView(QWidget):
         """Save in place. Raises SaveError."""
         if self._document is None:
             return
+        self._prepare_save(self._document)
         self._document.save()
         self.undo_stack.setClean()
 
@@ -78,8 +80,19 @@ class DocumentView(QWidget):
         """Save under a new path and continue editing it. Raises SaveError."""
         if self._document is None:
             return
+        self._prepare_save(self._document)
         self._document.save_as(path)
         self.undo_stack.setClean()
+
+    @staticmethod
+    def _prepare_save(document: PdfDocument) -> None:
+        """Document changes that belong to every save (Save and Save As).
+
+        A filled static XFA form loses its /XFA: XFA-aware viewers would otherwise show
+        the stale XFA datasets instead of the AcroForm values just entered.
+        """
+        if document.xfa_kind is XfaKind.STATIC and document.form_edited:
+            document.strip_xfa()
 
     def shutdown(self) -> None:
         """Stop background rendering and close the document (application exit)."""

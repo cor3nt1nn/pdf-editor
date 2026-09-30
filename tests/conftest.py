@@ -77,3 +77,13 @@ def lo_form_encrypted_pdf(tmp_path):
 @pytest.fixture
 def owner_locked_pdf(tmp_path):
     return fixtures.make_owner_locked_pdf(tmp_path / "owner_locked.pdf")
+
+
+@pytest.fixture
+def static_xfa_pdf(tmp_path):
+    return fixtures.make_static_xfa_pdf(tmp_path / "static_xfa.pdf")
+
+
+@pytest.fixture
+def dynamic_xfa_pdf(tmp_path):
+    return fixtures.make_dynamic_xfa_pdf(tmp_path / "dynamic_xfa.pdf")

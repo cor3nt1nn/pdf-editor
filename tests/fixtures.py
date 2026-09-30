@@ -356,3 +356,101 @@ def make_owner_locked_pdf(path: Path) -> Path:
     )
     doc.close()
     return path
+
+
+XFA_FIELD_NAME = "topmostSubform[0].Page1[0].Nom[0]"
+
+
+def _xfa_config(render: str) -> bytes:
+    return (
+        '<config xmlns="http://www.xfa.org/schema/xci/3.1/"><present><pdf>'
+        "<version>1.7</version></pdf></present><acrobat><acrobat7>"
+        f"<dynamicRender>{render}</dynamicRender></acrobat7></acrobat></config>"
+    ).encode()
+
+
+_XFA_TEMPLATE = (
+    b'<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">'
+    b'<subform name="topmostSubform"><pageSet/></subform></template>'
+)
+
+
+def _stream_obj(doc: pymupdf.Document, data: bytes) -> int:
+    x = doc.get_new_xref()
+    doc.update_object(x, "<<>>")
+    doc.update_stream(x, data)
+    return x
+
+
+def make_static_xfa_pdf(path: Path) -> Path:
+    """Static XFA (dynamicRender forbidden) over one AcroForm text field ``XFA_FIELD_NAME``.
+
+    Indirect /AcroForm with /XFA [(config) c 0 R (template) t 0 R (datasets) d 0 R].
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    page.insert_text((72, 72), "Static XFA form", fontsize=14)
+    helv = doc.get_new_xref()
+    doc.update_object(helv, "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>")
+    field = doc.get_new_xref()
+    rect = _pdf_rect((72, 100, 300, 114))
+    doc.update_object(
+        field,
+        f"<</Type/Annot/Subtype/Widget/P {doc.page_xref(0)} 0 R/Rect{rect}"
+        f"/FT/Tx/F 4/DA(/Helv 8 Tf 0 g)/T({XFA_FIELD_NAME})>>",
+    )
+    doc.xref_set_key(doc.page_xref(0), "Annots", f"[{field} 0 R]")
+    config = _stream_obj(doc, _xfa_config("forbidden"))
+    template = _stream_obj(doc, _XFA_TEMPLATE)
+    datasets = _stream_obj(
+        doc,
+        b'<xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><xfa:data>'
+        b"<topmostSubform><Nom>ancien</Nom></topmostSubform></xfa:data></xfa:datasets>",
+    )
+    acro = doc.get_new_xref()
+    doc.update_object(
+        acro,
+        f"<</Fields[{field} 0 R]/DA(/Helv 0 Tf 0 g)/DR<</Font<</Helv {helv} 0 R>>>>"
+        f"/XFA[(config) {config} 0 R (template) {template} 0 R (datasets) {datasets} 0 R]>>",
+    )
+    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", f"{acro} 0 R")
+    doc.save(path, deflate=True)
+    doc.close()
+    return path
+
+
+def make_dynamic_xfa_pdf(path: Path, single_stream: bool = False) -> Path:
+    """Dynamic XFA: a "Please wait..." page, no AcroForm fields, /Extensions /ADBE.
+
+    /XFA is a packet array (config dynamicRender required) or, with ``single_stream``,
+    one XDP stream.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    page.insert_text(
+        (72, 72),
+        "Please wait... If this message is not eventually replaced by the proper contents"
+        " of the document, your PDF viewer may not be able to display this type of document.",
+        fontsize=8,
+    )
+    if single_stream:
+        xdp = _stream_obj(
+            doc,
+            b'<?xml version="1.0"?><xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">'
+            + _xfa_config("required")
+            + _XFA_TEMPLATE
+            + b"</xdp:xdp>",
+        )
+        xfa = f"{xdp} 0 R"
+    else:
+        config = _stream_obj(doc, _xfa_config("required"))
+        template = _stream_obj(doc, _XFA_TEMPLATE)
+        xfa = f"[(config) {config} 0 R (template) {template} 0 R]"
+    acro = doc.get_new_xref()
+    doc.update_object(acro, f"<</Fields[]/XFA {xfa}>>")
+    catalog = doc.pdf_catalog()
+    doc.xref_set_key(catalog, "AcroForm", f"{acro} 0 R")
+    doc.xref_set_key(catalog, "Extensions", "<</ADBE<</BaseVersion/1.7/ExtensionLevel 8>>>>")
+    doc.save(path, deflate=True)
+    doc.close()
+    return path
