@@ -102,3 +102,18 @@ def odd_widgets_pdf(tmp_path):
 @pytest.fixture
 def annotated_pdf(tmp_path):
     return fixtures.make_annotated_pdf(tmp_path / "annotated.pdf")
+
+
+@pytest.fixture
+def word_form_pdf(tmp_path):
+    return fixtures.make_word_form_pdf(tmp_path / "word_form.pdf")
+
+
+@pytest.fixture
+def word_form_rotated_pdf(tmp_path):
+    return fixtures.make_word_form_pdf(tmp_path / "word_form_rotated.pdf", rotate=90)
+
+
+@pytest.fixture
+def print_pdf(tmp_path):
+    return fixtures.make_print_pdf(tmp_path / "print.pdf")

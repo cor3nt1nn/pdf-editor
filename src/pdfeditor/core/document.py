@@ -23,7 +23,7 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations
+from pdfeditor.core import annotations, snapping
 from pdfeditor.core.annotations import AnnotInfo, AnnotSpec
 from pdfeditor.core.forms import (
     FieldKind,
@@ -39,6 +39,7 @@ from pdfeditor.core.forms import (
     widget_kind,
 )
 from pdfeditor.core.geometry import fitz_from_qrect
+from pdfeditor.core.snapping import PageShapes
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +125,9 @@ class PdfDocument(QObject):
         self._size_cache: dict[int, QSizeF] = {}
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
         self._annot_cache: dict[int, list[AnnotInfo]] = {}
+        # Snapping shapes by (page, rotation); page content never changes in place.
+        self._shapes_cache: dict[tuple[int, int], PageShapes] = {}
+        self._rotation_cache: dict[int, int] = {}
         self._is_form = False
         self._can_fill_forms = False
         self._can_annotate = False
@@ -546,9 +550,38 @@ class PdfDocument(QObject):
     def _clear_annot_cache(self, *_args: object) -> None:
         self._annot_cache.clear()
 
+    # -- snapping ------------------------------------------------------------
+    def page_shapes(self, i: int) -> PageShapes:
+        """Snapping targets of page ``i``'s content (cells, rules, checkboxes) in page
+        space; see :mod:`pdfeditor.core.snapping`.
+
+        Cached by (page, rotation) and dropped on ``structure_changed``, ``reloaded`` and
+        ``close()``. Annotations and widgets are not part of the scan, so annotation and
+        field edits keep the cache. A page that cannot be scanned has no shapes.
+        """
+        self._check_index(i)
+        with self.lock:
+            rotation = self._rotation_cache.get(i)
+            if rotation is None:
+                rotation = self._rotation_cache[i] = int(self.fitz[i].rotation)
+            cached = self._shapes_cache.get((i, rotation))
+            if cached is None:
+                try:
+                    cached = snapping.scan_page(self.fitz[i])
+                except Exception:  # MuPDF raises FzError* (not RuntimeError)
+                    log.warning("could not scan page %d for snapping", i, exc_info=True)
+                    cached = snapping.EMPTY_SHAPES
+                self._shapes_cache[(i, rotation)] = cached
+        return cached
+
+    def _clear_shapes_cache(self) -> None:
+        self._shapes_cache.clear()
+        self._rotation_cache.clear()
+
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
         self._annot_cache.clear()
+        self._clear_shapes_cache()
         self._read_form_state()
 
     def render(self, i: int, scale: float, clip: QRectF | None = None) -> QImage:
@@ -689,6 +722,7 @@ class PdfDocument(QObject):
         self._size_cache.clear()
         self._widget_cache.clear()
         self._annot_cache.clear()
+        self._clear_shapes_cache()
         self._is_form = self._can_fill_forms = self._can_annotate = self._form_edited = False
         self._xfa_kind = XfaKind.NONE
 
@@ -696,6 +730,7 @@ class PdfDocument(QObject):
         self._size_cache.pop(i, None)
         self._widget_cache.pop(i, None)
         self._annot_cache.pop(i, None)
+        self._rotation_cache.pop(i, None)
 
     def _on_structure_changed(self) -> None:
         with self.lock:
@@ -703,6 +738,7 @@ class PdfDocument(QObject):
         self._size_cache.clear()
         self._widget_cache.clear()
         self._annot_cache.clear()
+        self._clear_shapes_cache()
 
 
 def pdf_library_versions() -> list[tuple[str, str]]:

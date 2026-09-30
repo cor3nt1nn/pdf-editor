@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pymupdf
@@ -690,6 +691,141 @@ def make_annotated_pdf(path: Path) -> Path:
         fontname="helv",
         rotate=90,
     )
+    doc.save(path)
+    doc.close()
+    return path
+
+
+# -- snapping (M3-T3) ---------------------------------------------------------------
+_FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+MSGOTHIC_PATH = _FONT_DIR / "msgothic.ttc"
+SEGUISYM_PATH = _FONT_DIR / "seguisym.ttf"
+ARIAL_PATH = _FONT_DIR / "arial.ttf"
+#: The ☐ glyph checkboxes of :func:`make_word_form_pdf` need both Windows symbol fonts.
+SYMBOL_FONTS_AVAILABLE = MSGOTHIC_PATH.exists() and SEGUISYM_PATH.exists()
+
+#: Every drawn element of :func:`make_word_form_pdf`, as (x0, y0, x1, y1) in unrotated,
+#: uncropped (mediabox, y-down) coordinates.
+WORD_SHAPES: dict[str, Rect4] = {
+    #: Underline drawn as a thin filled rect (how Word exports a paragraph border).
+    "underline_rect": (110.0, 74.0, 300.0, 74.5),
+    #: Underline drawn as a 0.5 pt stroked line (zero height).
+    "underline_line": (110.0, 100.0, 300.0, 100.0),
+    #: 3 x 2 table; borders are 0.5 pt filled rects centred on WORD_TABLE_X/Y.
+    "table": (72.0, 150.0, 372.0, 210.0),
+    #: Stroked 10 pt and 12 pt checkboxes (0.75 pt).
+    "checkbox_10": (72.0, 250.0, 82.0, 260.0),
+    "checkbox_12": (120.0, 248.0, 132.0, 260.0),
+    #: 12 pt box drawn as four separate lines in one path.
+    "box_lines": (200.0, 250.0, 212.0, 262.0),
+    #: Large stroked area (1 pt).
+    "area": (72.0, 300.0, 500.0, 400.0),
+    #: Grey filled band (no stroke).
+    "band": (72.0, 420.0, 300.0, 440.0),
+}
+WORD_TABLE_X = (72.0, 172.0, 272.0, 372.0)
+WORD_TABLE_Y = (150.0, 180.0, 210.0)
+#: Glyph checkboxes ☐ (U+2610, 12 pt): font name -> text origin (baseline start).
+WORD_GLYPHS: dict[str, tuple[float, float]] = {"msgothic": (72.0, 500.0), "seguisym": (72.0, 530.0)}
+WORD_GLYPH_SIZE = 12.0
+#: Cropbox used with ``make_word_form_pdf(..., cropbox=True)`` (mediabox is A4).
+WORD_CROPBOX: Rect4 = (20.0, 30.0, 575.0, 812.0)
+
+
+def make_word_form_pdf(path: Path, *, rotate: int = 0, cropbox: bool = False) -> Path:
+    """One A4 page looking like a Word export of a flat form (see ``WORD_SHAPES``):
+    Helvetica labels, underlines, a table, stroked and line-drawn checkboxes, a large
+    area, a grey band and (when ``SYMBOL_FONTS_AVAILABLE``) ☐ glyphs from MS Gothic and
+    Segoe UI Symbol. ``rotate`` sets /Rotate, ``cropbox`` sets ``WORD_CROPBOX``."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    for pos, label in (
+        ((72, 72), "Nom :"),
+        ((72, 98), "Ville :"),
+        ((72, 140), "Tableau"),
+        ((86, 259), "Oui"),
+        ((136, 259), "Non"),
+        ((216, 261), "Autre"),
+        ((72, 295), "Observations"),
+    ):
+        page.insert_text(pos, label, fontsize=11, fontname="helv")
+    sh = page.new_shape()
+
+    def thin(rect: Rect4) -> None:
+        sh.draw_rect(pymupdf.Rect(rect))
+        sh.finish(fill=(0, 0, 0), color=None, width=0)
+
+    def stroked(rect: Rect4, width: float) -> None:
+        sh.draw_rect(pymupdf.Rect(rect))
+        sh.finish(color=(0, 0, 0), width=width)
+
+    thin(WORD_SHAPES["underline_rect"])
+    x0, y, x1, _ = WORD_SHAPES["underline_line"]
+    sh.draw_line(pymupdf.Point(x0, y), pymupdf.Point(x1, y))
+    sh.finish(color=(0, 0, 0), width=0.5)
+    tx0, ty0, tx1, ty1 = WORD_SHAPES["table"]
+    for x in WORD_TABLE_X:
+        thin((x - 0.25, ty0 - 0.25, x + 0.25, ty1 + 0.25))
+    for y in WORD_TABLE_Y:
+        thin((tx0 - 0.25, y - 0.25, tx1 + 0.25, y + 0.25))
+    stroked(WORD_SHAPES["checkbox_10"], 0.75)
+    stroked(WORD_SHAPES["checkbox_12"], 0.75)
+    bx0, by0, bx1, by1 = WORD_SHAPES["box_lines"]
+    corners = ((bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1), (bx0, by0))
+    for a, b in zip(corners, corners[1:], strict=False):
+        sh.draw_line(pymupdf.Point(a), pymupdf.Point(b))
+    sh.finish(color=(0, 0, 0), width=0.75)
+    stroked(WORD_SHAPES["area"], 1.0)
+    sh.draw_rect(pymupdf.Rect(WORD_SHAPES["band"]))
+    sh.finish(fill=(0.85, 0.85, 0.85), color=None, width=0)
+    sh.commit()
+    if SYMBOL_FONTS_AVAILABLE:
+        for name, font in (("msgothic", MSGOTHIC_PATH), ("seguisym", SEGUISYM_PATH)):
+            page.insert_text(
+                WORD_GLYPHS[name],
+                "\u2610",
+                fontsize=WORD_GLYPH_SIZE,
+                fontname=name,
+                fontfile=str(font),
+            )
+    if cropbox:
+        page.set_cropbox(pymupdf.Rect(WORD_CROPBOX))
+    if rotate:
+        page.set_rotation(rotate)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+#: The only vector element of :func:`make_print_pdf`: a 0.75 pt stroked line.
+PRINT_LINE: Rect4 = (72.0, 130.0, 400.0, 130.0)
+
+
+def make_print_pdf(path: Path) -> Path:
+    """One A4 page looking like a "Microsoft Print to PDF" output: text in an embedded
+    TrueType font (Arial, Helvetica if missing) and one stroked line, no boxes."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    font = {"fontname": "arial", "fontfile": str(ARIAL_PATH)} if ARIAL_PATH.exists() else {}
+    for y, text in ((72, "Formulaire imprimé"), (110, "Nom : Jean Dupont"), (160, "Oui  Non")):
+        page.insert_text((72, y), text, fontsize=11, **font)
+    x0, y, x1, _ = PRINT_LINE
+    page.draw_line(pymupdf.Point(x0, y), pymupdf.Point(x1, y), color=(0, 0, 0), width=0.75)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def make_busy_drawings_pdf(path: Path, n: int = 3000) -> Path:
+    """One A4 page with ``n`` stroked 8 pt squares (50 per row), for scan performance."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    sh = page.new_shape()
+    for i in range(n):
+        x, y = 20 + (i % 50) * 11, 20 + (i // 50) * 13
+        sh.draw_rect(pymupdf.Rect(x, y, x + 8, y + 8))
+        sh.finish(color=(0, 0, 0), width=0.5)
+    sh.commit()
     doc.save(path)
     doc.close()
     return path
