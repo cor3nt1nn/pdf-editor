@@ -11,13 +11,25 @@ from PySide6.QtGui import (
     QAction,
     QActionGroup,
     QCloseEvent,
+    QColor,
     QDragEnterEvent,
     QDropEvent,
+    QIcon,
     QKeySequence,
+    QPainter,
+    QPixmap,
 )
-from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow, QMessageBox, QSpinBox
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QSpinBox,
+    QToolButton,
+)
 
 from pdfeditor.constants import APP_NAME, ZoomMode
+from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired
 from pdfeditor.core.forms import XfaKind
@@ -34,6 +46,9 @@ from pdfeditor.ui.tools.hand_tool import HandTool
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
 log = logging.getLogger(__name__)
+
+#: Range of the toolbar font-size spin box (pt).
+FONT_SIZE_RANGE = (6, 72)
 
 
 def pdf_paths_from_urls(urls) -> list[str]:
@@ -291,6 +306,7 @@ class MainWindow(QMainWindow):
             self.tool_manager.register(tool, action)
         self.tool_manager.tool_changed.connect(self._update_delete_action)
         self.document_view.annot_selection.changed.connect(self._update_delete_action)
+        self.document_view.annot_selection.changed.connect(self._sync_style_widgets)
 
     def _create_menus(self) -> None:
         bar = self.menuBar()
@@ -308,6 +324,7 @@ class MainWindow(QMainWindow):
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_hand_tool)
         self.menu_edit.addAction(self.act_form_tool)
+        self.menu_edit.addSeparator()
         for act in self._annot_actions():
             self.menu_edit.addAction(act)
         self.menu_edit.addAction(self.act_delete_annot)
@@ -364,6 +381,21 @@ class MainWindow(QMainWindow):
         for act in self._annot_actions():
             tb.addAction(act)
         tb.addSeparator()
+        self.font_size_spin = QSpinBox(self)
+        self.font_size_spin.setObjectName("font_size_spin")
+        self.font_size_spin.setRange(*FONT_SIZE_RANGE)
+        self.font_size_spin.setSuffix(self.tr(" pt"))
+        self.font_size_spin.setKeyboardTracking(False)
+        self.font_size_spin.setToolTip(self.tr("Font size"))
+        self.font_size_spin.setAccessibleName(self.tr("Font size"))
+        tb.addWidget(self.font_size_spin)
+        self.color_button = QToolButton(self)
+        self.color_button.setObjectName("color_button")
+        self.color_button.setToolTip(self.tr("Text color"))
+        self.color_button.setAccessibleName(self.tr("Text color"))
+        tb.addWidget(self.color_button)
+        self._show_style(self.settings.annot_font_size, QColor(self.settings.annot_color))
+        tb.addSeparator()
         tb.addAction(self.act_prev_page)
         self.page_spin = QSpinBox(self)
         self.page_spin.setObjectName("page_spin")
@@ -398,6 +430,8 @@ class MainWindow(QMainWindow):
         self.thumbnails.page_requested.connect(pv.scroll_to_page)
         self.document_view.document_changed.connect(self._on_document_changed)
         self.document_view.path_changed.connect(self._on_path_changed)
+        self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
+        self.color_button.clicked.connect(self.choose_text_color)
 
     # -- state sync -------------------------------------------------------------
     def _update_title(self) -> None:
@@ -430,6 +464,8 @@ class MainWindow(QMainWindow):
         can_annotate = self._can_annotate()
         for act in self._annot_actions():
             act.setEnabled(can_annotate)
+        self.font_size_spin.setEnabled(can_annotate)
+        self.color_button.setEnabled(can_annotate)
         self._update_delete_action()
         if has_doc:
             cur = self.page_view.current_page
@@ -480,6 +516,66 @@ class MainWindow(QMainWindow):
             and self._active_annot_tool() is not None
             and self.document_view.annot_selection.current is not None
         )
+
+    # -- text style widgets -----------------------------------------------------------
+    def _show_style(self, font_size: float, color: QColor) -> None:
+        """Show ``font_size``/``color`` in the toolbar widgets without applying them."""
+        if not color.isValid():
+            color = QColor(Qt.GlobalColor.black)
+        self.font_size_spin.blockSignals(True)
+        self.font_size_spin.setValue(round(font_size))
+        self.font_size_spin.blockSignals(False)
+        self._color = color
+        self.color_button.setIcon(self._swatch(color))
+
+    def _swatch(self, color: QColor) -> QIcon:
+        size = self.color_button.iconSize()
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setPen(QColor(Qt.GlobalColor.gray))
+        painter.setBrush(color)
+        painter.drawRect(2, 2, size.width() - 5, size.height() - 5)
+        painter.end()
+        return QIcon(pixmap)
+
+    @property
+    def text_color(self) -> QColor:
+        """The colour shown by the toolbar colour button."""
+        return QColor(self._color)
+
+    def _sync_style_widgets(self) -> None:
+        """Show the selected annotation's style, or the defaults without a selection."""
+        current = self.document_view.annot_selection.current
+        font_size = self.settings.annot_font_size
+        color = QColor(self.settings.annot_color)
+        if current is not None:
+            color = QColor.fromRgbF(*current.color)
+            if current.kind is AnnotKind.TEXT:
+                font_size = current.font_size
+        self._show_style(font_size, color)
+
+    def _apply_style(self, font_size: float | None = None, color: QColor | None = None) -> None:
+        rgb = (color.redF(), color.greenF(), color.blueF()) if color is not None else None
+        tool = self._active_annot_tool()
+        if tool is not None:
+            tool.apply_style(font_size=font_size, color=rgb)
+        else:
+            if font_size is not None:
+                self.settings.annot_font_size = float(font_size)
+            if color is not None:
+                self.settings.annot_color = color.name()
+
+    def _on_font_size_changed(self, value: int) -> None:
+        self._apply_style(font_size=float(value))
+
+    def choose_text_color(self) -> None:
+        """Toolbar colour button: pick the text colour (defaults and selection)."""
+        color = dialogs.get_color(self, self.text_color)
+        if color is None:
+            return
+        self._show_style(self.font_size_spin.value(), color)
+        self._apply_style(color=color)
 
     def _can_fill_forms(self) -> bool:
         doc = self.document_view.document

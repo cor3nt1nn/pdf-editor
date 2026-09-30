@@ -6,7 +6,15 @@ import html
 import os
 
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtWidgets import QFileDialog, QInputDialog, QLineEdit, QMessageBox, QWidget
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QColorDialog,
+    QFileDialog,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
+    QWidget,
+)
 
 
 def ask_password(parent: QWidget | None, file_name: str, wrong: bool) -> str | None:
@@ -120,6 +128,14 @@ def confirm_overwrite(parent: QWidget | None, path: str) -> bool:
         QMessageBox.StandardButton.No,
     )
     return answer == QMessageBox.StandardButton.Yes
+
+
+def get_color(parent: QWidget | None, initial: QColor) -> QColor | None:
+    """Text colour picker; ``None`` when cancelled."""
+    color = QColorDialog.getColor(
+        initial, parent, QCoreApplication.translate("Dialogs", "Choose text color")
+    )
+    return color if color.isValid() else None
 
 
 def get_open_path(parent: QWidget | None, directory: str) -> str | None:

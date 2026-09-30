@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import fixtures
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt
+from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtWidgets import QMessageBox, QPlainTextEdit
 
 from pdfeditor.core.annotations import STAMP_CENTRE, AnnotKind
@@ -14,6 +15,7 @@ from pdfeditor.core.commands import (
     EditAnnotCommand,
     RotatePageCommand,
 )
+from pdfeditor.core.settings import Settings
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.main_window import MainWindow
 from pdfeditor.ui.overlays.annot_items import Handle
@@ -427,3 +429,120 @@ def test_settings_defaults(settings) -> None:
     settings.annot_font_size = 14
     settings.stamp_size = 0  # invalid: default
     assert settings.annot_font_size == 14.0 and settings.stamp_size == 12.0
+
+
+# -- M3-T6: text style toolbar widgets ---------------------------------------------------
+
+
+def _select_text(qtbot, w: MainWindow, annotated_pdf):
+    assert w.open_file(str(annotated_pdf))
+    w.act_text_tool.trigger()
+    x0, y0, x1, y1 = fixtures.ANNOT_TEXT_RECT
+    _click(qtbot, w, QPointF((x0 + x1) / 2, (y0 + y1) / 2))
+    current = w.document_view.annot_selection.current
+    assert current is not None and current.name == fixtures.ANNOT_TEXT_NAME
+    return current
+
+
+def test_style_widgets_in_toolbar_and_menu(window) -> None:
+    w = window
+    edit = w.menu_edit.actions()
+    tools = [w.act_hand_tool, w.act_form_tool, *w._annot_actions()]
+    assert all(a in edit for a in (*tools, w.act_delete_annot))
+    assert edit.index(w.act_text_tool) < edit.index(w.act_delete_annot)
+    assert all(a in w.toolbar.actions() for a in tools)
+    assert w.act_delete_annot.shortcut() == QKeySequence(QKeySequence.StandardKey.Delete)
+    assert w.act_text_tool.shortcut().toString() == "T"
+    assert w.act_stamp_dot.shortcut().toString() == "3"
+    spin, button = w.font_size_spin, w.color_button
+    assert w.toolbar.isAncestorOf(spin) and w.toolbar.isAncestorOf(button)
+    assert (spin.minimum(), spin.maximum(), spin.suffix()) == (6, 72, " pt")
+    assert spin.toolTip() == "Font size" and spin.accessibleName() == "Font size"
+    assert button.toolTip() == "Text color" and not button.icon().isNull()
+    assert spin.value() == 11 and w.text_color.name() == "#000000"
+
+
+def test_style_widgets_initialised_from_settings(qtbot, settings) -> None:
+    settings.annot_font_size = 16
+    settings.annot_color = "#0000ff"
+    w = MainWindow(settings)
+    qtbot.addWidget(w)
+    assert w.font_size_spin.value() == 16
+    assert w.text_color.name() == "#0000ff"
+
+
+def test_font_size_spin_edits_selection_and_persists(
+    qtbot, window, annotated_pdf, ini_path
+) -> None:
+    w = window
+    current = _select_text(qtbot, w, annotated_pdf)
+    assert w.font_size_spin.value() == 11
+    w.font_size_spin.setValue(20)
+    assert w.undo_stack.count() == 1
+    cmd = w.undo_stack.command(0)
+    assert isinstance(cmd, EditAnnotCommand) and cmd.text() == "Change text style"
+    edited = w.document_view.document.annot(0, current.name)
+    assert edited.font_size == 20
+    assert edited.rect.height() > current.rect.height()  # refitted
+    w.settings.qsettings.sync()
+    assert Settings(QSettings(str(ini_path), QSettings.Format.IniFormat)).annot_font_size == 20
+
+
+def test_color_button_edits_selection_and_persists(
+    qtbot, window, annotated_pdf, ini_path, monkeypatch
+) -> None:
+    w = window
+    current = _select_text(qtbot, w, annotated_pdf)
+    asked: list[str] = []
+
+    def fake_get_color(parent, initial):
+        asked.append(initial.name())
+        return QColor("#ff0000")
+
+    monkeypatch.setattr(dialogs, "get_color", fake_get_color)
+    qtbot.mouseClick(w.color_button, LEFT)
+    assert asked == ["#000000"]
+    assert w.undo_stack.count() == 1
+    assert isinstance(w.undo_stack.command(0), EditAnnotCommand)
+    assert w.document_view.document.annot(0, current.name).color == (1.0, 0.0, 0.0)
+    assert w.text_color.name() == "#ff0000"
+    w.settings.qsettings.sync()
+    assert Settings(QSettings(str(ini_path), QSettings.Format.IniFormat)).annot_color == "#ff0000"
+    monkeypatch.setattr(dialogs, "get_color", lambda parent, initial: None)  # cancelled
+    qtbot.mouseClick(w.color_button, LEFT)
+    assert w.undo_stack.count() == 1
+
+
+def test_style_widgets_follow_selection(qtbot, window, annotated_pdf) -> None:
+    w = window
+    w.settings.annot_font_size = 30
+    w.settings.annot_color = "#00ff00"
+    _select_text(qtbot, w, annotated_pdf)
+    assert w.font_size_spin.value() == 11 and w.text_color.name() == "#000000"
+    w.document_view.annot_selection.clear()
+    assert w.font_size_spin.value() == 30 and w.text_color.name() == "#00ff00"
+    assert w.undo_stack.count() == 0
+
+
+def test_style_without_annot_tool_only_updates_defaults(
+    qtbot, window, annotated_pdf, monkeypatch
+) -> None:
+    w = window
+    assert w.open_file(str(annotated_pdf))
+    assert w.tool_manager.active_tool.name == "form"  # annotated_pdf has a widget
+    w.font_size_spin.setValue(9)
+    monkeypatch.setattr(dialogs, "get_color", lambda parent, initial: QColor("#123456"))
+    w.color_button.click()
+    assert w.undo_stack.count() == 0
+    assert w.settings.annot_font_size == 9 and w.settings.annot_color == "#123456"
+
+
+def test_style_widgets_disabled_without_document_or_permission(
+    window, simple_pdf, owner_locked_pdf
+) -> None:
+    w = window
+    assert not w.font_size_spin.isEnabled() and not w.color_button.isEnabled()
+    assert w.open_file(str(simple_pdf))
+    assert w.font_size_spin.isEnabled() and w.color_button.isEnabled()
+    assert w.open_file(str(owner_locked_pdf))
+    assert not w.font_size_spin.isEnabled() and not w.color_button.isEnabled()
