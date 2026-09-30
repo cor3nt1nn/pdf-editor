@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
 from pdfeditor.core.forms import XfaKind
+from pdfeditor.ui.banner import InfoBanner
 from pdfeditor.ui.overlays.field_editor import FieldEditorOverlay
 from pdfeditor.ui.overlays.field_items import FieldLayer
 from pdfeditor.ui.page_view import PageView
@@ -28,13 +29,17 @@ class DocumentView(QWidget):
         super().__init__(parent)
         self.undo_stack = QUndoStack(self)
         self.page_view = PageView(parent=self)
+        # Document-level notices (XFA, form permissions) above the pages.
+        self.banner = InfoBanner(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.banner)
         layout.addWidget(self.page_view)
-        #: Form field highlights of the current document (the form tool reuses it).
+        # Form field highlights of the current document (the form tool reuses it).
         self.field_layer = FieldLayer(self.page_view, self)
-        #: The floating form field editor (driven by the form tool, which pushes the
-        #: commands for its ``committed`` values).
+        # The floating form field editor (driven by the form tool, which pushes the
+        # commands for its ``committed`` values).
         self.field_editor = FieldEditorOverlay(self.page_view, parent=self)
         self._document: PdfDocument | None = None
 
@@ -75,6 +80,7 @@ class DocumentView(QWidget):
         old = self._document
         if old is not None:
             old.path_changed.disconnect(self.path_changed)
+            old.reloaded.disconnect(self._refresh_banner)
         # Pending edits were committed by the callers; anything left belongs to the old
         # document and is dropped (its undo stack is being cleared).
         self.field_editor.close()
@@ -82,12 +88,17 @@ class DocumentView(QWidget):
         self._document = document
         if document is not None:
             document.path_changed.connect(self.path_changed)
+            # After the document's own slot (connected at construction): xfa_kind is
+            # already recomputed when the banner is refreshed.
+            document.reloaded.connect(self._refresh_banner)
         self.page_view.set_document(document)
         self.field_layer.set_document(document)  # after the view: its items need PageItems
         self.field_editor.set_document(document)
         if old is not None:
             old.close()
         self.undo_stack.setClean()
+        self.banner.clear()  # a closed banner reappears for the next document
+        self._refresh_banner()
         self.document_changed.emit()
 
     def save(self) -> None:
@@ -98,6 +109,7 @@ class DocumentView(QWidget):
         self._prepare_save(self._document)
         self._document.save()
         self.undo_stack.setClean()
+        self._refresh_banner()  # the save may have stripped the XFA
 
     def save_as(self, path: str) -> None:
         """Save under a new path and continue editing it. Raises SaveError."""
@@ -107,6 +119,44 @@ class DocumentView(QWidget):
         self._prepare_save(self._document)
         self._document.save_as(path)
         self.undo_stack.setClean()
+        self._refresh_banner()
+
+    def banner_message(self) -> tuple[str, str] | None:
+        """(text, kind) the banner should show for the current document, or None."""
+        doc = self._document
+        if doc is None:
+            return None
+        if doc.xfa_kind is XfaKind.DYNAMIC:
+            return (
+                self.tr(
+                    "This form uses dynamic XFA, which cannot be filled here. Open it in "
+                    "Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then "
+                    "fill the printed copy in PDF Editor as a flat form."
+                ),
+                "warning",
+            )
+        if doc.is_form and not doc.can_fill_forms:
+            return (
+                self.tr("Form filling is not permitted by this document’s security settings."),
+                "info",
+            )
+        if doc.xfa_kind is XfaKind.STATIC:
+            return (
+                self.tr(
+                    "This form contains XFA data; saving will convert it to a standard PDF form."
+                ),
+                "info",
+            )
+        return None
+
+    def _refresh_banner(self) -> None:
+        """Show the banner for the current state; a message the user closed stays closed
+        (until the document changes), a message that no longer applies disappears."""
+        message = self.banner_message()
+        if message is None:
+            self.banner.clear()
+        elif message != self.banner.message:
+            self.banner.show_message(*message)
 
     @staticmethod
     def _prepare_save(document: PdfDocument) -> None:

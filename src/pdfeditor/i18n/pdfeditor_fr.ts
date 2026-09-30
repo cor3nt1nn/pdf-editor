@@ -157,6 +157,24 @@ Redémarrer maintenant ?</translation>
     </message>
 </context>
 <context>
+    <name>DocumentView</name>
+    <message>
+        <location filename="../ui/document_view.py" line="132"/>
+        <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
+        <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
+    </message>
+    <message>
+        <location filename="../ui/document_view.py" line="140"/>
+        <source>Form filling is not permitted by this document’s security settings.</source>
+        <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
+    </message>
+    <message>
+        <location filename="../ui/document_view.py" line="146"/>
+        <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
+        <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
+    </message>
+</context>
+<context>
     <name>FormTool</name>
     <message>
         <location filename="../ui/tools/form_tool.py" line="308"/>
@@ -167,6 +185,15 @@ Redémarrer maintenant ?</translation>
         <location filename="../ui/tools/form_tool.py" line="325"/>
         <source>The form field could not be updated.</source>
         <translation>Le champ de formulaire n’a pas pu être mis à jour.</translation>
+    </message>
+</context>
+<context>
+    <name>InfoBanner</name>
+    <message>
+        <location filename="../ui/banner.py" line="51"/>
+        <location filename="../ui/banner.py" line="52"/>
+        <source>Close</source>
+        <translation>Fermer</translation>
     </message>
 </context>
 <context>

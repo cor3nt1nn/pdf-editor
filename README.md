@@ -3,8 +3,9 @@
 Free, open-source (AGPL-3.0) PDF editor for Windows, bilingual French/English.
 
 Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stamps, sign with an
-image of a handwritten signature. Milestone 1 (current) is a fast, crisp PDF viewer with
-page rotation, undo/redo and saving. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+image of a handwritten signature. Milestone 1 is a fast, crisp PDF viewer with page rotation,
+undo/redo and saving; Milestone 2 (current) adds filling of standard PDF forms (AcroForm).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/M2_PLAN.md](docs/M2_PLAN.md).
 
 ## Requirements
 
@@ -70,6 +71,57 @@ Run `uv run pdfeditor` and check:
     are in French (`uv run pdfeditor --lang fr` forces it for one run).
 12. Help ▸ About shows the version, the AGPL notice and library versions.
 13. Window size/position and zoom mode are restored on the next start.
+
+## Filling forms (Milestone 2)
+
+A PDF with fillable fields opens with the **Form Tool** active (Edit ▸ Form Tool, or the
+toolbar); other PDFs open with the hand tool.
+
+- **Text fields**: click to type. Enter (single line) or Ctrl+Enter (multi-line) validates,
+  Escape cancels, clicking elsewhere validates.
+- **Checkboxes and radio buttons**: click to toggle (or Space when focused with Tab). Their
+  original look is kept.
+- **Drop-down and list boxes**: click and choose a value (list boxes are single-select).
+- **Tab / Shift+Tab** move to the next / previous field in reading order (top to bottom, left
+  to right, page after page), whatever order the file lists its fields in.
+- **View ▸ Highlight Form Fields** shows or hides the blue tint over fillable fields (the
+  choice is remembered).
+- **Edit ▸ Auto-shrink Overflowing Text** (on by default, remembered): a single-line value
+  too long for its box is written with an automatic font size so it fits.
+- Each field change is one Undo step; saving (Ctrl+S) appends the values to the file
+  (incremental save), including encrypted PDFs, which keep their encryption.
+- Read-only and hidden fields, push buttons and signature fields cannot be edited.
+
+A banner above the pages explains forms that cannot be filled normally (close it with ×; it
+comes back when the document is reopened):
+
+- **Dynamic XFA** forms (Adobe LiveCycle, often "Please wait…" pages): cannot be filled here.
+  Open the file in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill
+  the printed copy as a flat form. The Form Tool is disabled.
+- **Static XFA** forms: filled as standard forms; after an edit, saving removes the XFA data
+  so every viewer shows the values you entered (the banner then disappears).
+- **Filling not permitted** by the document's security settings: the Form Tool is disabled.
+
+Known limitations:
+
+- On rotated pages the editor stays horizontal (the saved value follows the page rotation).
+- Comb fields (one character per box) are filled as plain text, not split into boxes.
+- List boxes are single-select.
+- Field fonts are replaced by Helvetica in the appearance; characters outside the Windows
+  Latin-1 (cp1252) set are stored but cannot be displayed or printed (a status-bar message
+  warns about it). A drop-down shows its export value in the saved appearance.
+
+### Manual form checklist (Milestone 2)
+
+1. Open a LibreOffice/Word-made form: the Form Tool is active and fields are tinted blue.
+2. Type accented text (é à ç œ €) in a text field, press Tab: the value shows, the next field
+   (reading order, across pages) opens; the title shows `*`.
+3. Toggle checkboxes and a radio group: the check mark looks like the original; Ctrl+Z undoes
+   one change at a time.
+4. A long value in a small single-line field shrinks to fit (turn Auto-shrink off to compare).
+5. Save, reopen here and in Edge/Chrome/Adobe Reader: all values are shown.
+6. A dynamic XFA form shows the amber banner mentioning Adobe Acrobat Reader and no Form Tool;
+   an owner-locked form shows the permission banner.
 
 ## License
 
