@@ -17,7 +17,14 @@ from PySide6.QtGui import QColor, QCursor, QKeyEvent, QPainter, QPen
 
 from pdfeditor.core.commands import SetFieldValueCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
-from pdfeditor.core.forms import FF_NO_TOGGLE_TO_OFF, FieldKind, WidgetInfo, tab_order, text_fits
+from pdfeditor.core.forms import (
+    FF_NO_TOGGLE_TO_OFF,
+    RECT_TOLERANCE,
+    FieldKind,
+    WidgetInfo,
+    tab_order,
+    text_fits,
+)
 from pdfeditor.ui.overlays.field_editor import EDITABLE_KINDS
 from pdfeditor.ui.tools.base import Tool, ToolEvent
 
@@ -35,8 +42,15 @@ FOCUS_PEN = QColor(0, 120, 215)
 
 
 def _same_widget(a: WidgetInfo, b: WidgetInfo) -> bool:
-    return a.page == b.page and (
-        a.xref == b.xref or (a.name == b.name and a.unrotated_rect == b.unrotated_rect)
+    """Same widget across saves: page, name and rect decide (full saves renumber xrefs,
+    so an old xref may name another widget, even a same-name sibling)."""
+    return (
+        a.page == b.page
+        and a.name == b.name
+        and all(
+            abs(x - y) <= RECT_TOLERANCE
+            for x, y in zip(a.unrotated_rect, b.unrotated_rect, strict=True)
+        )
     )
 
 
@@ -64,9 +78,14 @@ class FormTool(Tool):
         self._last: WidgetInfo | None = None
         # Checkbox/radio showing the keyboard focus frame (Space toggles it).
         self._focused_button: WidgetInfo | None = None
+        # /DA font size of single-line text fields before auto-shrink set it to 0
+        # (field name -> size), restored when a later value fits again.
+        self._shrunk_from: dict[str, float] = {}
+        self._document: PdfDocument | None = None
         self.editor.committed.connect(self._on_committed)
         self.editor.navigate.connect(self._on_navigate)
-        document_view.document_changed.connect(self._reset)
+        document_view.document_changed.connect(self._on_document_changed)
+        self._on_document_changed()
 
     # -- state ----------------------------------------------------------------
     @property
@@ -97,6 +116,27 @@ class FormTool(Tool):
     def _reset(self) -> None:
         self._last = None
         self._set_button_focus(None)
+
+    def _on_document_changed(self) -> None:
+        old, new = self._document, self.document
+        if old is not None:
+            try:
+                old.reloaded.disconnect(self._on_reloaded)
+            except (RuntimeError, TypeError):
+                pass
+        self._document = new
+        if new is not None:
+            new.reloaded.connect(self._on_reloaded)
+        self._shrunk_from.clear()
+        self._reset()
+
+    def _on_reloaded(self) -> None:
+        """A save swapped the document (full saves renumber xrefs): re-resolve our
+        snapshots so that Space/Tab act on the same widgets."""
+        if self._last is not None:
+            self._last = self._fresh(self._last) or self._last
+        if self._focused_button is not None:
+            self._set_button_focus(self._fresh(self._focused_button))
 
     # -- hit testing ------------------------------------------------------------
     def widget_at(self, page: int | None, pos: QPointF | None) -> WidgetInfo | None:
@@ -129,12 +169,14 @@ class FormTool(Tool):
         if not event.buttons & Qt.MouseButton.LeftButton:
             return False
         info = self.widget_at(event.page_index, event.page_pos)
+        # Commit first: the pending value may belong to the clicked field (another
+        # widget of it), whose snapshot is then stale.
+        self.commit_pending()
         if info is None:
-            self.commit_pending()
             self._set_button_focus(None)
             return False  # ScrollHandDrag pans
+        info = self._fresh(info) or info
         if info.kind in BUTTON_KINDS:
-            self.commit_pending()
             self.toggle(info)
             self._last = info
             self._set_button_focus(info)
@@ -189,13 +231,16 @@ class FormTool(Tool):
         view = self.view
         if view is None or not 0 <= info.page < view.page_count:
             return
+        # Commit the pending edit, then re-read the field: the edit may have changed it
+        # (e.g. ``info`` is another widget of the field being edited).
+        self.commit_pending()
+        info = self._fresh(info) or info
         self._ensure_visible(view, info)
         self._last = info
         if info.kind in EDITABLE_KINDS:
             self._set_button_focus(None)
             self.editor.open(info)
         else:
-            self.commit_pending()
             self._set_button_focus(info)
             view.setFocus(Qt.FocusReason.TabFocusReason)
 
@@ -289,18 +334,7 @@ class FormTool(Tool):
             log.info("dropping an edit of %r: its document is gone", info.name)
             return
         text = str(value)
-        font_size: float | None = None
-        if (
-            info.kind is FieldKind.TEXT
-            and not info.multiline
-            and info.font_size > 0
-            and self.settings.auto_shrink_text
-        ):
-            x0, _y0, x1, _y1 = info.unrotated_rect
-            with doc.lock:
-                fits = text_fits(text, info.font_size, x1 - x0)
-            if not fits:
-                font_size = 0
+        font_size = self._auto_font_size(doc, info, text)
         try:
             text.encode("cp1252")
         except UnicodeEncodeError:
@@ -312,10 +346,35 @@ class FormTool(Tool):
             )
         self._push(doc, info, text, font_size)
 
+    def _auto_font_size(self, doc: PdfDocument, info: WidgetInfo, text: str) -> float | None:
+        """Font size to write with ``text`` (``None``: keep the field's).
+
+        Auto-shrink: a single-line value that does not fit at the field's size is written
+        with size 0 (auto); the original size is remembered and restored when a later
+        value fits in it again.
+        """
+        if info.kind is not FieldKind.TEXT or info.multiline or not self.settings.auto_shrink_text:
+            return None
+        original = self._shrunk_from.get(info.name, info.font_size)
+        if original <= 0:
+            return None  # authored auto size: leave it to MuPDF
+        x0, _y0, x1, _y1 = info.unrotated_rect
+        with doc.lock:
+            fits = text_fits(text, original, x1 - x0)
+        if not fits:
+            if info.font_size > 0:
+                self._shrunk_from[info.name] = info.font_size
+                return 0
+            return None  # already auto-sized
+        if info.font_size == 0 and info.name in self._shrunk_from:
+            return original
+        return None
+
     def _push(
         self, doc: PdfDocument, info: WidgetInfo, value: str | bool, font_size: float | None
     ) -> None:
         """Apply the change now (reporting a vanished field) and push it for undo."""
+        self.commit_pending()  # no-op from ``committed`` (the editor is already closed)
         try:
             command = SetFieldValueCommand(doc, info, value, font_size)
             command.apply_now()
@@ -325,7 +384,7 @@ class FormTool(Tool):
                 QCoreApplication.translate("FormTool", "The form field could not be updated.")
             )
             return
-        self.document_view.undo_stack.push(command)
+        self.document_view.push(command)
 
 
 __all__ = ["FormTool"]

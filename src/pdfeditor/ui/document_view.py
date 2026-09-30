@@ -6,7 +6,7 @@ import logging
 import os
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QUndoStack
+from PySide6.QtGui import QUndoCommand, QUndoStack
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
@@ -75,6 +75,17 @@ class DocumentView(QWidget):
         before it consults ``is_dirty``).
         """
         self.field_editor.commit()
+
+    def push(self, command: QUndoCommand) -> None:
+        """Push ``command`` on the undo stack; **every** command push goes through here.
+
+        A pending field edit is committed first, so it becomes its own undo step before
+        ``command`` and is never pushed re-entrantly from inside ``command.redo()`` (e.g.
+        a rotation closing the editor). Build commands that snapshot document state
+        after :meth:`commit_pending_edits` (or make that snapshot in ``redo()``).
+        """
+        self.commit_pending_edits()
+        self.undo_stack.push(command)
 
     def _replace(self, document: PdfDocument | None) -> None:
         old = self._document

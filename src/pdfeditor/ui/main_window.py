@@ -470,7 +470,8 @@ class MainWindow(QMainWindow):
         page = self.page_view.current_page
         if doc is None or page < 0:
             return
-        self.undo_stack.push(RotatePageCommand(doc, page, delta))
+        self.document_view.commit_pending_edits()  # before the command's snapshot
+        self.document_view.push(RotatePageCommand(doc, page, delta))
 
     def show_about(self) -> None:
         dialogs.show_about(self)

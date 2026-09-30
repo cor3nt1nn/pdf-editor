@@ -115,6 +115,7 @@ class FieldEditorOverlay(QObject):
         self._info: WidgetInfo | None = None
         self._editor: QWidget | None = None
         self._page_size: QSizeF | None = None
+        self._page_rotation: int | None = None
         self._hiding = False  # editor hidden because scrolled out of view
         self._restore_focus = False
         view.horizontalScrollBar().valueChanged.connect(self.reposition)
@@ -184,6 +185,7 @@ class FieldEditorOverlay(QObject):
         self._editor = editor
         doc = self._document
         self._page_size = doc.page_size(info.page) if doc is not None else None
+        self._page_rotation = doc.page_rotation(info.page) if doc is not None else None
         for w in (editor, *editor.findChildren(QWidget)):
             w.installEventFilter(self)
         self.reposition()  # shows the editor unless its field is out of view
@@ -359,6 +361,7 @@ class FieldEditorOverlay(QObject):
         self._info = None
         self._editor = None
         self._page_size = None
+        self._page_rotation = None
         self._restore_focus = False
         if editor is None or not shiboken6.isValid(editor):
             return
@@ -385,9 +388,17 @@ class FieldEditorOverlay(QObject):
         if info is None or i != info.page:
             return
         doc = self._document
-        size = doc.page_size(i) if doc is not None and i < doc.page_count else None
-        if size is None or self._page_size is None or size != self._page_size:
-            # Rotation (or a vanished page): the snapshot rect is stale.
+        size = rotation = None
+        if doc is not None and i < doc.page_count:
+            size, rotation = doc.page_size(i), doc.page_rotation(i)
+        if (
+            size is None
+            or self._page_size is None
+            or size != self._page_size
+            or rotation != self._page_rotation
+        ):
+            # Rotation (even of a square page) or a vanished page: the snapshot rect is
+            # stale. (UI rotations commit first, through ``DocumentView.push``.)
             self.commit()
         else:
             self.reposition()
