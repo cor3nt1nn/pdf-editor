@@ -51,6 +51,8 @@ log = logging.getLogger(__name__)
 HANDLE_TOLERANCE_PX = 6.0
 # Extra margin (viewport pixels) around annotations when hit-testing them.
 HIT_TOLERANCE_PX = 3.0
+# Checkbox snapping reach (points) of the stamp tools (the text tool uses 0).
+SNAP_TOLERANCE = 6.0
 # Smallest side (points) a resize can produce; text boxes keep at least MIN_TEXT_WIDTH.
 MIN_SIDE = 4.0
 MIN_TEXT_WIDTH = 12.0
@@ -241,18 +243,23 @@ class AnnotToolBase(Tool):
         return any(w.editable and w.rect.contains(pos) for w in widgets)
 
     def _handle_at(self, page: int, pos: QPointF) -> Handle | None:
+        """The resize handle of the selection under ``pos`` (see
+        :meth:`AnnotHandleItem.handle_at`: inside the rect a handle only wins within a
+        quarter of the rect's side, so small boxes stay movable when zoomed out)."""
         current, item = self.selection.current, self.selection.item
         if current is None or item is None or current.page != page:
             return None
         return item.handle_at(pos, HANDLE_TOLERANCE_PX / self._scale())
 
-    def snap_at(self, page: int, pos: QPointF, alt: bool) -> Snap:
+    def snap_at(
+        self, page: int, pos: QPointF, alt: bool, *, tolerance: float = SNAP_TOLERANCE
+    ) -> Snap:
         """The snapping target under ``pos`` (none with Alt)."""
         doc = self._doc()
         if alt or doc is None:
             return Snap(SnapKind.NONE)
         try:
-            return snapping.snap(doc.page_shapes(page), pos)
+            return snapping.snap(doc.page_shapes(page), pos, tolerance=tolerance)
         except (DocumentError, IndexError):
             return Snap(SnapKind.NONE)
 
@@ -263,8 +270,8 @@ class AnnotToolBase(Tool):
 
     # -- mouse ------------------------------------------------------------------------
     def mouse_press(self, event: ToolEvent) -> bool:
-        if not event.buttons & Qt.MouseButton.LeftButton:
-            return False
+        if _button(event) != Qt.MouseButton.LeftButton:
+            return self._drag is not None  # other buttons are ignored during a drag
         doc = self._doc()
         if doc is None or self.view is None:
             return False
@@ -310,6 +317,9 @@ class AnnotToolBase(Tool):
             return False
         if self.view is None:
             return True
+        if not self._drag_alive(drag):
+            self._cancel_drag()
+            return True
         pos = self._page_pos(drag.info.page, event)
         if drag.mode is _Mode.PENDING:
             moved = _viewport_pos(event) - drag.start_px
@@ -328,14 +338,24 @@ class AnnotToolBase(Tool):
                     ghost.setLeft(ghost.right() - MIN_TEXT_WIDTH)
                 else:
                     ghost.setRight(ghost.left() + MIN_TEXT_WIDTH)
+            ghost = self._resize_on_page(drag, ghost)
+            if ghost is None:
+                return True  # would leave the page: keep the last ghost
         drag.ghost = ghost
         self.selection.set_ghost(ghost)
         return True
 
     def mouse_release(self, event: ToolEvent) -> bool:
-        drag, self._drag = self._drag, None
+        drag = self._drag
         if drag is None:
             return False
+        if _button(event) != Qt.MouseButton.LeftButton:
+            return True  # e.g. a right click during a left drag
+        self._drag = None
+        if not self._drag_alive(drag):
+            # Undone (Ctrl+Z) or removed while dragging: nothing to move, no message.
+            self.selection.set_ghost(None)
+            return True
         info = drag.info
         if drag.mode is _Mode.PENDING:
             if drag.reopen:
@@ -349,12 +369,39 @@ class AnnotToolBase(Tool):
             return True
         fit = drag.mode is _Mode.RESIZE and info.kind is AnnotKind.TEXT
         if self.edit(info, rect=ghost, fit_height=fit):
-            self._armed = info.name
+            # The edit may have given a foreign annotation its lasting name.
+            current = self.selection.current
+            self._armed = current.name if current is not None else info.name
         return True
 
-    def mouse_double_click(self, event: ToolEvent) -> bool:
-        if not event.buttons & Qt.MouseButton.LeftButton:
+    def _drag_alive(self, drag: _Drag) -> bool:
+        """The dragged annotation still exists and is still the selection."""
+        current = self.selection.current
+        if current is None or current.page != drag.info.page:
             return False
+        return self.fresh(drag.info.page, drag.info.name) is not None
+
+    def _cancel_drag(self) -> None:
+        self._drag = None
+        self.selection.set_ghost(None)
+
+    def _resize_on_page(self, drag: _Drag, ghost: QRectF) -> QRectF | None:
+        """``ghost`` cut to the page (text boxes), or None when it would leave the page
+        (stamps stay square). No limit for an annotation already off the page."""
+        doc = self._doc()
+        if doc is None:
+            return ghost
+        page = QRectF(QPointF(0, 0), doc.page_size(drag.info.page))
+        if page.contains(ghost) or not page.contains(drag.info.rect):
+            return ghost
+        if drag.info.kind is AnnotKind.STAMP:
+            return None
+        cut = ghost.intersected(page)
+        return cut if cut.width() >= MIN_SIDE and cut.height() >= MIN_SIDE else None
+
+    def mouse_double_click(self, event: ToolEvent) -> bool:
+        if _button(event) != Qt.MouseButton.LeftButton:
+            return self._drag is not None
         info = self.annot_at(event.page_index, event.page_pos)
         if info is None:
             return True  # the press already placed something (or showed a notice)
@@ -407,18 +454,17 @@ class AnnotToolBase(Tool):
             return False
         key = qt_event.key()
         mods = qt_event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if key == Qt.Key.Key_Escape and self._drag is not None:
+            self._cancel_drag()
+            return True
         if mods != Qt.KeyboardModifier.NoModifier or self.selection.current is None:
             return False
         if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selection()
             return True
         if key == Qt.Key.Key_Escape:
-            if self._drag is not None:
-                self.selection.set_ghost(None)
-                self._drag = None
-            else:
-                self.selection.clear()
-                self._armed = None
+            self.selection.clear()
+            self._armed = None
             return True
         return False
 
@@ -590,10 +636,17 @@ class TextTool(AnnotToolBase):
         doc = self._doc()
         if doc is None:
             return None
-        snap = self.snap_at(page, pos, alt)
+        # No reach: a click beside a checkbox must not wrap text into it. A click in a
+        # checkbox-sized box places a normal text box (one that small would wrap every
+        # word).
+        snap = self.snap_at(page, pos, alt, tolerance=0.0)
+        if snap.kind is SnapKind.BOX:
+            snap = Snap(SnapKind.NONE)
         font_size, _color = self.style()
-        width = doc.page_size(page).width()
-        rect = snapping.text_placement(snap, pos, font_size, DEFAULT_TEXT_WIDTH, width)
+        size = doc.page_size(page)
+        rect = snapping.text_placement(
+            snap, pos, font_size, DEFAULT_TEXT_WIDTH, size.width(), size.height()
+        )
         return snap, rect
 
     def create_at(self, page: int, pos: QPointF, alt: bool) -> None:
@@ -614,7 +667,7 @@ class TextTool(AnnotToolBase):
         if info.kind is not AnnotKind.TEXT:
             return
         current = self.fresh(info.page, info.name)
-        if current is None or not current.editable:
+        if current is None or not current.text_editable:
             return
         self._armed = None
         self.editor.open_existing(current)
@@ -688,11 +741,22 @@ class StampTool(AnnotToolBase):
         centre, side = self._placement(page, pos, alt)
         rect, font_size = stamp_rect(centre, side, self.glyph)
         _fs, color = self.style()
+        rect = self._clamped(page, rect)  # kept on the page
         self.add(AnnotSpec(page, AnnotKind.STAMP, self.glyph, font_size, color, rect))
 
     def preview_rect(self, page: int, pos: QPointF, alt: bool) -> QRectF | None:
         centre, side = self._placement(page, pos, alt)
-        return QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side)
+        return self._clamped(page, QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side))
+
+
+def _button(event: ToolEvent) -> Qt.MouseButton:
+    """The button that changed (``QMouseEvent.button()``), not all the held ones."""
+    qt_event = event.qt_event
+    if isinstance(qt_event, QMouseEvent):
+        return qt_event.button()
+    if event.buttons & Qt.MouseButton.LeftButton:
+        return Qt.MouseButton.LeftButton
+    return Qt.MouseButton.NoButton
 
 
 def _viewport_pos(event: ToolEvent) -> QPoint:

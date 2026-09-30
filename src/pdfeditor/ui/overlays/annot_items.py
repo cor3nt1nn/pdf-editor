@@ -107,12 +107,19 @@ class AnnotHandleItem(QGraphicsItem):
         """The handle nearest ``page_pos`` within ``tol_pt`` (both axes), or None.
 
         The tools pass ``6 px / view_scale`` so the tolerance is constant on screen.
+        Inside the rect the tolerance is capped at a quarter of the rect's width
+        (horizontally) and height (vertically): the body of a box that is small on
+        screen (zoomed out) stays movable, while its corners and edges still resize.
         """
+        tol_x = tol_y = tol_pt
+        if self._rect.contains(page_pos):
+            tol_x = min(tol_pt, self._rect.width() / 4)
+            tol_y = min(tol_pt, self._rect.height() / 4)
         best: Handle | None = None
         best_dist = float("inf")
         for handle, centre in handle_points(self._rect).items():
             dx, dy = abs(page_pos.x() - centre.x()), abs(page_pos.y() - centre.y())
-            if dx <= tol_pt and dy <= tol_pt:
+            if dx <= tol_x and dy <= tol_y:
                 dist = max(dx, dy)
                 if dist < best_dist:
                     best, best_dist = handle, dist

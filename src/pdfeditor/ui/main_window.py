@@ -206,10 +206,15 @@ class MainWindow(QMainWindow):
         self.act_stamp_dot.setToolTip(self.tr("Dot (3)"))
         self.act_delete_annot = self._action(
             self.tr("&Delete Annotation"),
-            QKeySequence(QKeySequence.StandardKey.Delete),
+            [QKeySequence(QKeySequence.StandardKey.Delete), QKeySequence(Qt.Key.Key_Backspace)],
             self.delete_annotation,
             "delete_annot",
         )
+        # Delete/Backspace act on the page view only (not in the thumbnails or the
+        # toolbar widgets): the shortcut lives on the document view.
+        self.removeAction(self.act_delete_annot)
+        self.act_delete_annot.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.document_view.addAction(self.act_delete_annot)
         self.act_auto_shrink = self._action(
             self.tr("Auto-shrink Overflowing Text"), None, None, "auto_shrink_text"
         )
