@@ -354,7 +354,8 @@ def show_about(parent: QWidget | None) -> None:
 
 
 def interaction_shortcuts() -> list[tuple[str, str]]:
-    """(description, keys) of the mouse and editing keys that are not menu actions."""
+    """(description, keys) of the mouse and keyboard keys that are not menu actions
+    (page navigation keys are handled by the page view)."""
 
     def keys(*names: str) -> str:
         native = QKeySequence.SequenceFormat.NativeText
@@ -365,6 +366,13 @@ def interaction_shortcuts() -> list[tuple[str, str]]:
             QCoreApplication.translate("Dialogs", "Zoom under the pointer"),
             QCoreApplication.translate("Dialogs", "Ctrl+Wheel"),
         ),
+        # Handled by PageView.keyPressEvent (not menu shortcuts: the keys must keep
+        # scrolling text editors and lists when they have the focus).
+        (
+            QCoreApplication.translate("Dialogs", "Next / previous page"),
+            keys("PgDown", "PgUp"),
+        ),
+        (QCoreApplication.translate("Dialogs", "First / last page"), keys("Home", "End")),
         (
             QCoreApplication.translate("Dialogs", "Place without snapping / over a form field"),
             QCoreApplication.translate("Dialogs", "Alt+Click"),

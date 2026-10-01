@@ -273,62 +273,72 @@ Redémarrer maintenant ?</translation>
         <translation>À propos de PDF Editor</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="365"/>
+        <location filename="../ui/dialogs.py" line="366"/>
         <source>Zoom under the pointer</source>
         <translation>Zoomer sous le pointeur</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="366"/>
+        <location filename="../ui/dialogs.py" line="367"/>
         <source>Ctrl+Wheel</source>
         <translation>Ctrl+Molette</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="369"/>
+        <location filename="../ui/dialogs.py" line="372"/>
+        <source>Next / previous page</source>
+        <translation>Page suivante / précédente</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="375"/>
+        <source>First / last page</source>
+        <translation>Première / dernière page</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="377"/>
         <source>Place without snapping / over a form field</source>
         <translation>Placer sans magnétisme / sur un champ de formulaire</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="370"/>
+        <location filename="../ui/dialogs.py" line="378"/>
         <source>Alt+Click</source>
         <translation>Alt+Clic</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="373"/>
+        <location filename="../ui/dialogs.py" line="381"/>
         <source>Validate the text being typed</source>
         <translation>Valider le texte en cours de saisie</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="376"/>
+        <location filename="../ui/dialogs.py" line="384"/>
         <source>Next / previous field</source>
         <translation>Champ suivant / précédent</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="377"/>
+        <location filename="../ui/dialogs.py" line="385"/>
         <source>Toggle the focused checkbox</source>
         <translation>Cocher/décocher la case sélectionnée</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="378"/>
+        <location filename="../ui/dialogs.py" line="386"/>
         <source>Cancel, deselect</source>
         <translation>Annuler, désélectionner</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="389"/>
+        <location filename="../ui/dialogs.py" line="397"/>
         <source>Keyboard Shortcuts</source>
         <translation>Raccourcis clavier</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="394"/>
+        <location filename="../ui/dialogs.py" line="402"/>
         <source>Action</source>
         <translation>Action</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="395"/>
+        <location filename="../ui/dialogs.py" line="403"/>
         <source>Shortcut</source>
         <translation>Raccourci</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="442"/>
+        <location filename="../ui/dialogs.py" line="450"/>
         <source>Third-Party Licenses</source>
         <translation>Licences tierces</translation>
     </message>
@@ -354,52 +364,52 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>ExportDialog</name>
     <message>
-        <location filename="../ui/export_dialog.py" line="32"/>
+        <location filename="../ui/export_dialog.py" line="33"/>
         <source>Export Copy</source>
         <translation>Exporter une copie</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="38"/>
+        <location filename="../ui/export_dialog.py" line="39"/>
         <source>Flatten form fields</source>
         <translation>Aplatir les champs de formulaire</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="39"/>
+        <location filename="../ui/export_dialog.py" line="40"/>
         <source>Flatten text, stamps and signatures</source>
         <translation>Aplatir les textes, tampons et signatures</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="40"/>
+        <location filename="../ui/export_dialog.py" line="41"/>
         <source>Keep password protection</source>
         <translation>Conserver la protection par mot de passe</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="42"/>
+        <location filename="../ui/export_dialog.py" line="43"/>
         <source>Keep document properties (title, author…)</source>
         <translation>Conserver les propriétés du document (titre, auteur…)</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="46"/>
+        <location filename="../ui/export_dialog.py" line="47"/>
         <source>Unchecked: the title, author, keywords, XMP metadata and application private data are removed. The file identifier and the name of the PDF library that wrote the copy remain.</source>
         <translation>Décoché : le titre, l’auteur, les mots-clés, les métadonnées XMP et les données privées des applications sont supprimés. L’identifiant du fichier et le nom de la bibliothèque PDF qui a écrit la copie sont conservés.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="63"/>
+        <location filename="../ui/export_dialog.py" line="64"/>
         <source>The author restricted this document (printing, copying or editing): the copy keeps its protection. Open it with the owner password to remove it.</source>
         <translation>L’auteur a restreint ce document (impression, copie ou modification) : la copie conserve sa protection. Ouvrez-le avec le mot de passe du propriétaire pour la retirer.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="71"/>
+        <location filename="../ui/export_dialog.py" line="72"/>
         <source>This form uses dynamic XFA: its fields cannot be flattened here.</source>
         <translation>Ce formulaire utilise XFA dynamique : ses champs ne peuvent pas être aplatis ici.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="77"/>
+        <location filename="../ui/export_dialog.py" line="78"/>
         <source>A copy is written; the open document is not changed. Flattened fields and annotations can no longer be edited. Earlier saved versions (deleted signatures, previous values) are not carried over.</source>
         <translation>Une copie est écrite ; le document ouvert n’est pas modifié. Les champs et annotations aplatis ne sont plus modifiables. Les versions enregistrées précédentes (signatures supprimées, anciennes valeurs) ne sont pas reprises.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="87"/>
+        <location filename="../ui/export_dialog.py" line="88"/>
         <source>Export</source>
         <translation>Exporter</translation>
     </message>

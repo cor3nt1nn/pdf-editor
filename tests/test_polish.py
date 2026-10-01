@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QComboBox, QLabel, QTableWidget, QTextBrowser
 
@@ -175,7 +176,7 @@ def _check_sections(window: MainWindow, sections) -> None:
         for action, keys in section_rows:
             assert action and keys
     interaction = dict(sections[-1][1])
-    assert len(interaction) == 6
+    assert len(interaction) == 8
     assert len(sections) >= 5
 
 
@@ -206,6 +207,12 @@ def test_shortcut_sections_grouped_by_menu(window: MainWindow) -> None:
     assert interaction["Zoom under the pointer"] == "Ctrl+Wheel"
     assert interaction["Place without snapping / over a form field"] == "Alt+Click"
     assert interaction["Next / previous field"] == "Tab / Shift+Tab"
+    assert interaction["Next / previous page"] == " / ".join(
+        QKeySequence(k).toString(native) for k in ("PgDown", "PgUp")
+    )
+    assert interaction["First / last page"] == " / ".join(
+        QKeySequence(k).toString(native) for k in ("Home", "End")
+    )
     _check_sections(window, sections)
 
 
@@ -243,6 +250,8 @@ def test_shortcuts_in_french(qtbot, qapp, settings) -> None:
         assert interaction["Placer sans magnétisme / sur un champ de formulaire"] == "Alt+Clic"
         assert "Cocher/décocher la case sélectionnée" in interaction
         assert "Annuler, désélectionner" in interaction
+        assert "Page suivante / précédente" in interaction
+        assert "Première / dernière page" in interaction
         _check_sections(w, sections)
         dialog = dialogs.make_shortcuts_dialog(w, sections)
         qtbot.addWidget(dialog)
@@ -253,3 +262,24 @@ def test_shortcuts_in_french(qtbot, qapp, settings) -> None:
         w.close()
     finally:
         remove_translators(qapp)
+
+
+def test_page_navigation_keys_listed_are_handled(qtbot, window: MainWindow, many_pages_pdf):
+    """The "Next / previous page" and "First / last page" rows of the shortcuts dialog
+    are handled by the page view (review finding 5)."""
+    window.show()
+    qtbot.waitExposed(window)
+    assert window.open_file(str(many_pages_pdf))
+    pv = window.page_view
+    pv.setFocus()
+    last = pv.page_count - 1
+    assert last >= 2
+    qtbot.keyClick(pv, Qt.Key.Key_PageDown)
+    assert pv.current_page == 1
+    qtbot.keyClick(pv, Qt.Key.Key_PageUp)
+    assert pv.current_page == 0
+    qtbot.keyClick(pv, Qt.Key.Key_End)
+    assert pv.current_page == last
+    qtbot.keyClick(pv, Qt.Key.Key_Home)
+    assert pv.current_page == 0
+    window.undo_stack.setClean()
