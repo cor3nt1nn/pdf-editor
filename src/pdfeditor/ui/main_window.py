@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.constants import APP_NAME, ZoomMode
-from pdfeditor.core import recent
+from pdfeditor.core import file_assoc, recent
 from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired, SaveError
@@ -304,6 +304,19 @@ class MainWindow(QMainWindow):
         self.act_highlight_fields.toggled.connect(self._on_highlight_fields_toggled)
         self.act_about = self._action(self.tr("&About PDF Editor…"), None, self.show_about, "about")
         self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
+        self.act_register_assoc = self._action(
+            self.tr("Register with Windows (Open with)…"),
+            None,
+            self.register_file_assoc,
+            "register_assoc",
+        )
+        self.act_unregister_assoc = self._action(
+            self.tr("Unregister from Windows"), None, self.unregister_file_assoc, "unregister_assoc"
+        )
+        # Real state is read when the Settings menu opens (no registry access at startup).
+        supported = file_assoc.is_supported()
+        self.act_register_assoc.setEnabled(supported)
+        self.act_unregister_assoc.setEnabled(supported)
         self.act_rotate_cw.setIconText(self.tr("Rotate"))
         for act, name in (
             (self.act_open, "open"),
@@ -437,6 +450,10 @@ class MainWindow(QMainWindow):
             self.language_group.addAction(act)
             self.menu_language.addAction(act)
             self.language_actions[code] = act
+        self.menu_settings = bar.addMenu(self.tr("&Settings"))
+        self.menu_settings.addAction(self.act_register_assoc)
+        self.menu_settings.addAction(self.act_unregister_assoc)
+        self.menu_settings.aboutToShow.connect(self._update_assoc_actions)
         self.menu_help = bar.addMenu(self.tr("&Help"))
         self.menu_help.addAction(self.act_about)
 
@@ -1156,6 +1173,50 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             self.tr("Exported to “{name}”").format(name=os.path.basename(path)), 10000
         )
+        return True
+
+    def _update_assoc_actions(self) -> None:
+        """Register: when not registered or registered with another command (app moved).
+        Unregister: when registered. Both disabled outside Windows."""
+        if not file_assoc.is_supported():
+            self.act_register_assoc.setEnabled(False)
+            self.act_unregister_assoc.setEnabled(False)
+            return
+        registered: str | None = None
+        try:
+            registered = file_assoc.registered_command()
+        except OSError as exc:
+            log.warning("cannot read the file association: %s", exc)
+        current = file_assoc.command_line(file_assoc.app_command())
+        self.act_register_assoc.setEnabled(registered is None or registered != current)
+        self.act_unregister_assoc.setEnabled(registered is not None)
+
+    def register_file_assoc(self) -> bool:
+        """Settings ▸ Register with Windows (Open with)…, after confirmation."""
+        command = file_assoc.command_line(file_assoc.app_command())
+        if not dialogs.confirm_register(self, command):
+            return False
+        return self._change_file_assoc(file_assoc.register, self.tr("Registered with Windows"))
+
+    def unregister_file_assoc(self) -> bool:
+        """Settings ▸ Unregister from Windows."""
+        return self._change_file_assoc(file_assoc.unregister, self.tr("Removed from Windows"))
+
+    def _change_file_assoc(self, change, done: str) -> bool:
+        try:
+            change()
+        except OSError as exc:
+            log.warning("file association change failed: %s", exc)
+            dialogs.warn(
+                self,
+                self.tr("Settings"),
+                self.tr("The registration could not be changed."),
+                details=str(exc),
+            )
+            return False
+        finally:
+            self._update_assoc_actions()
+        self.statusBar().showMessage(done, 10000)
         return True
 
     def maybe_save(self) -> bool:

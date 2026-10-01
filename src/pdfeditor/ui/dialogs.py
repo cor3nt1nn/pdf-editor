@@ -224,6 +224,22 @@ def get_save_path(parent: QWidget | None, suggested: str, title: str | None = No
     return path
 
 
+def confirm_register(parent: QWidget | None, command: str) -> bool:
+    """Settings ▸ Register with Windows: explain what is written, show the command."""
+    box = QMessageBox(
+        QMessageBox.Icon.Question,
+        QCoreApplication.translate("Dialogs", "Register with Windows"),
+        QCoreApplication.translate(
+            "Dialogs",
+            "PDF Editor will be added to the “Open with” list for PDF files, for your Windows account only (no administrator rights). You can undo this with Settings ▸ Unregister from Windows.\n\nCommand: {command}",  # noqa: E501
+        ).format(command=command),
+        QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+        parent,
+    )
+    box.setDefaultButton(QMessageBox.StandardButton.Ok)
+    return box.exec() == QMessageBox.StandardButton.Ok
+
+
 def ask_restart(parent: QWidget | None) -> bool:
     """Ask whether to restart now to apply a new language."""
     answer = QMessageBox.question(
