@@ -284,6 +284,11 @@ Known limitations:
 - An image placed several times is shared in the file only while the document stays open
   (and after a full save); undo keeps its own copy of the image, so deleting a signature
   from the saved list never breaks undo.
+- Privacy of earlier saves: a signature (or text) placed and then undone or deleted
+  before saving is never written to the file. But Save keeps the file's earlier versions
+  inside it (it only appends the changes), so a signature that was saved once and deleted
+  later can still be recovered from the file with technical tools. To remove it for good,
+  use **File ▸ Save As…** (it rewrites the whole file without the leftovers).
 - No drag & drop of an image straight onto the page; no certified digital signatures.
 - Flattening (turning signatures into page content on export) comes with Milestone 5.
 
@@ -321,7 +326,11 @@ line); keep the originals.
 10. **Save failure**: make the file read-only, place a signature, Ctrl+S: an error offers
     Save As; cancel it: the title still shows `*`, the signature is still there and Undo
     still works.
-11. **Flatten**: not available yet (Milestone 5): signatures stay movable annotations, so
+11. **Privacy of deleted signatures**: place a signature, Undo, Ctrl+S: the file grows
+    by well under 2 KB (the image is not written). Place one, Ctrl+S, delete it, Ctrl+S: it
+    is gone from every viewer, but the file still holds the earlier version; File ▸ Save As…
+    a new file: that one no longer contains the image (its size drops accordingly).
+12. **Flatten**: not available yet (Milestone 5): signatures stay movable annotations, so
     anyone with an editor can move or copy them; flatten on export will bake them into the
     page.
 

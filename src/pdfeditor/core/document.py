@@ -23,7 +23,7 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations, signature, snapping
+from pdfeditor.core import annotations, orphans, signature, snapping
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.forms import (
     FieldKind,
@@ -122,6 +122,8 @@ class PdfDocument(QObject):
         # None = unknown (not loaded from disk).
         self._disk_stamp = disk_stamp
         self._needs_full_save = False
+        # Objects numbered from here on were created since the load (see core/orphans.py).
+        self._first_new_xref = int(fitz_doc.xref_length())
         self._page_count = int(fitz_doc.page_count)
         self._size_cache: dict[int, QSizeF] = {}
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
@@ -759,7 +761,7 @@ class PdfDocument(QObject):
         if self._path is None:
             raise SaveError("document has no file path; use save_as()")
         incremental = not force_full and self.can_save_incrementally()
-        self._save_to(self._path, incremental)
+        incremental = self._save_to(self._path, incremental)
         log.info("saved (%s): %s", "incremental" if incremental else "full", self._path)
 
     def save_as(self, new_path: str | os.PathLike[str]) -> None:
@@ -778,7 +780,8 @@ class PdfDocument(QObject):
     def _full_save_kwargs(self) -> dict[str, object]:
         return {"garbage": 3, "deflate": True, "encryption": pymupdf.PDF_ENCRYPT_KEEP}
 
-    def _save_to(self, path: str, incremental: bool) -> None:
+    def _save_to(self, path: str, incremental: bool) -> bool:
+        """Write the document to ``path``; returns whether the write was incremental."""
         # A full write may renumber objects of the in-memory document, and an incremental
         # write marks its changes as written even if writing the file then fails (a
         # second incremental write of the same document produces a file with missing
@@ -787,6 +790,8 @@ class PdfDocument(QObject):
         self._needs_full_save = True
         with self.lock:
             try:
+                if incremental and not self._drop_session_orphans():
+                    incremental = False
                 if incremental:
                     data = _incremental_bytes(self.fitz)
                 else:
@@ -806,6 +811,26 @@ class PdfDocument(QObject):
             raise SaveError(str(exc)) from exc
         self._disk_stamp = _stamp(path)
         self._reload(data)
+        return incremental
+
+    def _drop_session_orphans(self) -> bool:
+        """Free the objects created since the load that nothing references any more
+        (undone or deleted signatures and their images, replaced appearances...), so that
+        an incremental write does not carry them. False if that failed (logged): the
+        caller then writes the whole file, whose garbage collection drops them. Under the
+        lock."""
+        try:
+            dead = orphans.session_orphans(self.fitz, self._first_new_xref)
+            if dead:
+                orphans.drop_objects(self.fitz, dead)
+                log.info("dropped %d orphaned objects before an incremental save", len(dead))
+        except Exception:  # MuPDF raises FzError* (not RuntimeError)
+            log.warning("could not drop orphaned objects; saving in full", exc_info=True)
+            self._image_xrefs.clear()
+            return False
+        if dead:
+            self._image_xrefs.clear()  # may name a dropped image
+        return True
 
     def _reload(self, data: bytes) -> None:
         """Replace the document by one loaded from the bytes just written.
@@ -832,6 +857,7 @@ class PdfDocument(QObject):
             return
         with self.lock:
             old, self._doc = self._doc, doc
+            self._first_new_xref = int(doc.xref_length())
             if old is not None:
                 old.close()
         self._needs_full_save = False
