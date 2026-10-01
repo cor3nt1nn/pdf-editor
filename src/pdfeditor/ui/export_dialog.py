@@ -41,6 +41,12 @@ class ExportDialog(QDialog):
         self.keep_metadata_box = QCheckBox(
             self.tr("Keep document properties (title, author…)"), self
         )
+        self.keep_metadata_box.setToolTip(
+            self.tr(
+                # Single literal: lupdate does not join implicitly concatenated strings.
+                "Unchecked: the title, author, keywords, XMP metadata and application private data are removed. The file identifier and the name of the PDF library that wrote the copy remain."  # noqa: E501
+            )
+        )
         self.flatten_forms_box.setChecked(settings.export_flatten_forms)
         self.flatten_annots_box.setChecked(settings.export_flatten_annots)
         self.keep_metadata_box.setChecked(settings.export_keep_metadata)

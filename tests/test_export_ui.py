@@ -104,6 +104,7 @@ def test_dialog_defaults_plain_document(window, settings, simple_pdf) -> None:
     assert d.flatten_annots_box.isChecked() and d.flatten_annots_box.isEnabled()
     assert d.keep_metadata_box.isChecked()
     assert d.keep_encryption_box.isHidden()
+    assert "file identifier" in d.keep_metadata_box.toolTip()
     assert d.xfa_note.isHidden()
     assert not d.note.isHidden()
     assert d.note.text().startswith("A copy is written; the open document is not changed.")

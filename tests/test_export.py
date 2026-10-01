@@ -7,6 +7,7 @@ import os
 import re
 import time
 import zlib
+from dataclasses import replace
 
 import fixtures
 import pymupdf
@@ -434,6 +435,63 @@ def test_metadata_kept_or_cleared(metadata_pdf, tmp_path, keep) -> None:
     finally:
         pdf.close()
     assert _raw_contains(out, b"xmp-marker") is keep
+    strict_read(out)
+
+
+@pytest.fixture
+def private_metadata_pdf(tmp_path):
+    """Info (standard + custom key), catalog XMP, a page XMP stream, page and catalog
+    /PieceInfo: every place where a document keeps private metadata."""
+    path = tmp_path / "private_meta.pdf"
+    pdf = pymupdf.open(fixtures.make_simple_pdf(tmp_path / "plain.pdf"))
+    pdf.set_metadata({"title": "TITLE-SECRET", "author": "AUTHOR-SECRET", "producer": "PROD"})
+    info = int(re.search(r"/Info\s+(\d+)\s+0\s+R", pdf.pdf_trailer()).group(1))
+    pdf.xref_set_key(info, "Company", "(COMPANY-SECRET)")
+    pdf.set_xml_metadata('<x:xmpmeta xmlns:x="adobe:ns:meta/">CATALOG-XMP-SECRET</x:xmpmeta>')
+    page_xmp = pdf.get_new_xref()
+    pdf.update_object(page_xmp, "<</Type/Metadata/Subtype/XML>>")
+    pdf.update_stream(page_xmp, b"PAGE-XMP-SECRET", compress=False)
+    for page in pdf:
+        pdf.xref_set_key(page.xref, "Metadata", f"{page_xmp} 0 R")
+        pdf.xref_set_key(page.xref, "PieceInfo", "<</Illustrator<</Private(PAGE-PIECE-SECRET)>>>>")
+    pdf.xref_set_key(pdf.pdf_catalog(), "PieceInfo", "<</App<</Private(CAT-PIECE-SECRET)>>>>")
+    pdf.save(path)
+    pdf.close()
+    return path
+
+
+PRIVATE_NEEDLES = [
+    b"TITLE-SECRET",
+    b"AUTHOR-SECRET",
+    b"COMPANY-SECRET",
+    b"CATALOG-XMP-SECRET",
+    b"PAGE-XMP-SECRET",
+    b"PAGE-PIECE-SECRET",
+    b"CAT-PIECE-SECRET",
+    b"/PieceInfo",
+    b"/Metadata",
+    b"/Producer",
+]
+
+
+@pytest.mark.parametrize("flatten", [True, False])
+@pytest.mark.parametrize("keep", [True, False])
+def test_private_metadata_raw_bytes(private_metadata_pdf, tmp_path, keep, flatten) -> None:
+    for needle in PRIVATE_NEEDLES:
+        assert _raw_contains(private_metadata_pdf, needle), needle
+    doc = PdfDocument.open(private_metadata_pdf)
+    out = tmp_path / "copy.pdf"
+    options = replace(ExportOptions() if flatten else FLATTEN_NONE, keep_metadata=keep)
+    doc.export_copy(out, options)
+    doc.close()
+    found = [needle for needle in PRIVATE_NEEDLES if _raw_contains(out, needle)]
+    if keep:
+        assert found == PRIVATE_NEEDLES
+    else:
+        assert found == []
+        with pymupdf.open(out) as pdf:
+            assert "Info" not in pdf.pdf_trailer()
+            assert pdf[0].get_text().strip() != ""  # the content is untouched
     strict_read(out)
 
 

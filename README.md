@@ -416,6 +416,13 @@ values) are not carried over. **File ▸ Open Recent** lists the last opened fil
 **Settings ▸ Register with Windows (Open with)…** / **Unregister from Windows** add or
 remove PDF Editor in the "Open with" list of PDF files (current user only).
 
+Known limitations:
+
+1. **Document properties**: with "Keep document properties" unchecked the copy loses its
+   title, author, keywords, XMP metadata (document and pages) and application private
+   data (/PieceInfo), but it still has a file identifier (trailer /ID, needed by PDF
+   readers) and a header comment naming the PDF library that wrote it (MuPDF).
+
 ### Manual checklist (Milestone 5)
 
 Run it on copies of your own documents, with the zip built by `scripts\build_exe.ps1`.

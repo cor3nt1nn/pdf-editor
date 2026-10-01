@@ -99,7 +99,10 @@ class ExportOptions:
     annotations disappear). Both off = a clean copy (full rewrite, no earlier revisions).
     ``keep_encryption``: keep the password protection (ignored, i.e. always kept, for
     owner-password restrictions: see :attr:`PdfDocument.has_restrictions`).
-    ``keep_metadata``: keep the document properties (Info dictionary and XMP metadata).
+    ``keep_metadata``: keep the document properties (Info dictionary and XMP metadata);
+    off also drops the pages' XMP (/Metadata) and /PieceInfo of the pages and catalog.
+    The trailer /ID and MuPDF's "% Written by MuPDF" header comment remain
+    (docs/ARCHITECTURE.md Deviation 57).
     """
 
     flatten_forms: bool = True
@@ -1029,12 +1032,34 @@ def _export_bytes(
         if not options.keep_metadata:
             copy.set_metadata({})
             copy.del_xml_metadata()
+            _drop_private_metadata(copy)
         encryption = (
             pymupdf.PDF_ENCRYPT_KEEP if options.keep_encryption else pymupdf.PDF_ENCRYPT_NONE
         )
         return copy.tobytes(garbage=4, deflate=True, encryption=encryption)
     finally:
         copy.close()
+
+
+#: Keys holding document-private data besides the Info dictionary and the catalog XMP:
+#: XMP streams of the pages (/Metadata) and application private data (/PieceInfo, ISO
+#: 32000 §14.5), plus, in the catalog only, the non-standard /Info dictionary in which
+#: MuPDF-made documents carry a /Producer.
+_PAGE_PRIVATE_KEYS = ("Metadata", "PieceInfo")
+_CATALOG_PRIVATE_KEYS = ("Metadata", "PieceInfo", "Info")
+
+
+def _drop_private_metadata(pdf: pymupdf.Document) -> None:
+    """Delete the private-metadata keys from the catalog and every page (the objects
+    they pointed to become unreferenced and are dropped by ``garbage=4``)."""
+    mupdf = pymupdf.mupdf
+    raw = pymupdf._as_pdf_document(pdf)
+    targets = [(pdf.pdf_catalog(), _CATALOG_PRIVATE_KEYS)]
+    targets += [(pdf.page_xref(i), _PAGE_PRIVATE_KEYS) for i in range(pdf.page_count)]
+    for xref, keys in targets:
+        obj = mupdf.pdf_new_indirect(raw, xref, 0)
+        for key in keys:
+            mupdf.pdf_dict_dels(obj, key)
 
 
 REPLACE_ATTEMPTS = 3
