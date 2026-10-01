@@ -138,6 +138,37 @@ def get_color(parent: QWidget | None, initial: QColor) -> QColor | None:
     return color if color.isValid() else None
 
 
+def get_image_path(parent: QWidget | None, directory: str) -> str | None:
+    """Choose a signature image; ``None`` when cancelled."""
+    path, _ = QFileDialog.getOpenFileName(
+        parent,
+        QCoreApplication.translate("Dialogs", "Choose a signature image"),
+        directory,
+        QCoreApplication.translate(
+            "Dialogs", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
+        ),
+    )
+    return path or None
+
+
+def ask_text(parent: QWidget | None, title: str, label: str, initial: str) -> str | None:
+    """One-line text prompt; ``None`` when cancelled."""
+    text, ok = QInputDialog.getText(parent, title, label, QLineEdit.EchoMode.Normal, initial)
+    return text if ok else None
+
+
+def confirm_delete_signature(parent: QWidget | None, name: str) -> bool:
+    """Ask before deleting a saved signature."""
+    answer = QMessageBox.question(
+        parent,
+        QCoreApplication.translate("Dialogs", "Delete"),
+        QCoreApplication.translate("Dialogs", "Delete the signature “{name}”?").format(name=name),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    return answer == QMessageBox.StandardButton.Yes
+
+
 def get_open_path(parent: QWidget | None, directory: str) -> str | None:
     path, _ = QFileDialog.getOpenFileName(
         parent,

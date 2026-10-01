@@ -162,59 +162,79 @@ Voulez-vous le remplacer ?</translation>
         <translation>Choisir la couleur du texte</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="144"/>
+        <location filename="../ui/dialogs.py" line="145"/>
+        <source>Choose a signature image</source>
+        <translation>Choisir une image de signature</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="147"/>
+        <source>Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)</source>
+        <translation>Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="164"/>
+        <source>Delete</source>
+        <translation>Supprimer</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="165"/>
+        <source>Delete the signature “{name}”?</source>
+        <translation>Supprimer la signature « {name} » ?</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="175"/>
         <source>Open PDF</source>
         <translation>Ouvrir un PDF</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="146"/>
+        <location filename="../ui/dialogs.py" line="177"/>
         <source>PDF documents (*.pdf);;All files (*)</source>
         <translation>Documents PDF (*.pdf);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="155"/>
+        <location filename="../ui/dialogs.py" line="186"/>
         <source>Save PDF As</source>
         <translation>Enregistrer le PDF sous</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="157"/>
+        <location filename="../ui/dialogs.py" line="188"/>
         <source>PDF documents (*.pdf)</source>
         <translation>Documents PDF (*.pdf)</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="190"/>
+        <location filename="../ui/dialogs.py" line="221"/>
         <source>Language changed</source>
         <translation>Langue modifiée</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="191"/>
+        <location filename="../ui/dialogs.py" line="222"/>
         <source>The new language will be used after restarting PDF Editor.
 Restart now?</source>
         <translation>La nouvelle langue sera utilisée après le redémarrage de PDF Editor.
 Redémarrer maintenant ?</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="217"/>
+        <location filename="../ui/dialogs.py" line="248"/>
         <source>Version {version}</source>
         <translation>Version {version}</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="218"/>
+        <location filename="../ui/dialogs.py" line="249"/>
         <source>Free and open-source PDF editor: fill forms, add text and stamps, sign.</source>
         <translation>Éditeur PDF libre et open source : remplir des formulaires, ajouter du texte et des tampons, signer.</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="222"/>
+        <location filename="../ui/dialogs.py" line="253"/>
         <source>This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License version 3. It comes with ABSOLUTELY NO WARRANTY.</source>
         <translation>Ce programme est un logiciel libre : vous pouvez le redistribuer et/ou le modifier selon les termes de la licence publique générale GNU Affero version 3. Il est fourni SANS AUCUNE GARANTIE.</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="226"/>
+        <location filename="../ui/dialogs.py" line="257"/>
         <source>Built with:</source>
         <translation>Construit avec :</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="238"/>
+        <location filename="../ui/dialogs.py" line="269"/>
         <source>About PDF Editor</source>
         <translation>À propos de PDF Editor</translation>
     </message>
@@ -572,6 +592,138 @@ Redémarrer maintenant ?</translation>
         <location filename="../ui/main_window.py" line="832"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
+    </message>
+</context>
+<context>
+    <name>SignatureImportDialog</name>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="99"/>
+        <source>Import Signature</source>
+        <translation>Importer une signature</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="104"/>
+        <source>Browse…</source>
+        <translation>Parcourir…</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="113"/>
+        <location filename="../ui/signature_dialogs.py" line="138"/>
+        <source>Preview</source>
+        <translation>Aperçu</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="124"/>
+        <source>Even out paper</source>
+        <translation>Uniformiser le papier</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="126"/>
+        <source>Crop to ink</source>
+        <translation>Rogner sur l’encre</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="130"/>
+        <source>Keep</source>
+        <translation>Conserver</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="131"/>
+        <source>Black</source>
+        <translation>Noir</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="132"/>
+        <source>Blue</source>
+        <translation>Bleu</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="137"/>
+        <source>Image file</source>
+        <translation>Fichier image</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="139"/>
+        <source>Threshold</source>
+        <translation>Seuil</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="142"/>
+        <source>Ink colour</source>
+        <translation>Couleur de l’encre</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="143"/>
+        <source>Name</source>
+        <translation>Nom</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="147"/>
+        <source>The signature is stored only on this computer. Anyone who receives a signed PDF can copy the image from it.</source>
+        <translation>La signature est conservée uniquement sur cet ordinateur. Toute personne recevant un PDF signé peut en copier l’image.</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="204"/>
+        <source>The image could not be read.</source>
+        <translation>L’image n’a pas pu être lue.</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="310"/>
+        <source>No ink was found in the image; lower the threshold.</source>
+        <translation>Aucune encre n’a été détectée dans l’image ; réduisez le seuil.</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="318"/>
+        <source>The signature could not be saved.</source>
+        <translation>La signature n’a pas pu être enregistrée.</translation>
+    </message>
+</context>
+<context>
+    <name>SignatureManagerDialog</name>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="344"/>
+        <source>Signatures</source>
+        <translation>Signatures</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="351"/>
+        <source>Add…</source>
+        <translation>Ajouter…</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="352"/>
+        <source>Rename…</source>
+        <translation>Renommer…</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="353"/>
+        <source>Delete</source>
+        <translation>Supprimer</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="354"/>
+        <source>Set as Default</source>
+        <translation>Définir par défaut</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="371"/>
+        <source>Close</source>
+        <translation>Fermer</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="437"/>
+        <source>The signature could not be saved.</source>
+        <translation>La signature n’a pas pu être enregistrée.</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="451"/>
+        <source>Rename Signature</source>
+        <translation>Renommer la signature</translation>
+    </message>
+    <message>
+        <location filename="../ui/signature_dialogs.py" line="451"/>
+        <source>Signature name</source>
+        <translation>Nom de la signature</translation>
     </message>
 </context>
 <context>
