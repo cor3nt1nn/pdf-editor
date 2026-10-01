@@ -1270,3 +1270,84 @@ def make_odd_stamps_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M5: export ----------------------------------------------------------------------------
+#: URI link rect (y-down) of :func:`make_links_pdf`; the GoTo link is ``LINK_GOTO_RECT``.
+LINK_URI_RECT: Rect4 = (72, 60, 150, 80)
+LINK_GOTO_RECT: Rect4 = (72, 100, 150, 120)
+LINK_URI = "https://example.org/"
+LINK_NOTE_TEXT = "a sticky note"
+LINK_SIG_FIELD = "sig"
+
+
+def make_links_pdf(path: Path) -> Path:
+    """Two A4 pages. Page 1: text, a URI link (``LINK_URI_RECT``), a GoTo link to page 2
+    (``LINK_GOTO_RECT``), a sticky note (Text annotation with a popup), a Highlight over
+    the URI link and an unsigned signature field (/FT/Sig widget ``LINK_SIG_FIELD``)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    page.insert_text((72, 72), "link here", fontsize=12)
+    page.insert_text((72, 112), "go to page 2", fontsize=12)
+    del page  # pages are invalidated when another page is added
+    doc.new_page(width=A4[0], height=A4[1]).insert_text((72, 72), "Page 2", fontsize=14)
+    page = doc[0]
+    page.insert_link(
+        {"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(LINK_URI_RECT), "uri": LINK_URI}
+    )
+    page.insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(LINK_GOTO_RECT), "page": 1})
+    page.add_text_annot((200, 200), LINK_NOTE_TEXT)
+    page.add_highlight_annot(pymupdf.Rect(LINK_URI_RECT))
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+    w.field_name = LINK_SIG_FIELD
+    w.rect = pymupdf.Rect(300, 300, 400, 340)
+    page.add_widget(w)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def render_diff(a: pymupdf.Pixmap, b: pymupdf.Pixmap) -> tuple[int, int]:
+    """(number of differing channels, largest absolute channel difference) of two
+    pixmaps of the same size and format (rows compared first, so equal areas are fast)."""
+    assert (a.width, a.height, a.n) == (b.width, b.height, b.n), "different pixmap sizes"
+    sa, sb = a.samples, b.samples
+    if sa == sb:
+        return 0, 0
+    stride = a.stride
+    count = largest = 0
+    for start in range(0, len(sa), stride):
+        ra, rb = sa[start : start + stride], sb[start : start + stride]
+        if ra == rb:
+            continue
+        for x, y in zip(ra, rb, strict=True):
+            if x != y:
+                count += 1
+                d = abs(x - y)
+                if d > largest:
+                    largest = d
+    return count, largest
+
+
+#: Values written by :func:`fill_lo_form`: field name -> (widget index among the field's
+#: widgets, value). "Civilité" "f" shows "Madame".
+LO_FILL: dict[str, tuple[int, str | bool]] = {
+    "Zone de texte 8_54": (0, "Élève à Noël €"),
+    "Zone de texte multi": (0, "ligne 1\nligne 2"),
+    "Case à cocher 1_2": (0, True),
+    "Case à cocher 1_3": (0, True),
+    "Civilité": (0, "f"),
+    "Couleur": (0, "Vert"),
+    "Sexe": (1, True),
+    "Nom": (0, "Dupont"),
+}
+
+
+def fill_lo_form(doc) -> None:
+    """Fill a :func:`make_lo_form_pdf` document (a ``PdfDocument``) with ``LO_FILL``
+    through ``set_field_value`` (not saved)."""
+    widgets = doc.all_widgets()
+    for name, (index, value) in LO_FILL.items():
+        w = [x for x in widgets if x.name == name][index]
+        doc.set_field_value(w.page, w.xref, value, name=w.name, unrotated_rect=w.unrotated_rect)

@@ -21,7 +21,11 @@ def test_defaults(settings: Settings) -> None:
     assert settings.window_state.isEmpty()
     assert settings.last_open_dir == ""
     assert settings.recent_files == []
-    assert settings.flatten_on_export is False
+    assert not hasattr(settings, "flatten_on_export")
+    assert settings.export_flatten_forms is True
+    assert settings.export_flatten_annots is True
+    assert settings.export_keep_encryption is True
+    assert settings.export_keep_metadata is True
     assert settings.highlight_fields is True
     assert settings.auto_shrink_text is True
     assert settings.signature_width == 150.0
@@ -36,7 +40,10 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     settings.window_state = QByteArray(b"\x03state")
     settings.last_open_dir = "C:/Users/Test/Documents"
     settings.recent_files = ["C:/a.pdf", "C:/b é.pdf"]
-    settings.flatten_on_export = True
+    settings.export_flatten_forms = False
+    settings.export_flatten_annots = False
+    settings.export_keep_encryption = False
+    settings.export_keep_metadata = False
     settings.highlight_fields = False
     settings.auto_shrink_text = False
     settings.signature_width = 182.5
@@ -52,10 +59,26 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     assert bytes(s.window_state.data()) == b"\x03state"
     assert s.last_open_dir == "C:/Users/Test/Documents"
     assert s.recent_files == ["C:/a.pdf", "C:/b é.pdf"]
-    assert s.flatten_on_export is True
+    assert s.export_flatten_forms is False
+    assert s.export_flatten_annots is False
+    assert s.export_keep_encryption is False
+    assert s.export_keep_metadata is False
     assert s.highlight_fields is False
     assert s.auto_shrink_text is False
     assert s.signature_width == 182.5
+
+
+def test_export_choices_mixed(settings: Settings, ini_path) -> None:
+    settings.export_flatten_forms = True
+    settings.export_flatten_annots = False
+    settings.sync()
+    s = _reopen(ini_path)
+    assert s.export_flatten_forms is True
+    assert s.export_flatten_annots is False
+    assert s.export_keep_encryption is True
+    text = ini_path.read_text(encoding="utf-8")
+    assert "[export]" in text
+    assert "flatten_on_export" not in text
 
 
 def test_single_recent_file_and_language_reset(settings: Settings, ini_path) -> None:

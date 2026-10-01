@@ -141,13 +141,38 @@ class Settings:
     def recent_files(self, value: list[str]) -> None:
         self._s.setValue("files/recent", list(value))
 
+    # Export Copy dialog choices (docs/M5_PLAN.md 1.1), all on by default.
     @property
-    def flatten_on_export(self) -> bool:
-        return self._bool("files/flatten_on_export", False)
+    def export_flatten_forms(self) -> bool:
+        return self._bool("export/flatten_forms", True)
 
-    @flatten_on_export.setter
-    def flatten_on_export(self, value: bool) -> None:
-        self._s.setValue("files/flatten_on_export", bool(value))
+    @export_flatten_forms.setter
+    def export_flatten_forms(self, value: bool) -> None:
+        self._s.setValue("export/flatten_forms", bool(value))
+
+    @property
+    def export_flatten_annots(self) -> bool:
+        return self._bool("export/flatten_annots", True)
+
+    @export_flatten_annots.setter
+    def export_flatten_annots(self, value: bool) -> None:
+        self._s.setValue("export/flatten_annots", bool(value))
+
+    @property
+    def export_keep_encryption(self) -> bool:
+        return self._bool("export/keep_encryption", True)
+
+    @export_keep_encryption.setter
+    def export_keep_encryption(self, value: bool) -> None:
+        self._s.setValue("export/keep_encryption", bool(value))
+
+    @property
+    def export_keep_metadata(self) -> bool:
+        return self._bool("export/keep_metadata", True)
+
+    @export_keep_metadata.setter
+    def export_keep_metadata(self, value: bool) -> None:
+        self._s.setValue("export/keep_metadata", bool(value))
 
     @property
     def highlight_fields(self) -> bool:

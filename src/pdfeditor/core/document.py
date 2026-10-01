@@ -17,6 +17,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pymupdf
@@ -85,6 +86,25 @@ class FieldError(DocumentError):
 
 class AnnotError(DocumentError):
     """An annotation could not be found (anymore), created or changed."""
+
+
+@dataclass(frozen=True)
+class ExportOptions:
+    """What :meth:`PdfDocument.export_copy` does to the copy.
+
+    ``flatten_forms``: draw the form fields into the page content and remove the form
+    (``Document.bake(widgets=True)``). ``flatten_annots``: same for the other
+    annotations (text boxes, stamps, signatures, highlights; links are kept, hidden
+    annotations disappear). Both off = a clean copy (full rewrite, no earlier revisions).
+    ``keep_encryption``: keep the password protection (ignored, i.e. always kept, for
+    owner-password restrictions: see :attr:`PdfDocument.has_restrictions`).
+    ``keep_metadata``: keep the document properties (Info dictionary and XMP metadata).
+    """
+
+    flatten_forms: bool = True
+    flatten_annots: bool = True
+    keep_encryption: bool = True
+    keep_metadata: bool = True
 
 
 class PdfDocument(QObject):
@@ -253,6 +273,20 @@ class PdfDocument(QObject):
     def permissions(self) -> int:
         with self.lock:
             return int(self.fitz.permissions)
+
+    @property
+    def encryption_method(self) -> str | None:
+        """The encryption of the file (e.g. "AES-256 (R6)"), or None if it is not
+        encrypted. Set for owner-password-only files too (unlike :attr:`is_encrypted`)."""
+        with self.lock:
+            method = self.fitz.metadata.get("encryption")
+        return str(method) if method else None
+
+    @property
+    def has_restrictions(self) -> bool:
+        """Encrypted with an owner password only (opens without a password, permissions
+        set by the author): exports always keep that protection."""
+        return self.encryption_method is not None and not self._encrypted
 
     @property
     def is_form(self) -> bool:
@@ -777,6 +811,51 @@ class PdfDocument(QObject):
             self.path_changed.emit(new_path)
         log.info("saved as: %s", new_path)
 
+    def export_copy(
+        self, path: str | os.PathLike[str], options: ExportOptions | None = None
+    ) -> None:
+        """Write a copy of the current state (unsaved changes included) to ``path``.
+
+        The copy is built from an in-memory write of this document, then flattened,
+        cleaned and fully rewritten (``garbage=4``) as ``options`` say. The open document,
+        its path, caches, undo history and modified state are unchanged and no signal is
+        emitted; only its next save is a full one (an incremental write after an
+        in-memory write would produce a corrupt file). A static XFA form filled in this
+        session loses its /XFA in the copy; a dynamic XFA form is never flattened
+        (``flatten_forms`` is ignored). Raises ``ValueError`` if ``path`` is the
+        document's own file, :class:`SaveError` if the copy cannot be made or written (no
+        temp file is left behind).
+        """
+        options = options if options is not None else ExportOptions()
+        path = str(path)
+        if self._path is not None and _same_file(path, self._path):
+            raise ValueError("an exported copy cannot replace the open document")
+        if self._xfa_kind is XfaKind.DYNAMIC and options.flatten_forms:
+            log.info("dynamic XFA form: exporting without flattening the fields")
+            options = replace(options, flatten_forms=False)
+        if self.has_restrictions and not options.keep_encryption:
+            log.info("owner-password restrictions are kept in the exported copy")
+            options = replace(options, keep_encryption=True)
+        strip = self._xfa_kind is XfaKind.STATIC and self._form_edited
+        with self.lock:
+            try:
+                try:
+                    data = self.fitz.tobytes(
+                        garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_KEEP
+                    )
+                finally:
+                    # The in-memory write marks the changes as written: an incremental
+                    # save on top of it would produce a corrupt file (docs/M5_PLAN.md C1).
+                    self._needs_full_save = True
+                out = _export_bytes(data, options, self._password, strip_static_xfa=strip)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise SaveError(str(exc)) from exc
+        try:
+            _write_atomically(path, out)
+        except OSError as exc:
+            raise SaveError(str(exc)) from exc
+        log.info("exported %s to %s (%s)", self._path, path, options)
+
     def _full_save_kwargs(self) -> dict[str, object]:
         return {"garbage": 3, "deflate": True, "encryption": pymupdf.PDF_ENCRYPT_KEEP}
 
@@ -924,6 +1003,37 @@ def _incremental_bytes(doc: pymupdf.Document) -> bytes:
     finally:
         out.fz_close_output()
     return bytes(buf.fz_buffer_extract())
+
+
+def _export_bytes(
+    data: bytes,
+    options: ExportOptions,
+    password: str | None,
+    *,
+    strip_static_xfa: bool = False,
+) -> bytes:
+    """The exported file made from ``data`` (an in-memory write of the document, with
+    its encryption): opened as a separate document (authenticated with ``password``),
+    XFA stripped, baked and metadata cleared as asked, then fully rewritten with
+    ``garbage=4`` (no free or unreferenced objects, no earlier revisions)."""
+    copy = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        # needs_pass is read only before authenticate() (see PdfDocument.open()).
+        if copy.needs_pass and not copy.authenticate(password or ""):
+            raise SaveError("the copy could not be decrypted")
+        if strip_static_xfa:
+            strip_xfa(copy)
+        if options.flatten_forms or options.flatten_annots:
+            copy.bake(annots=options.flatten_annots, widgets=options.flatten_forms)
+        if not options.keep_metadata:
+            copy.set_metadata({})
+            copy.del_xml_metadata()
+        encryption = (
+            pymupdf.PDF_ENCRYPT_KEEP if options.keep_encryption else pymupdf.PDF_ENCRYPT_NONE
+        )
+        return copy.tobytes(garbage=4, deflate=True, encryption=encryption)
+    finally:
+        copy.close()
 
 
 REPLACE_ATTEMPTS = 3
