@@ -1184,7 +1184,11 @@ ODD_STAMP_RECTS: dict[str, Rect4] = {
     "no_rect": (300, 50, 500, 130),
     "huge": (300, 150, 500, 230),
     "no_width": (300, 250, 500, 330),
+    "acrobat": (300, 350, 500, 430),
+    "scaled": (300, 450, 500, 530),
 }
+#: /Contents, /T and /C of the "acrobat" stamp of :func:`make_odd_stamps_pdf`.
+ODD_ACROBAT_KEYS = {"Contents": "Signed by Alice", "T": "Alice", "C": "[1 0 0]"}
 #: Colour of the opaque JPEG of the "dct" stamp and of the "mask1" image.
 ODD_DCT_COLOR = (30, 40, 160)
 ODD_MASK1_COLOR = (200, 0, 0)
@@ -1204,7 +1208,9 @@ def make_odd_stamps_pdf(path: Path) -> Path:
     :data:`ODD_STAMP_RECTS`): "ok" (ours), "no_image" (an "Approved" text stamp with
     /IT /StampImage), "dct" (opaque 200x80 JPEG, no /SMask), "mask1" (200x80 RGB with a
     1-bit /SMask: top half opaque, bottom half clear), "no_rect" (/Rect null), "huge"
-    (coordinates beyond 1e6 pt) and "no_width" (image without /Width)."""
+    (coordinates beyond 1e6 pt), "no_width" (image without /Width), "acrobat" (an
+    Acrobat-like appearance: a 200x80 form drawing a red border and the image as /Im0,
+    with :data:`ODD_ACROBAT_KEYS`) and "scaled" (MuPDF's appearance with a /Matrix)."""
     from PySide6.QtCore import QBuffer, QByteArray, QIODevice
     from PySide6.QtGui import QColor, QImage
 
@@ -1241,6 +1247,20 @@ def make_odd_stamps_pdf(path: Path) -> Path:
     huge = _our_signature(doc, page, r["huge"], image, "huge")
     no_width = _raw_image(doc, f"/Height 10{rgb}", b"\0" * 300)
     _our_signature(doc, page, r["no_width"], no_width, "no_width")
+    acrobat = _our_signature(doc, page, r["acrobat"], image, "acrobat")
+    ap = doc.get_new_xref()
+    doc.update_object(
+        ap,
+        f"<</Type/XObject/Subtype/Form/BBox[0 0 200 80]/Matrix[1 0 0 1 0 0]"
+        f"/Resources<</XObject<</Im0 {image} 0 R>>>>>>",
+    )
+    doc.update_stream(ap, b"q 1 0 0 RG 2 w 1 1 198 78 re S Q q 200 0 0 80 0 0 cm /Im0 Do Q")
+    doc.xref_set_key(acrobat, "AP", f"<</N {ap} 0 R>>")
+    for key, value in ODD_ACROBAT_KEYS.items():
+        doc.xref_set_key(acrobat, key, value if key == "C" else pymupdf.get_pdf_str(value))
+    scaled = _our_signature(doc, page, r["scaled"], image, "scaled")
+    scaled_ap = int(doc.xref_get_key(scaled, "AP/N")[1].split()[0])
+    doc.xref_set_key(scaled_ap, "Matrix", "[2 0 0 2 0 0]")
     del page
     doc.xref_set_key(no_rect, "Rect", "null")
     doc.xref_set_key(huge, "Rect", "[1000000 1000000 2000000 2000010]")

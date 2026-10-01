@@ -334,6 +334,53 @@ def signature_image_xref(
     return image
 
 
+def _numbers(value: str) -> list[float] | None:
+    try:
+        return [float(v) for v in value.strip("[] ").split()]
+    except ValueError:
+        return None
+
+
+def has_mupdf_appearance(fitz_doc: pymupdf.Document, annot_xref: int) -> bool:
+    """The normal appearance of stamp ``annot_xref`` is the one MuPDF builds for an image
+    stamp (``pdf_update_annot`` would rebuild it identically): a form XObject with
+    ``/BBox [0 0 1 1]``, no or an identity ``/Matrix``, one ``/XObject`` resource ``/I``
+    and the content ``/I Do``. Any other appearance (Acrobat's ``/Im0`` with a border,
+    a scaled form...) would be replaced by MuPDF's on a move, so such a stamp is locked."""
+    doc = fitz_doc
+    kind, value = _key(doc, annot_xref, "AP/N")
+    if kind != "xref":
+        return False
+    try:
+        form = int(value.split()[0])
+    except (ValueError, IndexError):
+        return False
+    if _key(doc, form, "Subtype")[1] != "/Form":
+        return False
+    kind, bbox = _key(doc, form, "BBox")
+    if kind != "array" or _numbers(bbox) != [0, 0, 1, 1]:
+        return False
+    kind, matrix = _key(doc, form, "Matrix")
+    if kind != "null" and (kind != "array" or _numbers(matrix) != [1, 0, 0, 1, 0, 0]):
+        return False
+    kind, xobjects = _key(doc, form, "Resources/XObject")
+    if kind == "xref":
+        try:
+            xobjects = doc.xref_object(int(xobjects.split()[0]), compressed=True)
+        except Exception:  # malformed reference
+            return False
+    elif kind != "dict":
+        return False
+    names = [t for t in xobjects.replace("<<", " ").replace(">>", " ").split() if t[:1] == "/"]
+    if names != ["/I"]:
+        return False
+    try:
+        content = doc.xref_stream(form)
+    except Exception:  # MuPDF raises FzError* on broken streams
+        return False
+    return content is not None and content.split() == [b"/I", b"Do"]
+
+
 def _image_obj(fitz_doc: pymupdf.Document, image_xref: int):  # noqa: ANN202 - mupdf type
     return _mupdf.pdf_new_indirect(pymupdf._as_pdf_document(fitz_doc), image_xref, 0)
 

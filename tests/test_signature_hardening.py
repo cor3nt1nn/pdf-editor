@@ -198,8 +198,9 @@ def test_odd_stamps_are_read_without_crash(odd_stamps_pdf) -> None:
         # No/huge /Rect: listed with an empty rect, never editable.
         for name in ("no_rect", "huge"):
             assert infos[name].rect.isEmpty() and not infos[name].editable, name
-        # An image without /Width: locked.
-        assert infos["no_width"].locked and not infos["no_width"].editable
+        # An image without /Width, or an appearance MuPDF did not build: locked.
+        for name in ("no_width", "acrobat", "scaled"):
+            assert infos[name].locked and not infos[name].editable, name
         with pytest.raises(AnnotError):
             doc.update_annot(0, "no_width", rect=QRectF(10, 10, 100, 40))
 
@@ -270,7 +271,7 @@ def test_odd_stamps_are_not_selectable(qtbot, window, odd_stamps_pdf) -> None:
             tool.mouse_move(_event(0, QPointF(x, y), Qt.MouseButton.NoButton))
     for name in ("ok", "dct", "mask1"):
         assert tool.annot_at(0, _centre(ODD_STAMP_RECTS[name])).name == name
-    for name in ("no_image", "no_rect", "huge", "no_width"):
+    for name in ("no_image", "no_rect", "huge", "no_width", "acrobat", "scaled"):
         assert tool.annot_at(0, _centre(ODD_STAMP_RECTS[name])) is None, name
 
     # A click where the unusable "no_width" stamp sits places a new signature instead.

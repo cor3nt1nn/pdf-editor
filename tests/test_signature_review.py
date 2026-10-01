@@ -1,5 +1,5 @@
 """M4 review fixes: nothing hidden under alpha 0 reaches the PDF, size of a "Keep colour"
-photo signature."""
+photo signature, foreign image stamps are locked."""
 
 from __future__ import annotations
 
@@ -7,13 +7,14 @@ import os
 
 import pymupdf
 import pytest
-from fixtures import A4
+from fixtures import A4, ODD_ACROBAT_KEYS, ODD_STAMP_RECTS
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import image_tools
+from pdfeditor.core import image_tools, signature
 from pdfeditor.core.annotations import AnnotKind, AnnotSpec
-from pdfeditor.core.document import PdfDocument
+from pdfeditor.core.commands import DeleteAnnotCommand, EditAnnotCommand
+from pdfeditor.core.document import AnnotError, PdfDocument
 from pdfeditor.core.signature import ImageData
 
 RECT = QRectF(100, 100, 200, 80)
@@ -101,3 +102,54 @@ def test_photo_signature_incremental_save_is_small(
     growth = os.path.getsize(blank.path) - size
     assert growth < budget, growth
     assert blank.annot_image(0, blank.annots(0)[0].name) == data
+
+
+# -- 3: foreign appearances are locked ---------------------------------------------------
+def _stamp_state(doc: PdfDocument, name: str) -> tuple[str, bytes, dict[str, str]]:
+    with doc.lock:
+        xref = doc.annot(0, name).xref
+        form = int(doc.fitz.xref_get_key(xref, "AP/N")[1].split()[0])
+        keys = {k: doc.fitz.xref_get_key(xref, k)[1] for k in ("Contents", "T", "C", "Rect")}
+        return doc.fitz.xref_object(form, compressed=True), doc.fitz.xref_stream(form), keys
+
+
+@pytest.mark.parametrize("name", ["acrobat", "scaled"])
+def test_foreign_appearance_stamp_is_locked_and_kept(qapp, odd_stamps_pdf, name) -> None:
+    doc = PdfDocument.open(str(odd_stamps_pdf))
+    try:
+        info = doc.annot(0, name)
+        assert info.kind is AnnotKind.SIGNATURE and info.locked and not info.editable
+        with doc.lock:
+            assert not signature.has_mupdf_appearance(doc.fitz, info.xref)
+            assert signature.has_mupdf_appearance(doc.fitz, doc.annot(0, "ok").xref)
+        before = _stamp_state(doc, name)
+        if name == "acrobat":
+            keys = before[2]
+            assert keys["Contents"] == ODD_ACROBAT_KEYS["Contents"]
+            assert keys["T"] == ODD_ACROBAT_KEYS["T"]
+            assert b"/Im0 Do" in before[1]
+        with pytest.raises(AnnotError):
+            doc.update_annot(0, name, rect=info.rect.translated(10, 10))
+        with pytest.raises(AnnotError):
+            doc.delete_annot(0, name)
+        with pytest.raises(AnnotError):
+            EditAnnotCommand(doc, info, rect=info.rect.translated(10, 10)).apply_now()
+        with pytest.raises(AnnotError):
+            DeleteAnnotCommand(doc, info).apply_now()
+        assert _stamp_state(doc, name) == before
+        doc.save()
+        assert _stamp_state(doc, name) == before
+        assert doc.annot(0, name).rect == QRectF(*ODD_STAMP_RECTS[name][:2], 200, 80)
+    finally:
+        doc.close()
+
+
+def test_mupdf_made_stamps_stay_editable(signed_pdf) -> None:
+    doc = PdfDocument.open(str(signed_pdf))
+    try:
+        sigs = [a for a in doc.annots(0) if a.kind is AnnotKind.SIGNATURE and not a.locked]
+        assert len(sigs) >= 2
+        with doc.lock:
+            assert all(signature.has_mupdf_appearance(doc.fitz, a.xref) for a in sigs)
+    finally:
+        doc.close()

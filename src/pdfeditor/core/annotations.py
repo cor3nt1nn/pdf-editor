@@ -264,14 +264,15 @@ def _signature_info(
     details: dict[str, str] | None,
     image_xref: int | None,
 ) -> AnnotInfo:
-    """Snapshot of signature ``annot`` (locked when its image has no valid size)."""
+    """Snapshot of signature ``annot`` (locked when its image has no valid size or its
+    appearance is not MuPDF's, see :func:`signature.has_mupdf_appearance`)."""
     xref = int(annot.xref)
     if details is None:
         details = annot.info
     if image_xref is None:
         image_xref = signature.signature_image_xref(doc, page, annot)
     size = signature.image_size(doc, image_xref) if image_xref else (0, 0)
-    ok = size[0] > 0 and size[1] > 0
+    ok = size[0] > 0 and size[1] > 0 and signature.has_mupdf_appearance(doc, xref)
     raw = pymupdf.Rect(annot.rect)
     flags = int(annot.flags or 0)
     return AnnotInfo(
