@@ -24,6 +24,16 @@ def _english_after_test():
         remove_translators(app)
 
 
+@pytest.fixture(autouse=True)
+def _private_default_signature_store(tmp_path_factory, monkeypatch):
+    """A ``SignatureStore()`` built without a directory (e.g. ``MainWindow(settings)``)
+    lives in a fresh temporary directory, never in the user's real store."""
+    from pdfeditor.core import signature_store
+
+    directory = tmp_path_factory.mktemp("default_signatures") / "signatures"
+    monkeypatch.setattr(signature_store, "default_directory", lambda: directory)
+
+
 @pytest.fixture
 def ini_path(tmp_path):
     return tmp_path / "PDFEditor.ini"

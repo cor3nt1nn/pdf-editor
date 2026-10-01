@@ -14,7 +14,7 @@ from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import AddAnnotCommand, EditAnnotCommand
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import Snap, SnapKind
-from pdfeditor.ui import dialogs
+from pdfeditor.ui import dialogs, signature_dialogs
 from pdfeditor.ui.main_window import MainWindow
 from pdfeditor.ui.overlays.annot_items import Handle
 from pdfeditor.ui.tools.annot_tools import SignatureTool, form_field_message, resized_rect
@@ -131,12 +131,14 @@ def test_resized_rect_square_unchanged() -> None:
 
 # -- the tool --------------------------------------------------------------------------------
 @pytest.fixture
-def window(qtbot, qapp, settings, monkeypatch):
+def window(qtbot, qapp, settings, signature_store, monkeypatch):
     monkeypatch.setattr(dialogs, "warn", lambda *a, **k: None)
     monkeypatch.setattr(
         dialogs, "confirm_save_changes", lambda p, n: QMessageBox.StandardButton.Discard
     )
-    w = MainWindow(settings)
+    # signature_needed opens the import dialog (queued): never show it here.
+    monkeypatch.setattr(signature_dialogs, "import_signature", lambda *a, **k: None)
+    w = MainWindow(settings, signature_store)
     qtbot.addWidget(w)
     w.resize(900, 700)
     w.show()
@@ -148,9 +150,10 @@ def window(qtbot, qapp, settings, monkeypatch):
 
 
 def _install(w: MainWindow, store) -> SignatureTool:
-    tool = SignatureTool(w.document_view, w.settings, store, w)
-    tool.message.connect(w.statusBar().showMessage)
-    w.tool_manager.register(tool)
+    """The window's signature tool (on ``store``, injected by ``window``), activated."""
+    assert w.signature_store is store
+    tool = w.signature_tool
+    assert isinstance(tool, SignatureTool)
     w.tool_manager.set_active(tool.name)
     assert w.tool_manager.active_tool is tool
     return tool

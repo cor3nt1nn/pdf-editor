@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSpinBox,
     QToolButton,
@@ -34,12 +35,13 @@ from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired
 from pdfeditor.core.forms import XfaKind
 from pdfeditor.core.settings import Settings
+from pdfeditor.core.signature_store import SignatureStore
 from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.resources import app_icon, icon
-from pdfeditor.ui import dialogs
+from pdfeditor.ui import dialogs, signature_dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
-from pdfeditor.ui.tools.annot_tools import AnnotToolBase, StampTool, TextTool
+from pdfeditor.ui.tools.annot_tools import AnnotToolBase, SignatureTool, StampTool, TextTool
 from pdfeditor.ui.tools.base import ToolManager
 from pdfeditor.ui.tools.form_tool import FormTool
 from pdfeditor.ui.tools.hand_tool import HandTool
@@ -75,10 +77,16 @@ def restart_command(path: str | None) -> tuple[str, list[str]]:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self, settings: Settings | None = None, signature_store: SignatureStore | None = None
+    ) -> None:
         super().__init__()
         self._force_close = False
         self.settings = settings if settings is not None else Settings()
+        #: The user's saved signatures (injectable: tests pass a store in tmp_path).
+        self.signature_store = (
+            signature_store if signature_store is not None else SignatureStore(parent=self)
+        )
         self.setObjectName("MainWindow")
         self.setAcceptDrops(True)
         self.setWindowIcon(app_icon())
@@ -204,6 +212,19 @@ class MainWindow(QMainWindow):
             self.tr("Dot Stamp"), QKeySequence("3"), None, "stamp_dot"
         )
         self.act_stamp_dot.setToolTip(self.tr("Dot (3)"))
+        # Not registered through ToolManager.register: activating it with an empty
+        # signature store first runs the import dialog (activate_signature_tool).
+        self.act_signature_tool = self._action(
+            self.tr("&Signature Tool"), QKeySequence("S"), None, "signature_tool"
+        )
+        self.act_signature_tool.setToolTip(self.tr("Signature (S)"))
+        self.act_signature_tool.triggered.connect(self.activate_signature_tool)
+        self.act_add_signature = self._action(
+            self.tr("Add Signature…"), None, self.add_signature, "add_signature"
+        )
+        self.act_manage_signatures = self._action(
+            self.tr("Manage Signatures…"), None, self.manage_signatures, "manage_signatures"
+        )
         self.act_delete_annot = self._action(
             self.tr("&Delete Annotation"),
             [QKeySequence(QKeySequence.StandardKey.Delete), QKeySequence(Qt.Key.Key_Backspace)],
@@ -286,6 +307,7 @@ class MainWindow(QMainWindow):
             (self.act_stamp_check, "stamp_check"),
             (self.act_stamp_cross, "stamp_cross"),
             (self.act_stamp_dot, "stamp_dot"),
+            (self.act_signature_tool, "signature"),
             (self.act_thumbnails, "thumbnails"),
         ):
             act.setIcon(icon(name))
@@ -309,6 +331,21 @@ class MainWindow(QMainWindow):
         ):
             tool.message.connect(self._show_message)
             self.tool_manager.register(tool, action)
+        self.signature_tool = SignatureTool(
+            self.document_view, self.settings, self.signature_store, self
+        )
+        self.signature_tool.message.connect(self._show_message)
+        # Queued: the tool emits from inside a mouse press; run the dialog after it.
+        self.signature_tool.signature_needed.connect(
+            self._on_signature_needed, Qt.ConnectionType.QueuedConnection
+        )
+        self.annot_tools.append(self.signature_tool)
+        tm = self.tool_manager
+        tm.register(self.signature_tool)
+        self.act_signature_tool.setCheckable(True)
+        self.act_signature_tool.setData(self.signature_tool.name)
+        tm.action_group.addAction(self.act_signature_tool)
+        tm.actions[self.signature_tool.name] = self.act_signature_tool
         self.tool_manager.tool_changed.connect(self._update_delete_action)
         self.document_view.annot_selection.changed.connect(self._update_delete_action)
         self.document_view.annot_selection.changed.connect(self._sync_style_widgets)
@@ -332,6 +369,13 @@ class MainWindow(QMainWindow):
         self.menu_edit.addSeparator()
         for act in self._annot_actions():
             self.menu_edit.addAction(act)
+        self.menu_edit.addAction(self.act_signature_tool)
+        self.menu_signatures = QMenu(self.tr("Signatures"), self)
+        self.menu_signatures.setObjectName("signatures_menu")
+        self._signature_group: QActionGroup | None = None
+        self.menu_edit.addMenu(self.menu_signatures)
+        self._rebuild_signatures_menu()
+        self.signature_store.changed.connect(self._rebuild_signatures_menu)
         self.menu_edit.addAction(self.act_delete_annot)
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_auto_shrink)
@@ -385,6 +429,13 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         for act in self._annot_actions():
             tb.addAction(act)
+        # The signature tool, with the saved signatures in its drop-down menu.
+        self.signature_button = QToolButton(self)
+        self.signature_button.setObjectName("signature_button")
+        self.signature_button.setDefaultAction(self.act_signature_tool)
+        self.signature_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.signature_button.setMenu(self.menu_signatures)
+        tb.addWidget(self.signature_button)
         tb.addSeparator()
         self.font_size_spin = QSpinBox(self)
         self.font_size_spin.setObjectName("font_size_spin")
@@ -469,8 +520,8 @@ class MainWindow(QMainWindow):
         can_annotate = self._can_annotate()
         for act in self._annot_actions():
             act.setEnabled(can_annotate)
-        self.font_size_spin.setEnabled(can_annotate)
-        self.color_button.setEnabled(can_annotate)
+        self.act_signature_tool.setEnabled(can_annotate)
+        self._update_style_enabled()
         self._update_delete_action()
         if has_doc:
             cur = self.page_view.current_page
@@ -549,16 +600,29 @@ class MainWindow(QMainWindow):
         """The colour shown by the toolbar colour button."""
         return QColor(self._color)
 
+    def _signature_selected(self) -> bool:
+        current = self.document_view.annot_selection.current
+        return current is not None and current.kind is AnnotKind.SIGNATURE
+
+    def _update_style_enabled(self) -> None:
+        """The style widgets work with a document that allows annotations, and are
+        inert while a signature (which has no text style) is selected."""
+        enabled = self._can_annotate() and not self._signature_selected()
+        self.font_size_spin.setEnabled(enabled)
+        self.color_button.setEnabled(enabled)
+
     def _sync_style_widgets(self) -> None:
-        """Show the selected annotation's style, or the defaults without a selection."""
+        """Show the selected annotation's style, or the defaults without a selection
+        (and for a selected signature, which has no style of its own)."""
         current = self.document_view.annot_selection.current
         font_size = self.settings.annot_font_size
         color = QColor(self.settings.annot_color)
-        if current is not None:
+        if current is not None and current.kind is not AnnotKind.SIGNATURE:
             color = QColor.fromRgbF(*current.color)
             if current.kind is AnnotKind.TEXT:
                 font_size = current.font_size
         self._show_style(font_size, color)
+        self._update_style_enabled()
 
     def _apply_style(self, font_size: float | None = None, color: QColor | None = None) -> None:
         rgb = (color.redF(), color.greenF(), color.blueF()) if color is not None else None
@@ -581,6 +645,109 @@ class MainWindow(QMainWindow):
             return
         self._show_style(self.font_size_spin.value(), color)
         self._apply_style(color=color)
+
+    # -- signatures ------------------------------------------------------------------
+    def _rebuild_signatures_menu(self) -> None:
+        """Edit ▸ Signatures (also the signature button's drop-down): the saved
+        signatures (the checked one is the default), Add Signature…, Manage Signatures…."""
+        menu = self.menu_signatures
+        menu.clear()  # deletes the record actions (owned by the menu), not Add/Manage
+        if self._signature_group is not None:
+            self._signature_group.deleteLater()
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        self._signature_group = group
+        default = self.signature_store.default_id
+        for record in self.signature_store.records():
+            act = QAction(record.name.replace("&", "&&"), menu)
+            act.setCheckable(True)
+            act.setChecked(record.id == default)
+            act.setData(record.id)
+            act.triggered.connect(lambda _checked=False, i=record.id: self.choose_signature(i))
+            group.addAction(act)
+            menu.addAction(act)
+        if group.actions():
+            menu.addSeparator()
+        menu.addAction(self.act_add_signature)
+        menu.addAction(self.act_manage_signatures)
+
+    def signature_actions(self) -> list[QAction]:
+        """The saved-signature entries of the Signatures menu, in store order."""
+        return [a for a in self.menu_signatures.actions() if isinstance(a.data(), str)]
+
+    def _signature_store_failed(self, exc: Exception) -> None:
+        log.warning("signature store write failed: %s", exc)
+        dialogs.warn(
+            self, self.tr("Signatures"), self.tr("The signature could not be saved."), str(exc)
+        )
+
+    def choose_signature(self, sig_id: str) -> None:
+        """A saved signature picked in the Signatures menu: make it the default and
+        switch to the signature tool (when the document can be annotated)."""
+        try:
+            self.signature_store.set_default(sig_id)
+        except KeyError:
+            log.warning("signature %s no longer exists", sig_id)
+            self._rebuild_signatures_menu()
+            return
+        except OSError as exc:
+            self._signature_store_failed(exc)
+            self._rebuild_signatures_menu()  # check the actual default again
+            return
+        if self._can_annotate():
+            self.tool_manager.set_active(self.signature_tool.name)
+
+    def _import_signature(self) -> bool:
+        """Run the import dialog; the new signature becomes the default. True if added."""
+        record = signature_dialogs.import_signature(self.signature_store, self)
+        if record is None:
+            return False
+        try:
+            self.signature_store.set_default(record.id)
+        except (KeyError, OSError) as exc:
+            log.warning("could not make %s the default signature: %s", record.id, exc)
+        return True
+
+    def add_signature(self) -> None:
+        """Signatures ▸ Add Signature…: import one and switch to the signature tool."""
+        if self._import_signature() and self._can_annotate():
+            self.tool_manager.set_active(self.signature_tool.name)
+
+    def manage_signatures(self) -> None:
+        """Signatures ▸ Manage Signatures…."""
+        dialog = signature_dialogs.SignatureManagerDialog(self.signature_store, self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    def activate_signature_tool(self) -> None:
+        """Edit ▸ Signature Tool (S): with no saved signature, run the import dialog
+        first; cancelling it keeps the previous tool."""
+        tm = self.tool_manager
+        previous = tm.active_tool
+        if self._can_annotate() and (self.signature_store.records() or self._import_signature()):
+            tm.set_active(self.signature_tool.name)
+            return
+        # The action group has already checked the signature action: give the check
+        # back to the previous tool.
+        action = tm.actions.get(previous.name) if previous is not None else None
+        if action is not None and action is not self.act_signature_tool:
+            action.setChecked(True)
+        else:
+            self.act_signature_tool.setChecked(previous is self.signature_tool)
+        if self._can_annotate():
+            self._show_message(self._signature_first_message())
+
+    def _signature_first_message(self) -> str:
+        return self.tr("Add a signature first (Signatures ▸ Add Signature…).")
+
+    def _on_signature_needed(self) -> None:
+        """A click with the signature tool while the store is empty."""
+        if self.tool_manager.active_tool is not self.signature_tool:
+            return
+        if not self._import_signature():
+            self._show_message(self._signature_first_message())
 
     def _can_fill_forms(self) -> bool:
         doc = self.document_view.document
