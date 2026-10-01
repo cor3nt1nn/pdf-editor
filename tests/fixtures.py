@@ -111,7 +111,10 @@ CROP_WIDGET_RECT = (100.0, 600.0, 300.0, 650.0)
 
 
 def make_cropped_form_pdf(path: Path, rotation: int) -> Path:
-    """Letter mediabox with an offset cropbox, one opaque red text widget, and /Rotate."""
+    """Letter mediabox with an offset cropbox, one opaque red text widget, and /Rotate.
+
+    Not for signature colour probes: the red widget lies where ``SIG_ASYM_PROBES`` land
+    for a signature placed at the usual test rects."""
     doc = pymupdf.open()
     page = doc.new_page(width=CROP_MEDIABOX[0], height=CROP_MEDIABOX[1])
     widget = pymupdf.Widget()
