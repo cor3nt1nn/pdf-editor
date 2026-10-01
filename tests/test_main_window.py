@@ -314,16 +314,18 @@ def test_save_dialog_appends_suffix_before_overwrite_check(qtbot, tmp_path, monk
 
     existing = tmp_path / "notes.txt.pdf"
     existing.write_bytes(b"x")
-    monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s: str(tmp_path / "notes.txt"))
+    monkeypatch.setattr(
+        dialogs, "_run_save_dialog", lambda p, s, t=None: str(tmp_path / "notes.txt")
+    )
     confirms: list[str] = []
     monkeypatch.setattr(dialogs, "confirm_overwrite", lambda p, path: confirms.append(path))
     assert dialogs.get_save_path(None, "") is None  # declined
     assert confirms == [str(existing)]
     monkeypatch.setattr(dialogs, "confirm_overwrite", lambda p, path: True)
     assert dialogs.get_save_path(None, "") == str(existing)
-    monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s: str(tmp_path / "new"))
+    monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s, t=None: str(tmp_path / "new"))
     assert dialogs.get_save_path(None, "") == str(tmp_path / "new.pdf")
-    monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s: None)
+    monkeypatch.setattr(dialogs, "_run_save_dialog", lambda p, s, t=None: None)
     assert dialogs.get_save_path(None, "") is None
 
 

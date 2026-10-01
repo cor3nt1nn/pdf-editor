@@ -179,11 +179,13 @@ def get_open_path(parent: QWidget | None, directory: str) -> str | None:
     return path or None
 
 
-def make_save_dialog(parent: QWidget | None, suggested: str) -> QFileDialog:
+def make_save_dialog(
+    parent: QWidget | None, suggested: str, title: str | None = None
+) -> QFileDialog:
     """Save dialog that appends ".pdf" *before* its own overwrite confirmation."""
     dialog = QFileDialog(
         parent,
-        QCoreApplication.translate("Dialogs", "Save PDF As"),
+        title or QCoreApplication.translate("Dialogs", "Save PDF As"),
         suggested,
         QCoreApplication.translate("Dialogs", "PDF documents (*.pdf)"),
     )
@@ -193,17 +195,25 @@ def make_save_dialog(parent: QWidget | None, suggested: str) -> QFileDialog:
     return dialog
 
 
-def _run_save_dialog(parent: QWidget | None, suggested: str) -> str | None:
-    dialog = make_save_dialog(parent, suggested)
+def _run_save_dialog(
+    parent: QWidget | None, suggested: str, title: str | None = None
+) -> str | None:
+    dialog = make_save_dialog(parent, suggested, title)
     if dialog.exec() != QFileDialog.DialogCode.Accepted:
         return None
     files = dialog.selectedFiles()
     return files[0] if files else None
 
 
-def get_save_path(parent: QWidget | None, suggested: str) -> str | None:
+def get_export_path(parent: QWidget | None, suggested: str) -> str | None:
+    """Target of File ▸ Export Copy…; same rules as :func:`get_save_path`."""
+    title = QCoreApplication.translate("Dialogs", "Export a Copy")
+    return get_save_path(parent, suggested, title)
+
+
+def get_save_path(parent: QWidget | None, suggested: str, title: str | None = None) -> str | None:
     """Ask for a target path; always ends in ".pdf" and never silently overwrites."""
-    path = _run_save_dialog(parent, suggested)
+    path = _run_save_dialog(parent, suggested, title)
     if not path:
         return None
     if not path.lower().endswith(".pdf"):

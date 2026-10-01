@@ -20,6 +20,8 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
     QDockWidget,
     QLabel,
     QMainWindow,
@@ -32,7 +34,7 @@ from PySide6.QtWidgets import (
 from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import RotatePageCommand
-from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired
+from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired, SaveError
 from pdfeditor.core.forms import XfaKind
 from pdfeditor.core.settings import Settings
 from pdfeditor.core.signature_store import SignatureStore
@@ -40,6 +42,7 @@ from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.resources import app_icon, icon
 from pdfeditor.ui import dialogs, signature_dialogs
 from pdfeditor.ui.document_view import DocumentView
+from pdfeditor.ui.export_dialog import ExportDialog
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
 from pdfeditor.ui.tools.annot_tools import AnnotToolBase, SignatureTool, StampTool, TextTool
 from pdfeditor.ui.tools.base import ToolManager
@@ -66,6 +69,11 @@ def pdf_paths_from_urls(urls) -> list[str]:
 
 def file_exists(path: str) -> bool:
     return os.path.isfile(path)
+
+
+def same_path(a: str, b: str) -> bool:
+    """``a`` and ``b`` name the same file (Windows: case-insensitive, any separator)."""
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 def restart_command(path: str | None) -> tuple[str, list[str]]:
@@ -155,6 +163,9 @@ class MainWindow(QMainWindow):
         )
         self.act_save_as = self._action(
             self.tr("Save &As…"), QKeySequence("Ctrl+Shift+S"), self.save_as, "save_as"
+        )
+        self.act_export = self._action(
+            self.tr("&Export Copy…"), QKeySequence("Ctrl+E"), self.export_copy, "export"
         )
         self.act_close = self._action(
             self.tr("&Close"), QKeySequence("Ctrl+W"), self.close_document, "close"
@@ -353,7 +364,13 @@ class MainWindow(QMainWindow):
     def _create_menus(self) -> None:
         bar = self.menuBar()
         self.menu_file = bar.addMenu(self.tr("&File"))
-        for act in (self.act_open, self.act_save, self.act_save_as, self.act_close):
+        for act in (
+            self.act_open,
+            self.act_save,
+            self.act_save_as,
+            self.act_export,
+            self.act_close,
+        ):
             self.menu_file.addAction(act)
         self.menu_file.addSeparator()
         self.menu_file.addAction(self.act_quit)
@@ -503,6 +520,7 @@ class MainWindow(QMainWindow):
         for act in (
             self.act_save,
             self.act_save_as,
+            self.act_export,
             self.act_close,
             self.act_zoom_in,
             self.act_zoom_out,
@@ -1005,6 +1023,64 @@ class MainWindow(QMainWindow):
             return False
         self.settings.last_open_dir = os.path.dirname(path)
         self._update_title()
+        return True
+
+    def export_copy(self) -> bool:
+        """File ▸ Export Copy…: write a (flattened or clean) copy of the current state.
+
+        The open document, its path, undo history and modified state are unchanged.
+        Returns True if a copy was written.
+        """
+        doc = self.document_view.document
+        if doc is None:
+            return False
+        self.document_view.commit_pending_edits()  # the copy includes the value typed
+        dialog = ExportDialog(doc, self.settings, self)
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return False
+            options = dialog.options()
+            dialog.save_choices()
+        finally:
+            dialog.deleteLater()
+        stem = os.path.splitext(os.path.basename(doc.path))[0] if doc.path else "document"
+        if options.flatten_forms or options.flatten_annots:
+            name = self.tr("{stem} - flattened.pdf").format(stem=stem)
+        else:
+            name = self.tr("{stem} - copy.pdf").format(stem=stem)
+        directory = self.settings.last_open_dir or (os.path.dirname(doc.path) if doc.path else "")
+        path = dialogs.get_export_path(self, os.path.join(directory, name))
+        if not path:
+            return False
+        if doc.path is not None and same_path(path, doc.path):
+            dialogs.warn(
+                self,
+                self.tr("Export Copy"),
+                self.tr("Choose another name: the copy cannot replace the open document."),
+            )
+            return False
+        error: Exception | None = None
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            doc.export_copy(path, options)
+        except (SaveError, ValueError) as exc:
+            log.warning("export to %s failed: %s", path, exc)
+            error = exc
+        finally:
+            QApplication.restoreOverrideCursor()
+        if error is not None:
+            dialogs.warn(
+                self,
+                self.tr("Export failed"),
+                self.tr(
+                    "The copy could not be written as “{name}”. Check that the folder exists and that you are allowed to write there."  # noqa: E501
+                ).format(name=os.path.basename(path)),
+                details=str(error),
+            )
+            return False
+        self.statusBar().showMessage(
+            self.tr("Exported to “{name}”").format(name=os.path.basename(path)), 10000
+        )
         return True
 
     def maybe_save(self) -> bool:

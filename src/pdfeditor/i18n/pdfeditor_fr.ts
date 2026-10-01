@@ -192,49 +192,54 @@ Voulez-vous le remplacer ?</translation>
         <translation>Documents PDF (*.pdf);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="186"/>
+        <location filename="../ui/dialogs.py" line="188"/>
         <source>Save PDF As</source>
         <translation>Enregistrer le PDF sous</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="188"/>
+        <location filename="../ui/dialogs.py" line="190"/>
         <source>PDF documents (*.pdf)</source>
         <translation>Documents PDF (*.pdf)</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="221"/>
+        <location filename="../ui/dialogs.py" line="210"/>
+        <source>Export a Copy</source>
+        <translation>Exporter une copie</translation>
+    </message>
+    <message>
+        <location filename="../ui/dialogs.py" line="231"/>
         <source>Language changed</source>
         <translation>Langue modifiée</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="222"/>
+        <location filename="../ui/dialogs.py" line="232"/>
         <source>The new language will be used after restarting PDF Editor.
 Restart now?</source>
         <translation>La nouvelle langue sera utilisée après le redémarrage de PDF Editor.
 Redémarrer maintenant ?</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="248"/>
+        <location filename="../ui/dialogs.py" line="258"/>
         <source>Version {version}</source>
         <translation>Version {version}</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="249"/>
+        <location filename="../ui/dialogs.py" line="259"/>
         <source>Free and open-source PDF editor: fill forms, add text and stamps, sign.</source>
         <translation>Éditeur PDF libre et open source : remplir des formulaires, ajouter du texte et des tampons, signer.</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="253"/>
+        <location filename="../ui/dialogs.py" line="263"/>
         <source>This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License version 3. It comes with ABSOLUTELY NO WARRANTY.</source>
         <translation>Ce programme est un logiciel libre : vous pouvez le redistribuer et/ou le modifier selon les termes de la licence publique générale GNU Affero version 3. Il est fourni SANS AUCUNE GARANTIE.</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="257"/>
+        <location filename="../ui/dialogs.py" line="267"/>
         <source>Built with:</source>
         <translation>Construit avec :</translation>
     </message>
     <message>
-        <location filename="../ui/dialogs.py" line="269"/>
+        <location filename="../ui/dialogs.py" line="279"/>
         <source>About PDF Editor</source>
         <translation>À propos de PDF Editor</translation>
     </message>
@@ -255,6 +260,49 @@ Redémarrer maintenant ?</translation>
         <location filename="../ui/document_view.py" line="168"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
+    </message>
+</context>
+<context>
+    <name>ExportDialog</name>
+    <message>
+        <location filename="../ui/export_dialog.py" line="32"/>
+        <source>Export Copy</source>
+        <translation>Exporter une copie</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="38"/>
+        <source>Flatten form fields</source>
+        <translation>Aplatir les champs de formulaire</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="39"/>
+        <source>Flatten text, stamps and signatures</source>
+        <translation>Aplatir les textes, tampons et signatures</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="40"/>
+        <source>Keep password protection</source>
+        <translation>Conserver la protection par mot de passe</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="42"/>
+        <source>Keep document properties (title, author…)</source>
+        <translation>Conserver les propriétés du document (titre, auteur…)</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="59"/>
+        <source>This form uses dynamic XFA: its fields cannot be flattened here.</source>
+        <translation>Ce formulaire utilise XFA dynamique : ses champs ne peuvent pas être aplatis ici.</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="65"/>
+        <source>A copy is written; the open document is not changed. Flattened fields and annotations can no longer be edited. Earlier saved versions (deleted signatures, previous values) are not carried over.</source>
+        <translation>Une copie est écrite ; le document ouvert n’est pas modifié. Les champs et annotations aplatis ne sont plus modifiables. Les versions enregistrées précédentes (signatures supprimées, anciennes valeurs) ne sont pas reprises.</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="75"/>
+        <source>Export</source>
+        <translation>Exporter</translation>
     </message>
 </context>
 <context>
@@ -282,278 +330,283 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../ui/main_window.py" line="124"/>
+        <location filename="../ui/main_window.py" line="132"/>
         <source>Pages</source>
         <extracomment>Range of the toolbar font-size spin box (pt). The user&apos;s saved signatures (injectable: tests pass a store in tmp_path).</extracomment>
         <translation>Pages</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="151"/>
+        <location filename="../ui/main_window.py" line="159"/>
         <source>&amp;Open…</source>
         <translation>&amp;Ouvrir…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="154"/>
+        <location filename="../ui/main_window.py" line="162"/>
         <source>&amp;Save</source>
         <translation>&amp;Enregistrer</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="157"/>
+        <location filename="../ui/main_window.py" line="165"/>
         <source>Save &amp;As…</source>
         <translation>Enregistrer &amp;sous…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="160"/>
+        <location filename="../ui/main_window.py" line="168"/>
+        <source>&amp;Export Copy…</source>
+        <translation>&amp;Exporter une copie…</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="171"/>
         <source>&amp;Close</source>
         <translation>&amp;Fermer</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="162"/>
+        <location filename="../ui/main_window.py" line="173"/>
         <source>&amp;Quit</source>
         <translation>&amp;Quitter</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="163"/>
+        <location filename="../ui/main_window.py" line="174"/>
         <source>Undo</source>
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="166"/>
+        <location filename="../ui/main_window.py" line="177"/>
         <source>Redo</source>
         <translation>Rétablir</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="180"/>
+        <location filename="../ui/main_window.py" line="191"/>
         <source>Rotate Page &amp;Clockwise</source>
         <translation>Faire pivoter la page dans le sens &amp;horaire</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="186"/>
+        <location filename="../ui/main_window.py" line="197"/>
         <source>Rotate Page C&amp;ounterclockwise</source>
         <translation>Faire pivoter la page dans le sens &amp;antihoraire</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="194"/>
+        <location filename="../ui/main_window.py" line="205"/>
         <source>&amp;Hand Tool</source>
         <translation>Outil &amp;main</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="197"/>
+        <location filename="../ui/main_window.py" line="208"/>
         <source>&amp;Form Tool</source>
         <translation>Outil &amp;formulaire</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="200"/>
+        <location filename="../ui/main_window.py" line="211"/>
         <source>&amp;Text Tool</source>
         <translation>Outil &amp;texte</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="202"/>
+        <location filename="../ui/main_window.py" line="213"/>
         <source>Text (T)</source>
         <translation>Texte (T)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="204"/>
+        <location filename="../ui/main_window.py" line="215"/>
         <source>Check Mark Stamp</source>
         <translation>Tampon coche</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="206"/>
+        <location filename="../ui/main_window.py" line="217"/>
         <source>Check mark (1)</source>
         <translation>Coche (1)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="208"/>
+        <location filename="../ui/main_window.py" line="219"/>
         <source>Cross Stamp</source>
         <translation>Tampon croix</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="210"/>
+        <location filename="../ui/main_window.py" line="221"/>
         <source>Cross (2)</source>
         <translation>Croix (2)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="212"/>
+        <location filename="../ui/main_window.py" line="223"/>
         <source>Dot Stamp</source>
         <translation>Tampon point</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="214"/>
+        <location filename="../ui/main_window.py" line="225"/>
         <source>Dot (3)</source>
         <translation>Point (3)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="218"/>
+        <location filename="../ui/main_window.py" line="229"/>
         <source>&amp;Signature Tool</source>
         <translation>Outil &amp;signature</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="220"/>
+        <location filename="../ui/main_window.py" line="231"/>
         <source>Signature (S)</source>
         <translation>Signature (S)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="223"/>
+        <location filename="../ui/main_window.py" line="234"/>
         <source>Add Signature…</source>
         <translation>Ajouter une signature…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="226"/>
+        <location filename="../ui/main_window.py" line="237"/>
         <source>Manage Signatures…</source>
         <translation>Gérer les signatures…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="229"/>
+        <location filename="../ui/main_window.py" line="240"/>
         <source>&amp;Delete Annotation</source>
         <translation>&amp;Supprimer l’annotation</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="240"/>
+        <location filename="../ui/main_window.py" line="251"/>
         <source>Auto-shrink Overflowing Text</source>
         <translation>Réduire automatiquement le texte trop long</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="246"/>
+        <location filename="../ui/main_window.py" line="257"/>
         <source>Zoom &amp;In</source>
         <translation>Zoom &amp;avant</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="252"/>
+        <location filename="../ui/main_window.py" line="263"/>
         <source>Zoom &amp;Out</source>
         <translation>Zoom a&amp;rrière</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="255"/>
+        <location filename="../ui/main_window.py" line="266"/>
         <source>Fit &amp;Width</source>
         <translation>Ajuster à la &amp;largeur</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="261"/>
+        <location filename="../ui/main_window.py" line="272"/>
         <source>Fit &amp;Page</source>
         <translation>Ajuster à la &amp;page</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="267"/>
+        <location filename="../ui/main_window.py" line="278"/>
         <source>&amp;Actual Size</source>
         <translation>&amp;Taille réelle</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="273"/>
+        <location filename="../ui/main_window.py" line="284"/>
         <source>&amp;Previous Page</source>
         <translation>Page &amp;précédente</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="275"/>
+        <location filename="../ui/main_window.py" line="286"/>
         <source>&amp;Next Page</source>
         <translation>Page &amp;suivante</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="277"/>
+        <location filename="../ui/main_window.py" line="288"/>
         <source>&amp;Thumbnails</source>
         <translation>&amp;Vignettes</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="284"/>
+        <location filename="../ui/main_window.py" line="295"/>
         <source>Highlight Form &amp;Fields</source>
         <translation>Surligner les &amp;champs de formulaire</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="290"/>
+        <location filename="../ui/main_window.py" line="301"/>
         <source>&amp;About PDF Editor…</source>
         <translation>À &amp;propos de PDF Editor…</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="292"/>
+        <location filename="../ui/main_window.py" line="303"/>
         <source>Rotate</source>
         <translation>Pivoter</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="355"/>
+        <location filename="../ui/main_window.py" line="366"/>
         <source>&amp;File</source>
         <translation>&amp;Fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="360"/>
+        <location filename="../ui/main_window.py" line="377"/>
         <source>&amp;Edit</source>
         <translation>&amp;Édition</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="373"/>
-        <location filename="../ui/main_window.py" line="681"/>
+        <location filename="../ui/main_window.py" line="390"/>
+        <location filename="../ui/main_window.py" line="699"/>
         <source>Signatures</source>
         <translation>Signatures</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="382"/>
+        <location filename="../ui/main_window.py" line="399"/>
         <source>&amp;View</source>
         <translation>&amp;Affichage</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="398"/>
+        <location filename="../ui/main_window.py" line="415"/>
         <source>&amp;Language</source>
         <translation>&amp;Langue</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="411"/>
+        <location filename="../ui/main_window.py" line="428"/>
         <source>&amp;Help</source>
         <translation>&amp;Aide</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="415"/>
+        <location filename="../ui/main_window.py" line="432"/>
         <source>Main toolbar</source>
         <translation>Barre d’outils principale</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="443"/>
+        <location filename="../ui/main_window.py" line="460"/>
         <source> pt</source>
         <translation> pt</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="445"/>
-        <location filename="../ui/main_window.py" line="446"/>
+        <location filename="../ui/main_window.py" line="462"/>
+        <location filename="../ui/main_window.py" line="463"/>
         <source>Font size</source>
         <translation>Taille de police</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="450"/>
-        <location filename="../ui/main_window.py" line="451"/>
+        <location filename="../ui/main_window.py" line="467"/>
+        <location filename="../ui/main_window.py" line="468"/>
         <source>Text color</source>
         <translation>Couleur du texte</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="460"/>
+        <location filename="../ui/main_window.py" line="477"/>
         <source>Current page</source>
         <translation>Page actuelle</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="496"/>
+        <location filename="../ui/main_window.py" line="513"/>
         <source>{name}[*] — {app}</source>
         <translation>{name}[*] — {app}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="537"/>
+        <location filename="../ui/main_window.py" line="555"/>
         <source>Page {current} / {total}</source>
         <translation>Page {current} / {total}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="681"/>
+        <location filename="../ui/main_window.py" line="699"/>
         <source>The signature could not be saved.</source>
         <translation>La signature n’a pas pu être enregistrée.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="743"/>
+        <location filename="../ui/main_window.py" line="761"/>
         <source>Add a signature first (Signatures ▸ Add Signature…).</source>
         <translation>Ajoutez d’abord une signature (Signatures ▸ Ajouter une signature…).</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="880"/>
-        <location filename="../ui/main_window.py" line="891"/>
+        <location filename="../ui/main_window.py" line="898"/>
+        <location filename="../ui/main_window.py" line="909"/>
         <source>Cannot open file</source>
         <translation>Impossible d’ouvrir le fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="881"/>
-        <location filename="../ui/main_window.py" line="892"/>
+        <location filename="../ui/main_window.py" line="899"/>
+        <location filename="../ui/main_window.py" line="910"/>
         <source>“{path}” could not be opened as a PDF document.
 
 {error}</source>
@@ -562,70 +615,105 @@ Redémarrer maintenant ?</translation>
 {error}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="893"/>
-        <location filename="../ui/main_window.py" line="924"/>
+        <location filename="../ui/main_window.py" line="911"/>
+        <location filename="../ui/main_window.py" line="942"/>
         <source>An unexpected error occurred.</source>
         <translation>Une erreur inattendue s’est produite.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="903"/>
+        <location filename="../ui/main_window.py" line="921"/>
         <source>Adding text and stamps is not permitted by this document’s security settings.</source>
         <translation>L’ajout de texte et de tampons n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="909"/>
+        <location filename="../ui/main_window.py" line="927"/>
         <source>The file was repaired while opening; saving will rewrite it completely.</source>
         <translation>Le fichier a été réparé à l’ouverture ; l’enregistrement le réécrira entièrement.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="916"/>
+        <location filename="../ui/main_window.py" line="934"/>
         <source>The file does not exist.</source>
         <translation>Le fichier n’existe pas.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="918"/>
+        <location filename="../ui/main_window.py" line="936"/>
         <source>The file could not be read. It may be locked by another program.</source>
         <translation>Le fichier n’a pas pu être lu. Il est peut-être verrouillé par un autre programme.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="920"/>
+        <location filename="../ui/main_window.py" line="938"/>
         <source>The file is empty.</source>
         <translation>Le fichier est vide.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="921"/>
+        <location filename="../ui/main_window.py" line="939"/>
         <source>The file is damaged or is not a PDF document.</source>
         <translation>Le fichier est endommagé ou n’est pas un document PDF.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="922"/>
+        <location filename="../ui/main_window.py" line="940"/>
         <source>The document has no pages.</source>
         <translation>Le document ne contient aucune page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="944"/>
+        <location filename="../ui/main_window.py" line="962"/>
         <source>The file “{name}” no longer exists. Use Save As to save a copy.</source>
         <translation>Le fichier « {name} » n’existe plus. Utilisez « Enregistrer sous » pour en enregistrer une copie.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="964"/>
+        <location filename="../ui/main_window.py" line="982"/>
         <source>Saved</source>
         <translation>Enregistré</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="977"/>
+        <location filename="../ui/main_window.py" line="995"/>
         <source>The document could not be saved and had to be closed.</source>
         <translation>Le document n’a pas pu être enregistré et a dû être fermé.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1001"/>
+        <location filename="../ui/main_window.py" line="1019"/>
         <source>The document could not be saved as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>Le document n’a pas pu être enregistré sous « {name} ». Vérifiez que le dossier existe et que vous avez le droit d’y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="943"/>
-        <location filename="../ui/main_window.py" line="976"/>
-        <location filename="../ui/main_window.py" line="999"/>
+        <location filename="../ui/main_window.py" line="1048"/>
+        <source>{stem} - flattened.pdf</source>
+        <translation>{stem} - aplati.pdf</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1050"/>
+        <source>{stem} - copy.pdf</source>
+        <translation>{stem} - copie.pdf</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1058"/>
+        <source>Export Copy</source>
+        <translation>Exporter une copie</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1059"/>
+        <source>Choose another name: the copy cannot replace the open document.</source>
+        <translation>Choisissez un autre nom : la copie ne peut pas remplacer le document ouvert.</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1074"/>
+        <source>Export failed</source>
+        <translation>Échec de l’exportation</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1076"/>
+        <source>The copy could not be written as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
+        <translation>La copie n’a pas pu être écrite sous « {name} ». Vérifiez que le dossier existe et que vous pouvez y écrire.</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1082"/>
+        <source>Exported to “{name}”</source>
+        <translation>Exporté vers « {name} »</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="961"/>
+        <location filename="../ui/main_window.py" line="994"/>
+        <location filename="../ui/main_window.py" line="1017"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
     </message>
