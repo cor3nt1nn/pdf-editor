@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
@@ -10,9 +11,17 @@ from pdfeditor.constants import APP_ID, ORG_NAME, ZoomMode
 from pdfeditor.core.recent import RECENT_MAX
 
 LANGUAGES = ("en", "fr")
+#: Environment variable naming a directory that holds the INI file instead of the
+#: per-user location (``%APPDATA%\PDFEditor\PDFEditor.ini``). Used by the frozen tests.
+SETTINGS_DIR_ENV = "PDFEDITOR_SETTINGS_DIR"
 
 
 def default_qsettings() -> QSettings:
+    """The application's INI settings: ``$PDFEDITOR_SETTINGS_DIR/PDFEditor.ini`` when that
+    variable is set, else the per-user INI file."""
+    override = os.environ.get(SETTINGS_DIR_ENV)
+    if override:
+        return QSettings(str(Path(override) / f"{APP_ID}.ini"), QSettings.Format.IniFormat)
     return QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, ORG_NAME, APP_ID)
 
 

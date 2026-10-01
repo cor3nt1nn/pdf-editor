@@ -45,3 +45,6 @@ ignore = ["N802"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
+markers = [
+    "frozen: tests of the PyInstaller build (skipped unless PDFEDITOR_FROZEN_EXE is set)",
+]
