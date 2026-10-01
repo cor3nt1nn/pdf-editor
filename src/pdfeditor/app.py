@@ -9,7 +9,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -17,10 +17,14 @@ from pdfeditor import __version__
 from pdfeditor.constants import APP_ID, ORG_NAME
 from pdfeditor.core.settings import Settings
 from pdfeditor.i18n import LANGUAGES, install_translators, system_lang
+from pdfeditor.paths import LOG_DIR_ENV, LOG_NAME, is_frozen, log_path
 
 __all__ = [
+    "LOG_DIR_ENV",
+    "LOG_NAME",
     "configure_logging",
     "install_translators",
+    "is_frozen",
     "log_path",
     "main",
     "parse_args",
@@ -30,10 +34,6 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-#: Environment variable naming the directory of the file log instead of
-#: ``AppLocalDataLocation/logs``; also turns the file log on outside a frozen build.
-LOG_DIR_ENV = "PDFEDITOR_LOG_DIR"
-LOG_NAME = "pdfeditor.log"
 LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 3
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -49,22 +49,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--self-check", metavar="DIR", help=argparse.SUPPRESS)
     parser.add_argument("--quit-after", metavar="MS", type=int, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
-
-
-def is_frozen() -> bool:
-    """Running from the PyInstaller build."""
-    return bool(getattr(sys, "frozen", False))
-
-
-def log_path() -> Path:
-    """Where the file log is written: ``$PDFEDITOR_LOG_DIR/pdfeditor.log`` or
-    ``AppLocalDataLocation/logs/pdfeditor.log`` (``%LOCALAPPDATA%\\PDFEditor\\logs`` in
-    the frozen build). Needs the application's organisation and name to be set."""
-    override = os.environ.get(LOG_DIR_ENV)
-    if override:
-        return Path(override) / LOG_NAME
-    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
-    return Path(base) / "logs" / LOG_NAME
 
 
 def _drop_file_handlers(root: logging.Logger) -> None:

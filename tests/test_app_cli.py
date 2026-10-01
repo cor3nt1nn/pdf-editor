@@ -185,3 +185,32 @@ def test_settings_dir_env_override(tmp_path, monkeypatch) -> None:
     qsettings.setValue("ui/language", "fr")
     qsettings.sync()
     assert "language=fr" in (tmp_path / "PDFEditor.ini").read_text(encoding="utf-8")
+
+
+def test_ui_does_not_import_app() -> None:
+    """Layering (review finding 6): the About box reads the runtime facts from
+    ``pdfeditor.paths``; no ``ui``/``render``/``core`` module imports ``pdfeditor.app``."""
+    import ast
+
+    import pdfeditor
+    from pdfeditor import paths
+
+    root = Path(pdfeditor.__file__).parent
+    offenders = []
+    for package in ("ui", "render", "core"):
+        for source in (root / package).rglob("*.py"):
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    base = node.module or ""
+                    names = [base] + [f"{base}.{a.name}" for a in node.names]
+                else:
+                    continue
+                if "pdfeditor.app" in names:
+                    offenders.append(source.name)
+    assert offenders == []
+    assert app_module.log_path is paths.log_path
+    assert app_module.is_frozen is paths.is_frozen
+    assert app_module.LOG_DIR_ENV == paths.LOG_DIR_ENV == "PDFEDITOR_LOG_DIR"

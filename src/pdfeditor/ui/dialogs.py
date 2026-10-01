@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from pdfeditor import paths
+
 log = logging.getLogger(__name__)
 
 # Link of the About box that opens Help ▸ Third-Party Licenses….
@@ -311,13 +313,11 @@ def about_html() -> str:
 
 def _build_details_html() -> str:
     """ "Portable build" and the log file's path, for the frozen build only."""
-    from pdfeditor import app
-
-    if not app.is_frozen():
+    if not paths.is_frozen():
         return ""
     portable = QCoreApplication.translate("Dialogs", "Portable build")
     log_line = QCoreApplication.translate("Dialogs", "Log file: {path}").format(
-        path=str(app.log_path())
+        path=str(paths.log_path())
     )
     return f"<p>{html.escape(portable)}<br>{html.escape(log_line)}</p>"
 
