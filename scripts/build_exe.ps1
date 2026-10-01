@@ -5,8 +5,9 @@
 .DESCRIPTION
     Syncs the dev environment, checks the translations, runs PyInstaller on
     pdfeditor.spec (onedir, windowed), copies LICENSE, THIRD_PARTY_LICENSES.md (when
-    present) and README.md next to PDFEditor.exe, zips dist\PDFEditor into
-    dist\PDFEditor-<version>-win64.zip and prints the sizes and the exe's version.
+    present), README.md and the licence texts (licenses\) next to PDFEditor.exe, zips
+    dist\PDFEditor into dist\PDFEditor-<version>-win64.zip and prints the sizes and the
+    exe's version.
 
     -Smoke then runs the frozen tests (tests/test_frozen.py) against the new build.
 
@@ -49,6 +50,14 @@ foreach ($Name in "LICENSE", "THIRD_PARTY_LICENSES.md", "README.md") {
     } elseif ($Name -ne "THIRD_PARTY_LICENSES.md") {
         throw "$Name is missing"
     }
+}
+
+# The licence texts also go next to the exe (they are bundled in _internal by the spec).
+$Licenses = Join-Path $Root "src\pdfeditor\resources\licenses"
+if (Test-Path $Licenses) {
+    $LicensesOut = Join-Path $Dist "licenses"
+    New-Item -ItemType Directory -Force $LicensesOut | Out-Null
+    Copy-Item (Join-Path $Licenses "*.txt") -Destination $LicensesOut -Force
 }
 
 $Zip = Join-Path $Root "dist\PDFEditor-$Version-win64.zip"

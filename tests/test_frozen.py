@@ -132,3 +132,16 @@ def test_bundle_is_pruned(exe) -> None:
     assert not (qt / "opengl32sw.dll").exists()
     size = sum(p.stat().st_size for p in exe.parent.rglob("*") if p.is_file())
     assert size <= MAX_FOLDER_MB * 1024 * 1024
+
+
+def test_licenses_are_shipped(exe) -> None:
+    from pdfeditor.resources import license_files
+
+    names = {p.name for p in license_files()}
+    assert names
+    folder = exe.parent
+    bundled = folder / "_internal" / "pdfeditor" / "resources" / "licenses"
+    assert {p.name for p in bundled.glob("*.txt")} == names
+    assert {p.name for p in (folder / "licenses").glob("*.txt")} == names
+    for name in ("LICENSE", "THIRD_PARTY_LICENSES.md", "README.md"):
+        assert (folder / name).is_file(), name

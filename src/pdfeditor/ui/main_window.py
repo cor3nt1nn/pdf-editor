@@ -57,6 +57,30 @@ log = logging.getLogger(__name__)
 FONT_SIZE_RANGE = (6, 72)
 
 
+def strip_mnemonic(text: str) -> str:
+    """Menu text without its "&" mnemonic marker ("&&" stays a literal "&")."""
+    return "&".join(part.replace("&", "") for part in text.split("&&"))
+
+
+def shortcut_text(action: QAction) -> str:
+    """The action's shortcuts as the platform shows them, comma-separated ("" if none)."""
+    keys = (seq.toString(QKeySequence.SequenceFormat.NativeText) for seq in action.shortcuts())
+    return ", ".join(k for k in keys if k)
+
+
+def menu_actions(menu: QMenu) -> list[QAction]:
+    """The actions of ``menu`` and of its submenus, in menu order (separators excluded)."""
+    result: list[QAction] = []
+    for act in menu.actions():
+        if act.isSeparator():
+            continue
+        if act.menu() is not None:
+            result += menu_actions(act.menu())
+        else:
+            result.append(act)
+    return result
+
+
 def pdf_paths_from_urls(urls) -> list[str]:
     """Local .pdf files (case-insensitive) among dropped URLs."""
     paths = []
@@ -304,6 +328,12 @@ class MainWindow(QMainWindow):
         self.act_highlight_fields.toggled.connect(self._on_highlight_fields_toggled)
         self.act_about = self._action(self.tr("&About PDF Editor…"), None, self.show_about, "about")
         self.act_about.setMenuRole(QAction.MenuRole.AboutRole)
+        self.act_shortcuts = self._action(
+            self.tr("&Keyboard Shortcuts…"), QKeySequence("F1"), self.show_shortcuts, "shortcuts"
+        )
+        self.act_third_party = self._action(
+            self.tr("&Third-Party Licenses…"), None, self.show_third_party_licenses, "third_party"
+        )
         self.act_register_assoc = self._action(
             self.tr("Register with Windows (Open with)…"),
             None,
@@ -455,6 +485,9 @@ class MainWindow(QMainWindow):
         self.menu_settings.addAction(self.act_unregister_assoc)
         self.menu_settings.aboutToShow.connect(self._update_assoc_actions)
         self.menu_help = bar.addMenu(self.tr("&Help"))
+        self.menu_help.addAction(self.act_shortcuts)
+        self.menu_help.addSeparator()
+        self.menu_help.addAction(self.act_third_party)
         self.menu_help.addAction(self.act_about)
 
     def _create_toolbar(self) -> None:
@@ -872,6 +905,32 @@ class MainWindow(QMainWindow):
 
     def show_about(self) -> None:
         dialogs.show_about(self)
+
+    def show_third_party_licenses(self) -> None:
+        dialogs.show_third_party_licenses(self)
+
+    def shortcut_sections(self) -> list[dialogs.ShortcutSection]:
+        """Menu actions with a shortcut, grouped by menu, then the pointer/editing keys."""
+        sections: list[dialogs.ShortcutSection] = []
+        for menu in (
+            self.menu_file,
+            self.menu_edit,
+            self.menu_view,
+            self.menu_settings,
+            self.menu_help,
+        ):
+            rows = [
+                (strip_mnemonic(act.text()), shortcut_text(act))
+                for act in menu_actions(menu)
+                if shortcut_text(act)
+            ]
+            if rows:
+                sections.append((strip_mnemonic(menu.title()), rows))
+        sections.append((self.tr("Pointer and editing"), dialogs.interaction_shortcuts()))
+        return sections
+
+    def show_shortcuts(self) -> None:
+        dialogs.show_shortcuts(self, self.shortcut_sections())
 
     # -- language -------------------------------------------------------------------
     def change_language(self, code: str) -> None:

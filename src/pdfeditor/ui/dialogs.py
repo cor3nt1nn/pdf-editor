@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 
-from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QCoreApplication, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QKeySequence
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QColorDialog,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QHeaderView,
     QInputDialog,
+    QLabel,
     QLineEdit,
     QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextBrowser,
+    QVBoxLayout,
     QWidget,
 )
+
+log = logging.getLogger(__name__)
+
+# Link of the About box that opens Help ▸ Third-Party Licenses….
+LICENSES_LINK = "pdfeditor:third-party-licenses"
 
 
 def ask_password(parent: QWidget | None, file_name: str, wrong: bool) -> str | None:
@@ -281,16 +297,188 @@ def about_html() -> str:
         "This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License version 3. It comes with ABSOLUTELY NO WARRANTY.",  # noqa: E501
     )
     built_with = QCoreApplication.translate("Dialogs", "Built with:")
+    licenses = QCoreApplication.translate("Dialogs", "Third-party licenses")
     return (
         f"<h3>PDF Editor</h3><p>{html.escape(version)}</p>"
         f"<p>{html.escape(summary)}</p>"
         f"<p>{html.escape(notice)} "
         '<a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a></p>'
         f"<p><b>{html.escape(built_with)}</b><br>{libs}</p>"
+        f'<p><a href="{LICENSES_LINK}">{html.escape(licenses)}</a></p>'
+        f"{_build_details_html()}"
     )
+
+
+def _build_details_html() -> str:
+    """ "Portable build" and the log file's path, for the frozen build only."""
+    from pdfeditor import app
+
+    if not app.is_frozen():
+        return ""
+    portable = QCoreApplication.translate("Dialogs", "Portable build")
+    log_line = QCoreApplication.translate("Dialogs", "Log file: {path}").format(
+        path=str(app.log_path())
+    )
+    return f"<p>{html.escape(portable)}<br>{html.escape(log_line)}</p>"
+
+
+def on_about_link(parent: QWidget | None, link: str) -> None:
+    """A link of the About box: the licences dialog, or the system browser."""
+    if link == LICENSES_LINK:
+        show_third_party_licenses(parent)
+    else:
+        QDesktopServices.openUrl(QUrl(link))
+
+
+def make_about_box(parent: QWidget | None) -> QMessageBox:
+    """About box (like ``QMessageBox.about``) whose licences link opens our dialog."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(QCoreApplication.translate("Dialogs", "About PDF Editor"))
+    box.setTextFormat(Qt.TextFormat.RichText)
+    box.setText(about_html())
+    icon = parent.windowIcon() if parent is not None else QIcon()
+    if not icon.isNull():
+        box.setIconPixmap(icon.pixmap(64, 64))
+    label = box.findChild(QLabel, "qt_msgbox_label")
+    if label is not None:
+        label.setOpenExternalLinks(False)
+        label.linkActivated.connect(lambda link: on_about_link(box, link))
+    return box
 
 
 def show_about(parent: QWidget | None) -> None:
-    QMessageBox.about(
-        parent, QCoreApplication.translate("Dialogs", "About PDF Editor"), about_html()
+    make_about_box(parent).exec()
+
+
+# -- keyboard shortcuts -------------------------------------------------------------
+
+
+def interaction_shortcuts() -> list[tuple[str, str]]:
+    """(description, keys) of the mouse and editing keys that are not menu actions."""
+
+    def keys(*names: str) -> str:
+        native = QKeySequence.SequenceFormat.NativeText
+        return " / ".join(QKeySequence(n).toString(native) for n in names)
+
+    return [
+        (
+            QCoreApplication.translate("Dialogs", "Zoom under the pointer"),
+            QCoreApplication.translate("Dialogs", "Ctrl+Wheel"),
+        ),
+        (
+            QCoreApplication.translate("Dialogs", "Place without snapping / over a form field"),
+            QCoreApplication.translate("Dialogs", "Alt+Click"),
+        ),
+        (
+            QCoreApplication.translate("Dialogs", "Validate the text being typed"),
+            keys("Ctrl+Return"),
+        ),
+        (QCoreApplication.translate("Dialogs", "Next / previous field"), keys("Tab", "Shift+Tab")),
+        (QCoreApplication.translate("Dialogs", "Toggle the focused checkbox"), keys("Space")),
+        (QCoreApplication.translate("Dialogs", "Cancel, deselect"), keys("Esc")),
+    ]
+
+
+# One section of the shortcuts dialog: (title, [(action, keys), ...]).
+ShortcutSection = tuple[str, list[tuple[str, str]]]
+
+
+def make_shortcuts_dialog(parent: QWidget | None, sections: list[ShortcutSection]) -> QDialog:
+    """Two-column table (Action, Shortcut) with a bold title row per section."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(QCoreApplication.translate("Dialogs", "Keyboard Shortcuts"))
+    table = QTableWidget(0, 2, dialog)
+    table.setObjectName("shortcuts_table")
+    table.setHorizontalHeaderLabels(
+        [
+            QCoreApplication.translate("Dialogs", "Action"),
+            QCoreApplication.translate("Dialogs", "Shortcut"),
+        ]
     )
+    table.verticalHeader().setVisible(False)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+    table.setShowGrid(False)
+    bold = QFont(table.font())
+    bold.setBold(True)
+    for title, rows in sections:
+        if not rows:
+            continue
+        r = table.rowCount()
+        table.insertRow(r)
+        item = QTableWidgetItem(title)
+        item.setFont(bold)
+        table.setItem(r, 0, item)
+        table.setSpan(r, 0, 1, 2)
+        for action, keys in rows:
+            r = table.rowCount()
+            table.insertRow(r)
+            table.setItem(r, 0, QTableWidgetItem(action))
+            table.setItem(r, 1, QTableWidgetItem(keys))
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+    header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+    buttons.rejected.connect(dialog.reject)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(table)
+    layout.addWidget(buttons)
+    dialog.resize(520, 600)
+    return dialog
+
+
+def show_shortcuts(parent: QWidget | None, sections: list[ShortcutSection]) -> None:
+    make_shortcuts_dialog(parent, sections).exec()
+
+
+# -- third-party licences -----------------------------------------------------------
+
+
+def make_licenses_dialog(parent: QWidget | None) -> QDialog:
+    """Third-party notice (THIRD_PARTY_LICENSES.md) and the full licence texts."""
+    from pdfeditor.resources import license_files, third_party_notice
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(QCoreApplication.translate("Dialogs", "Third-Party Licenses"))
+    chooser = QComboBox(dialog)
+    chooser.setObjectName("license_chooser")
+    browser = QTextBrowser(dialog)
+    browser.setObjectName("license_browser")
+    browser.setOpenExternalLinks(True)
+    notice = third_party_notice()
+    if notice is not None:
+        chooser.addItem(notice.name, str(notice))
+    for path in license_files():
+        chooser.addItem(path.name, str(path))
+
+    def show(index: int) -> None:
+        path = chooser.itemData(index)
+        if not path:
+            browser.clear()
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError as exc:
+            log.warning("cannot read %s: %s", path, exc)
+            browser.setPlainText(str(exc))
+            return
+        if path.endswith(".md"):
+            browser.setMarkdown(text)
+        else:
+            browser.setPlainText(text)
+
+    chooser.currentIndexChanged.connect(show)
+    show(chooser.currentIndex())
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+    buttons.rejected.connect(dialog.reject)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(chooser)
+    layout.addWidget(browser)
+    layout.addWidget(buttons)
+    dialog.resize(760, 640)
+    return dialog
+
+
+def show_third_party_licenses(parent: QWidget | None) -> None:
+    make_licenses_dialog(parent).exec()

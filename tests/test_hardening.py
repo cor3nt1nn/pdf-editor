@@ -45,7 +45,7 @@ def test_about_contents(qtbot, window: MainWindow, monkeypatch) -> None:
     assert "PySide6" in html and "Qt" in html
     shown: list[str] = []
     monkeypatch.setattr(
-        dialogs.QMessageBox, "about", staticmethod(lambda p, title, text: shown.append(title))
+        dialogs.QMessageBox, "exec", lambda self: shown.append(self.windowTitle()) or 0
     )
     window.act_about.trigger()
     assert shown == ["About PDF Editor"]
@@ -100,6 +100,7 @@ def test_shortcuts_unique_and_expected(window: MainWindow) -> None:
         "Ctrl+2": "fit_page",
         "Ctrl+0": "actual_size",
         "F4": "toggle_thumbnails",
+        "F1": "shortcuts",
     }
     for key, name in expected.items():
         assert seen.get(QKeySequence(key).toString()) == name, key

@@ -6,9 +6,79 @@ Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stam
 image of a handwritten signature. Milestone 1 is a fast, crisp PDF viewer with page rotation,
 undo/redo and saving; Milestone 2 adds filling of standard PDF forms (AcroForm); Milestone 3
 adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs); Milestone 4
-(current) adds signing with an image of a handwritten signature.
+adds signing with an image of a handwritten signature; Milestone 5 (current) adds File ▸
+Export Copy… (flattened or clean copies), Open Recent, "Open with" registration and a
+portable Windows release.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
-[docs/M3_PLAN.md](docs/M3_PLAN.md) and [docs/M4_PLAN.md](docs/M4_PLAN.md).
+[docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md) and
+[docs/M5_PLAN.md](docs/M5_PLAN.md).
+
+## Install & use (end users)
+
+1. Download `PDFEditor-<version>-win64.zip` (for example `PDFEditor-0.1.0-win64.zip`).
+2. Extract it: it contains one `PDFEditor` folder. Put that folder anywhere you like, for
+   example `%LOCALAPPDATA%\Programs\PDFEditor` (no administrator rights needed).
+3. Run `PDFEditor.exe` in that folder. The program is not signed, so Windows SmartScreen may
+   say "Windows protected your PC": click **More info ▸ Run anyway** (only the first time).
+4. Optional: **Settings ▸ Register with Windows (Open with)…** adds PDF Editor to the
+   "Open with" list of PDF files, for your Windows account only. Moving the folder later?
+   Register again from the new place.
+5. **Help ▸ Keyboard Shortcuts…** (F1) lists the shortcuts; **Help ▸ Third-Party
+   Licenses…** shows the licences of the bundled components (also in
+   `THIRD_PARTY_LICENSES.md` and `licenses\` next to `PDFEditor.exe`).
+
+Where PDF Editor keeps its data:
+
+- settings: `%APPDATA%\PDFEditor\PDFEditor.ini`
+- saved signatures: `%LOCALAPPDATA%\PDFEditor\PDFEditor\signatures`
+- log file: `%LOCALAPPDATA%\PDFEditor\logs\pdfeditor.log` (its exact path is shown in
+  Help ▸ About; attach it when reporting a problem)
+
+Uninstall: **Settings ▸ Unregister from Windows** (if you registered it), then delete the
+`PDFEditor` folder and, to remove your settings, signatures and log too,
+`%APPDATA%\PDFEditor` and `%LOCALAPPDATA%\PDFEditor`.
+
+## Installation et utilisation (utilisateurs)
+
+1. Téléchargez `PDFEditor-<version>-win64.zip` (par exemple `PDFEditor-0.1.0-win64.zip`).
+2. Extrayez-le : il contient un dossier `PDFEditor`. Placez ce dossier où vous voulez, par
+   exemple `%LOCALAPPDATA%\Programs\PDFEditor` (aucun droit d’administrateur nécessaire).
+3. Lancez `PDFEditor.exe` dans ce dossier. Le programme n’est pas signé : si Windows
+   SmartScreen affiche « Windows a protégé votre ordinateur », cliquez sur **Informations
+   complémentaires ▸ Exécuter quand même** (la première fois seulement).
+4. Facultatif : **Paramètres ▸ Enregistrer dans Windows (Ouvrir avec)…** ajoute PDF Editor à
+   la liste « Ouvrir avec » des fichiers PDF, pour votre compte Windows uniquement. Si vous
+   déplacez le dossier, enregistrez-le à nouveau depuis le nouvel emplacement.
+5. **Aide ▸ Raccourcis clavier…** (F1) liste les raccourcis ; **Aide ▸ Licences tierces…**
+   affiche les licences des composants inclus (aussi dans `THIRD_PARTY_LICENSES.md` et
+   `licenses\` à côté de `PDFEditor.exe`).
+
+Où PDF Editor conserve ses données :
+
+- paramètres : `%APPDATA%\PDFEditor\PDFEditor.ini`
+- signatures enregistrées : `%LOCALAPPDATA%\PDFEditor\PDFEditor\signatures`
+- fichier journal : `%LOCALAPPDATA%\PDFEditor\logs\pdfeditor.log` (son chemin exact est
+  indiqué dans Aide ▸ À propos ; joignez-le pour signaler un problème)
+
+Désinstallation : **Paramètres ▸ Retirer de Windows** (si vous l’aviez enregistré), puis
+supprimez le dossier `PDFEditor` et, pour effacer aussi vos paramètres, signatures et
+journal, `%APPDATA%\PDFEditor` et `%LOCALAPPDATA%\PDFEditor`.
+
+## Build the Windows release
+
+```powershell
+powershell -File scripts\build_exe.ps1          # build + zip
+powershell -File scripts\build_exe.ps1 -Smoke   # same, then run the frozen tests
+```
+
+It produces `dist\PDFEditor\` (`PDFEditor.exe`, `_internal\`, `README.md`, `LICENSE`,
+`THIRD_PARTY_LICENSES.md`, `licenses\`) and the deliverable
+`dist\PDFEditor-<version>-win64.zip` (about 44 MB; about 102 MB extracted). To rerun the
+frozen tests against an existing build:
+
+```powershell
+$env:PDFEDITOR_FROZEN_EXE = "$PWD\dist\PDFEditor\PDFEditor.exe"; uv run pytest -m frozen
+```
 
 ## Requirements
 
@@ -311,7 +381,8 @@ line); keep the originals.
 4. **Resize**: select it, drag a corner and a side handle: the proportions never change;
    move it; Undo/Redo every step.
 5. **Incremental save**: Ctrl+S: the `*` disappears and the file grows by a few KB per
-   signature image (not by the size of the photo).
+   signature with Black/Blue ink (about 50 KB when the photographed colour is kept), not
+   by the size of the photo.
 6. **Other viewers**: open the saved file in Adobe Acrobat Reader, Edge and Chrome: the
    signature is at the same place and size, with a transparent background (the cell lines
    show through), and printing (or printing to PDF) from each includes it.
@@ -333,6 +404,36 @@ line); keep the originals.
 12. **Flatten**: not available yet (Milestone 5): signatures stay movable annotations, so
     anyone with an editor can move or copy them; flatten on export will bake them into the
     page.
+
+## Export, recent files and Windows integration (Milestone 5)
+
+**File ▸ Export Copy…** (Ctrl+E) writes a copy and never changes the open document: with
+"Flatten form fields" and "Flatten text, stamps and signatures" the copy shows the same
+page but its fields and annotations become plain page content (no longer editable); the
+copy is rewritten from scratch, so earlier saved versions (deleted signatures, old
+values) are not carried over. **File ▸ Open Recent** lists the last opened files;
+**Settings ▸ Register with Windows (Open with)…** / **Unregister from Windows** add or
+remove PDF Editor in the "Open with" list of PDF files (current user only).
+
+### Manual checklist (Milestone 5)
+
+Run it on copies of your own documents, with the zip built by `scripts\build_exe.ps1`.
+
+1. **Export of a filled form**: fill a form (e.g. a Cerfa), File ▸ Export Copy… with both
+   flatten options: open the copy in Adobe Acrobat Reader, Edge and Chrome: the values are
+   shown and there are no fields left to fill (clicking does nothing, no field highlight).
+2. **Clean copy**: in a file where a signature was placed, saved, then deleted and saved
+   again, File ▸ Export Copy… (no flatten needed): the copy no longer contains the image
+   (smaller file; it is not recoverable from the copy).
+3. **Recent menu**: open three files, restart: File ▸ Open Recent lists them, most recent
+   first, with the full path as tooltip; delete one of the files and choose it: it is
+   reported and removed from the list; Clear List empties it.
+4. **Open with**: Settings ▸ Register with Windows (Open with)…: in Explorer, right-click a
+   PDF ▸ Open with: PDF Editor is listed and opens the file; Settings ▸ Unregister from
+   Windows: it is gone from the list (Windows may need a moment to refresh).
+5. **Portable build**: extract the zip to `%LOCALAPPDATA%\Programs\PDFEditor`, run
+   `PDFEditor.exe`: Help ▸ About shows "Portable build" and the log file path; F1 shows the
+   keyboard shortcuts; Help ▸ Third-Party Licenses… shows the notice and the licence texts.
 
 ## License
 
