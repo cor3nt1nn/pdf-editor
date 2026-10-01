@@ -142,3 +142,20 @@ def signature_png(tmp_path):
 @pytest.fixture
 def signature_photo(tmp_path):
     return fixtures.make_signature_image(tmp_path / "signature.jpg", kind="photo")
+
+
+@pytest.fixture
+def signature_store(tmp_path):
+    """An empty SignatureStore in tmp_path (never the user's real directory)."""
+    from pdfeditor.core.signature_store import SignatureStore
+
+    return SignatureStore(tmp_path / "signatures")
+
+
+@pytest.fixture
+def store_with_one(signature_store, signature_png):
+    """``signature_store`` holding one signature ("My signature", the clean PNG), default."""
+    from PySide6.QtGui import QImage
+
+    signature_store.add("My signature", QImage(str(signature_png)))
+    return signature_store

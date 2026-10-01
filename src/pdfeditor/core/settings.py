@@ -200,3 +200,12 @@ class Settings:
     @stamp_size.setter
     def stamp_size(self, value: float) -> None:
         self._s.setValue("annots/stamp_size", float(value))
+
+    @property
+    def signature_width(self) -> float:
+        """Default width (points) of a placed signature."""
+        return self._float("annots/signature_width", 150.0)
+
+    @signature_width.setter
+    def signature_width(self, value: float) -> None:
+        self._s.setValue("annots/signature_width", float(value))

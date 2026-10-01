@@ -24,6 +24,7 @@ def test_defaults(settings: Settings) -> None:
     assert settings.flatten_on_export is False
     assert settings.highlight_fields is True
     assert settings.auto_shrink_text is True
+    assert settings.signature_width == 150.0
 
 
 def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
@@ -38,6 +39,7 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     settings.flatten_on_export = True
     settings.highlight_fields = False
     settings.auto_shrink_text = False
+    settings.signature_width = 182.5
     settings.sync()
     assert ini_path.exists()
 
@@ -53,6 +55,7 @@ def test_round_trip_all_properties(settings: Settings, ini_path) -> None:
     assert s.flatten_on_export is True
     assert s.highlight_fields is False
     assert s.auto_shrink_text is False
+    assert s.signature_width == 182.5
 
 
 def test_single_recent_file_and_language_reset(settings: Settings, ini_path) -> None:
@@ -72,6 +75,10 @@ def test_invalid_values_fall_back(settings: Settings) -> None:
     assert settings.zoom_mode is ZoomMode.FIT_WIDTH
     assert settings.language is None
     assert settings.zoom_percent == 100.0
+    settings.qsettings.setValue("annots/signature_width", "wide")
+    assert settings.signature_width == 150.0
+    settings.qsettings.setValue("annots/signature_width", -5)
+    assert settings.signature_width == 150.0
 
 
 def test_geometry_restored(qtbot, settings: Settings, ini_path) -> None:
