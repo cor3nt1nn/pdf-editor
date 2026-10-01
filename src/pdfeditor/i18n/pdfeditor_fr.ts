@@ -4,14 +4,19 @@
 <context>
     <name>AnnotTools</name>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="78"/>
+        <location filename="../ui/tools/annot_tools.py" line="84"/>
         <source>The annotation could not be updated.</source>
         <translation>L’annotation n’a pas pu être mise à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="82"/>
+        <location filename="../ui/tools/annot_tools.py" line="88"/>
         <source>This is a form field: use the Form tool (F) to fill it. Hold Alt to place text over it anyway.</source>
         <translation>Ceci est un champ de formulaire : utilisez l’outil formulaire (F) pour le remplir. Maintenez Alt pour placer du texte par-dessus malgré tout.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/annot_tools.py" line="95"/>
+        <source>The image could not be read.</source>
+        <translation>L’image n’a pas pu être lue.</translation>
     </message>
 </context>
 <context>

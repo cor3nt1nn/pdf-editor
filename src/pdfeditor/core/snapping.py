@@ -6,8 +6,9 @@ lying inside annotation or widget rects: those are appearances) and the checkbox
 glyphs of its content text (``☐`` & co., Wingdings/Webdings), in page space (rotation
 applied, cropbox-relative, points), clipped to the page. Everything else is pure
 geometry on the resulting :class:`PageShapes`: :func:`snap` finds what a click targets,
-:func:`text_placement` and :func:`stamp_placement` turn a :class:`Snap` into the
-page-space rect of a new text box or the centre and size of a new stamp.
+:func:`text_placement`, :func:`stamp_placement` and :func:`signature_placement` turn a
+:class:`Snap` into the page-space rect of a new text box, the centre and size of a new
+stamp or the rect of a new signature (M4).
 
 Snap order (:func:`snap`):
 
@@ -35,7 +36,7 @@ from functools import cached_property
 from typing import NamedTuple
 
 import pymupdf
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, QSizeF
 
 from pdfeditor.core.annotations import BASELINE_RATIO, text_rect
 
@@ -666,3 +667,63 @@ def stamp_placement(
     ):
         return rect.center(), min(rect.width(), rect.height())
     return QPointF(click), default_size
+
+
+def signature_placement(
+    snap_result: Snap,
+    click: QPointF,
+    default_width: float,
+    aspect: float,
+    page_size: QSizeF,
+) -> QRectF:
+    """Page-space rect of a new signature whose width/height ratio is ``aspect``.
+
+    ``CELL``: the largest rect of that aspect fitting the cell minus ``CELL_PAD`` on
+    every side, but no wider than ``default_width``, bottom-left aligned in it.
+    ``UNDERLINE``: width ``min(default_width, rule length − 2 × CELL_PAD)``, left at the
+    rule start + ``CELL_PAD``, bottom at the rule − ``CELL_PAD``. ``BOX`` and ``NONE``:
+    ``default_width`` centred on the click. The result is always shrunk to fit the page
+    (aspect kept) and shifted onto it.
+    """
+    aspect = aspect if aspect > 0 and math.isfinite(aspect) else 1.0
+    kind, rect = snap_result.kind, snap_result.rect
+    width = max(default_width, 1.0)
+    out: QRectF | None = None
+    if kind is SnapKind.CELL and rect is not None:
+        room_w = rect.width() - 2 * CELL_PAD
+        room_h = rect.height() - 2 * CELL_PAD
+        if room_w > 0 and room_h > 0:
+            width = min(room_w, room_h * aspect, width)
+            height = width / aspect
+            left = rect.left() + CELL_PAD
+            bottom = rect.bottom() - CELL_PAD
+            out = QRectF(left, bottom - height, width, height)
+    elif kind is SnapKind.UNDERLINE and rect is not None:
+        room = rect.width() - 2 * CELL_PAD
+        if room > 0:
+            width = min(width, room)
+            height = width / aspect
+            left = rect.left() + CELL_PAD
+            bottom = rect.bottom() - CELL_PAD
+            out = QRectF(left, bottom - height, width, height)
+    if out is None:
+        height = width / aspect
+        out = QRectF(click.x() - width / 2, click.y() - height / 2, width, height)
+    return fit_on_page(out, aspect, page_size)
+
+
+def fit_on_page(rect: QRectF, aspect: float, page_size: QSizeF) -> QRectF:
+    """``rect`` shrunk (aspect kept, around its centre) to fit the page, then shifted
+    onto it."""
+    pw, ph = page_size.width(), page_size.height()
+    if pw <= 0 or ph <= 0:
+        return rect
+    scale = min(1.0, pw / rect.width(), ph / rect.height())
+    if scale < 1.0:
+        centre = rect.center()
+        w = rect.width() * scale
+        h = w / aspect
+        rect = QRectF(centre.x() - w / 2, centre.y() - h / 2, w, h)
+    dx = max(0.0, -rect.left()) - max(0.0, rect.right() - pw)
+    dy = max(0.0, -rect.top()) - max(0.0, rect.bottom() - ph)
+    return rect.translated(dx, dy)

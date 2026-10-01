@@ -1,4 +1,5 @@
-"""Text box and stamp tools (M3): place, select, move, resize, edit and delete FreeText.
+"""Text box, stamp (M3) and signature (M4) tools: place, select, move, resize, edit and
+delete FreeText annotations and signature image stamps.
 
 Both tools share ``DocumentView.annot_selection`` (the selected annotation and its
 handles) and ``DocumentView.annot_editor`` (the floating text box editor). A click on
@@ -7,8 +8,9 @@ pushes **one** ``EditAnnotCommand`` on release. A click on empty page space plac
 text box (the editor opens; the ``AddAnnotCommand`` is pushed when the text is
 committed) or a stamp, snapped to the table cell, underline or checkbox under the
 pointer (``core.snapping``; Alt disables snapping). Inside a fillable form field nothing
-is created unless Alt is held (the Form tool fills fields). The tools never mutate the
-document: every change is a command pushed through ``DocumentView.push``.
+is created unless Alt is held (the Form tool fills fields). Signatures keep their aspect
+when resized (by any of these tools). The tools never mutate the document: every change
+is a command pushed through ``DocumentView.push``.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from pdfeditor.core.annotations import (
 )
 from pdfeditor.core.commands import AddAnnotCommand, DeleteAnnotCommand, EditAnnotCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
+from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import Snap, SnapKind
 from pdfeditor.ui.overlays.annot_items import Handle
 from pdfeditor.ui.overlays.floating_editor import normalize_newlines
@@ -41,6 +44,7 @@ from pdfeditor.ui.tools.base import Tool, ToolEvent
 
 if TYPE_CHECKING:
     from pdfeditor.core.settings import Settings
+    from pdfeditor.core.signature_store import SignatureRecord, SignatureStore
     from pdfeditor.ui.document_view import DocumentView
     from pdfeditor.ui.overlays.annot_editor import EditorAnchor
     from pdfeditor.ui.page_view import PageView
@@ -56,6 +60,8 @@ SNAP_TOLERANCE = 6.0
 # Smallest side (points) a resize can produce; text boxes keep at least MIN_TEXT_WIDTH.
 MIN_SIDE = 4.0
 MIN_TEXT_WIDTH = 12.0
+# Smallest width (points) of a signature placed by dragging.
+MIN_SIGNATURE_WIDTH = 12.0
 PREVIEW_COLOR = QColor(0, 120, 215)
 
 _LEFT = (Handle.TOP_LEFT, Handle.LEFT, Handle.BOTTOM_LEFT)
@@ -85,10 +91,25 @@ def form_field_message() -> str:
     )
 
 
-def resized_rect(rect: QRectF, handle: Handle, delta: QPointF, *, square: bool) -> QRectF:
+def _image_unreadable() -> str:
+    return QCoreApplication.translate("AnnotTools", "The image could not be read.")
+
+
+def resized_rect(
+    rect: QRectF,
+    handle: Handle,
+    delta: QPointF,
+    *,
+    square: bool = False,
+    aspect: float | None = None,
+) -> QRectF:
     """``rect`` with the edges of ``handle`` moved by ``delta`` (no flipping; sides at
-    least ``MIN_SIDE``). ``square`` (stamps) keeps it square, anchored on the opposite
-    edge or corner and centred across an edge handle."""
+    least ``MIN_SIDE``). ``aspect`` (width / height; signatures) keeps that ratio,
+    anchored on the opposite edge or corner and centred across an edge handle: a corner
+    follows the dominant side, an edge scales the other side around the centre.
+    ``square`` (stamps) is ``aspect=1.0``."""
+    if aspect is None and square:
+        aspect = 1.0
     left, top, right, bottom = rect.left(), rect.top(), rect.right(), rect.bottom()
     if handle in _LEFT:
         left = min(left + delta.x(), right - MIN_SIDE)
@@ -98,27 +119,34 @@ def resized_rect(rect: QRectF, handle: Handle, delta: QPointF, *, square: bool) 
         top = min(top + delta.y(), bottom - MIN_SIDE)
     if handle in _BOTTOM:
         bottom = max(bottom + delta.y(), top + MIN_SIDE)
-    if not square:
+    if aspect is None or aspect <= 0:
         return QRectF(QPointF(left, top), QPointF(right, bottom))
     if handle in (Handle.LEFT, Handle.RIGHT):
-        side = right - left
+        width = right - left
     elif handle in (Handle.TOP, Handle.BOTTOM):
-        side = bottom - top
+        width = (bottom - top) * aspect
     else:
-        side = max(right - left, bottom - top)
+        width = max(right - left, (bottom - top) * aspect)
+    height = width / aspect
+    if height < MIN_SIDE:
+        height = MIN_SIDE
+        width = height * aspect
+    if width < MIN_SIDE:
+        width = MIN_SIDE
+        height = width / aspect
     if handle in _LEFT:
-        left = right - side
+        left = right - width
     elif handle in _RIGHT:
-        right = left + side
+        right = left + width
     else:
-        left = rect.center().x() - side / 2
+        left = rect.center().x() - width / 2
     if handle in _TOP:
-        top = bottom - side
+        top = bottom - height
     elif handle in _BOTTOM:
-        bottom = top + side
+        bottom = top + height
     else:
-        top = rect.center().y() - side / 2
-    return QRectF(left, top, side, side)
+        top = rect.center().y() - height / 2
+    return QRectF(left, top, width, height)
 
 
 class _Mode(Enum):
@@ -306,6 +334,10 @@ class AnnotToolBase(Tool):
         if not alt and self.form_field_at(page, pos):
             self.message.emit(form_field_message())
             return True
+        return self.press_empty(page, pos, alt, px)
+
+    def press_empty(self, page: int, pos: QPointF, alt: bool, px: QPoint) -> bool:
+        """A left press on empty page space (not in a form field, or with Alt)."""
         self.create_at(page, pos, alt)
         return True
 
@@ -332,7 +364,13 @@ class AnnotToolBase(Tool):
             ghost = self._clamped(drag.info.page, rect.translated(delta))
         else:
             assert drag.handle is not None
-            ghost = resized_rect(rect, drag.handle, delta, square=drag.info.kind is AnnotKind.STAMP)
+            ghost = resized_rect(
+                rect,
+                drag.handle,
+                delta,
+                square=drag.info.kind is AnnotKind.STAMP,
+                aspect=_aspect(drag.info),
+            )
             if drag.info.kind is AnnotKind.TEXT and ghost.width() < MIN_TEXT_WIDTH:
                 if drag.handle in _LEFT:
                     ghost.setLeft(ghost.right() - MIN_TEXT_WIDTH)
@@ -387,14 +425,15 @@ class AnnotToolBase(Tool):
 
     def _resize_on_page(self, drag: _Drag, ghost: QRectF) -> QRectF | None:
         """``ghost`` cut to the page (text boxes), or None when it would leave the page
-        (stamps stay square). No limit for an annotation already off the page."""
+        (stamps and signatures keep their aspect). No limit for an annotation already off
+        the page."""
         doc = self._doc()
         if doc is None:
             return ghost
         page = QRectF(QPointF(0, 0), doc.page_size(drag.info.page))
         if page.contains(ghost) or not page.contains(drag.info.rect):
             return ghost
-        if drag.info.kind is AnnotKind.STAMP:
+        if drag.info.kind in (AnnotKind.STAMP, AnnotKind.SIGNATURE):
             return None
         cut = ghost.intersected(page)
         return cut if cut.width() >= MIN_SIDE and cut.height() >= MIN_SIDE else None
@@ -581,8 +620,8 @@ class AnnotToolBase(Tool):
             )
             return
         current = self.selection.current
-        if current is None:
-            return
+        if current is None or current.kind is AnnotKind.SIGNATURE:
+            return  # a signature has no style
         changes: dict[str, object] = {}
         if color is not None and tuple(col) != tuple(current.color):
             changes["color"] = col
@@ -749,6 +788,213 @@ class StampTool(AnnotToolBase):
         return self._clamped(page, QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side))
 
 
+@dataclass
+class _Place:
+    """A press on empty page space with the signature tool: a click places the
+    signature where it snaps, a drag sizes it from the press point."""
+
+    page: int
+    start: QPointF  # page space
+    start_px: QPoint  # viewport
+    alt: bool
+    record_id: str
+    aspect: float  # width / height
+    ghost: QRectF | None = None
+
+
+class SignatureTool(AnnotToolBase):
+    """Place the default signature of ``store`` (an image stamp, upright on rotated
+    pages): a click places it in the table cell or on the underline under the pointer
+    (``snapping.signature_placement``; Alt disables snapping), a drag on empty space
+    sizes it (aspect kept). ``signature_needed`` is emitted instead when the store is
+    empty."""
+
+    name = "signature"
+    signature_needed = Signal()
+
+    def __init__(
+        self,
+        document_view: DocumentView,
+        settings: Settings,
+        store: SignatureStore,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(document_view, settings, parent)
+        self.store = store
+        self._place: _Place | None = None
+        # (signature id, page rotation) -> embedded samples; dropped on store changes.
+        self._images: dict[tuple[str, int], ImageData] = {}
+        store.changed.connect(self._images.clear)
+
+    @property
+    def cursor(self) -> QCursor:
+        return QCursor(Qt.CursorShape.CrossCursor)
+
+    def current_signature(self) -> SignatureRecord | None:
+        """The signature placed by a click: the store's default (None when empty)."""
+        default = self.store.default_id
+        record = self.store.get(default) if default is not None else None
+        if record is None:
+            records = self.store.records()
+            record = records[0] if records else None
+        return record
+
+    def _reset(self) -> None:
+        self._place = None
+        super()._reset()
+
+    # -- placement ------------------------------------------------------------------
+    def placement(self, page: int, pos: QPointF, alt: bool, aspect: float) -> QRectF | None:
+        """Page-space rect of a signature placed by a click at ``pos``."""
+        doc = self._doc()
+        if doc is None:
+            return None
+        # No reach: a click in a cell next to a checkbox must target the cell.
+        snap = self.snap_at(page, pos, alt, tolerance=0.0)
+        try:
+            size = doc.page_size(page)
+        except (DocumentError, IndexError):
+            return None
+        return snapping.signature_placement(snap, pos, self.settings.signature_width, aspect, size)
+
+    def _drag_rect(self, place: _Place, pos: QPointF) -> QRectF | None:
+        """The rect of a drag from ``place.start`` to ``pos``: the dragged width (at
+        least ``MIN_SIGNATURE_WIDTH``), aspect kept, kept on the page."""
+        doc = self._doc()
+        if doc is None:
+            return None
+        start = place.start
+        dx = pos.x() - start.x()
+        width = max(abs(dx), MIN_SIGNATURE_WIDTH)
+        height = width / place.aspect
+        left = start.x() if dx >= 0 else start.x() - width
+        top = start.y() if pos.y() >= start.y() else start.y() - height
+        try:
+            size = doc.page_size(place.page)
+        except (DocumentError, IndexError):
+            return None
+        return snapping.fit_on_page(QRectF(left, top, width, height), place.aspect, size)
+
+    def preview_rect(self, page: int, pos: QPointF, alt: bool) -> QRectF | None:
+        record = self.current_signature()
+        if record is None:
+            return None
+        return self.placement(page, pos, alt, _record_aspect(record))
+
+    def create_at(self, page: int, pos: QPointF, alt: bool) -> None:
+        record = self.current_signature()
+        if record is None:
+            self.signature_needed.emit()
+            return
+        rect = self.placement(page, pos, alt, _record_aspect(record))
+        if rect is not None:
+            self.place(page, rect, record.id)
+
+    def place(self, page: int, rect: QRectF, record_id: str) -> AnnotInfo | None:
+        """Add signature ``record_id`` at page-space ``rect`` (one undo step)."""
+        doc = self._doc()
+        if doc is None:
+            return None
+        try:
+            rotation = doc.page_rotation(page)
+        except (DocumentError, IndexError):
+            return None
+        image = self._image(record_id, rotation)
+        if image is None:
+            self.message.emit(_image_unreadable())
+            return None
+        spec = AnnotSpec(
+            page, AnnotKind.SIGNATURE, "", 11.0, (0.0, 0.0, 0.0), QRectF(rect), image=image
+        )
+        return self.add(spec)
+
+    def _image(self, record_id: str, rotation: int) -> ImageData | None:
+        """Samples of signature ``record_id`` turned for a page rotated by
+        ``rotation`` (upright on screen), or None when it cannot be loaded."""
+        key = (record_id, rotation % 360)
+        image = self._images.get(key)
+        if image is not None:
+            return image
+        if self.store.get(record_id) is None:
+            return None
+        qimage = self.store.load(record_id)
+        if qimage is None or qimage.isNull():
+            return None
+        try:
+            image = ImageData.from_qimage(qimage, rotation)
+        except ValueError as exc:
+            log.warning("signature %s unusable: %s", record_id, exc)
+            return None
+        self._images[key] = image
+        return image
+
+    # -- mouse ------------------------------------------------------------------------
+    def press_empty(self, page: int, pos: QPointF, alt: bool, px: QPoint) -> bool:
+        record = self.current_signature()
+        if record is None:
+            self.signature_needed.emit()
+            return True
+        self._place = _Place(page, pos, px, alt, record.id, _record_aspect(record))
+        return True
+
+    def mouse_press(self, event: ToolEvent) -> bool:
+        if self._place is not None:
+            return True  # another button during a placement drag
+        return super().mouse_press(event)
+
+    def mouse_move(self, event: ToolEvent) -> bool:
+        place = self._place
+        if place is None:
+            return super().mouse_move(event)
+        if self.view is None:
+            return True
+        if place.ghost is None:
+            moved = _viewport_pos(event) - place.start_px
+            if moved.manhattanLength() < QApplication.startDragDistance():
+                return True
+        ghost = self._drag_rect(place, self._page_pos(place.page, event))
+        if ghost is not None:
+            place.ghost = ghost
+            self._set_preview((place.page, ghost))
+        return True
+
+    def mouse_release(self, event: ToolEvent) -> bool:
+        place = self._place
+        if place is None:
+            return super().mouse_release(event)
+        if _button(event) != Qt.MouseButton.LeftButton:
+            return True
+        self._place = None
+        self._set_preview(None)
+        rect = place.ghost
+        if rect is None:
+            rect = self.placement(place.page, place.start, place.alt, place.aspect)
+        if rect is not None:
+            self.place(place.page, rect, place.record_id)
+        return True
+
+    def mouse_double_click(self, event: ToolEvent) -> bool:
+        if self._place is not None:
+            return True
+        return super().mouse_double_click(event)
+
+    def key_press(self, event: ToolEvent) -> bool:
+        qt_event = event.qt_event
+        if (
+            self._place is not None
+            and isinstance(qt_event, QKeyEvent)
+            and qt_event.key() == Qt.Key.Key_Escape
+        ):
+            self._place = None
+            self._set_preview(None)
+            return True
+        return super().key_press(event)
+
+
+def _record_aspect(record: SignatureRecord) -> float:
+    return record.width / record.height if record.width > 0 and record.height > 0 else 1.0
+
+
 def _button(event: ToolEvent) -> Qt.MouseButton:
     """The button that changed (``QMouseEvent.button()``), not all the held ones."""
     qt_event = event.qt_event
@@ -766,12 +1012,21 @@ def _viewport_pos(event: ToolEvent) -> QPoint:
     return QPoint()
 
 
+def _aspect(info: AnnotInfo) -> float | None:
+    """Width / height a resize of ``info`` keeps (signatures only: the page-space aspect
+    of its rect, which is the image's as placed)."""
+    if info.kind is not AnnotKind.SIGNATURE or info.rect.height() <= 0:
+        return None
+    return info.rect.width() / info.rect.height()
+
+
 def _same_rect(a: QRectF, b: QRectF) -> bool:
     return all(abs(x - y) < 1e-6 for x, y in zip(a.getCoords(), b.getCoords(), strict=True))
 
 
 __all__ = [
     "AnnotToolBase",
+    "SignatureTool",
     "StampTool",
     "TextTool",
     "form_field_message",
