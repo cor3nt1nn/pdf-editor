@@ -307,7 +307,7 @@ class SignatureImportDialog(QDialog):
             dialogs.warn(
                 self,
                 self.windowTitle(),
-                self.tr("No ink was found in the image; lower the threshold."),
+                self.tr("No ink was found in the image; raise the threshold."),
             )
             return
         try:

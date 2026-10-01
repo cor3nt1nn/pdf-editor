@@ -705,8 +705,8 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <location filename="../ui/signature_dialogs.py" line="310"/>
-        <source>No ink was found in the image; lower the threshold.</source>
-        <translation>Aucune encre n’a été détectée dans l’image ; réduisez le seuil.</translation>
+        <source>No ink was found in the image; raise the threshold.</source>
+        <translation>Aucune encre n’a été détectée dans l’image ; augmentez le seuil.</translation>
     </message>
     <message>
         <location filename="../ui/signature_dialogs.py" line="318"/>

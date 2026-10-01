@@ -1142,3 +1142,108 @@ def make_signature_image(path: Path, *, kind: str = "clean", size=SIG_PHOTO_SIZE
     if not img.save(str(path), "PNG" if kind == "clean" else "JPEG", -1 if kind == "clean" else 85):
         raise OSError(f"cannot write {path}")
     return Path(path)
+
+
+# -- M4-T8: hardening ------------------------------------------------------------------
+MANY_SIGNATURES = 100
+
+
+def many_signatures_name(n: int) -> str:
+    """/NM of signature ``n`` of :func:`make_many_signatures_pdf`."""
+    return f"sig-{n:03d}"
+
+
+def many_signatures_rect(n: int) -> Rect4:
+    """Page-space rect of signature ``n`` of :func:`make_many_signatures_pdf` (10x10 grid
+    of 50x20 pt rects)."""
+    x0 = 30 + (n % 10) * 55
+    y0 = 40 + (n // 10) * 75
+    return (x0, y0, x0 + 50, y0 + 20)
+
+
+def make_many_signatures_pdf(path: Path, n: int = MANY_SIGNATURES) -> Path:
+    """One A4 page with ``n`` of our signatures sharing the asymmetric image, named by
+    :func:`many_signatures_name`, laid out by :func:`many_signatures_rect`."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    image = _sig_image(doc, *sig_asym_samples())
+    for i in range(n):
+        _our_signature(doc, page, many_signatures_rect(i), image, many_signatures_name(i))
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+#: /NM -> page-space rect of the stamps of :func:`make_odd_stamps_pdf` (as placed, before
+#: the odd /Rect values replace "no_rect" and "huge").
+ODD_STAMP_RECTS: dict[str, Rect4] = {
+    "ok": (50, 50, 250, 130),
+    "no_image": (50, 150, 250, 190),
+    "dct": (50, 210, 250, 290),
+    "mask1": (50, 310, 250, 390),
+    "no_rect": (300, 50, 500, 130),
+    "huge": (300, 150, 500, 230),
+    "no_width": (300, 250, 500, 330),
+}
+#: Colour of the opaque JPEG of the "dct" stamp and of the "mask1" image.
+ODD_DCT_COLOR = (30, 40, 160)
+ODD_MASK1_COLOR = (200, 0, 0)
+
+
+def _raw_image(doc: pymupdf.Document, header: str, data: bytes, filt: str = "") -> int:
+    xref = doc.get_new_xref()
+    doc.update_object(xref, f"<</Type/XObject/Subtype/Image{header}>>")
+    doc.update_stream(xref, data, compress=not filt)
+    if filt:  # update_stream(compress=False) drops /Filter: set it afterwards
+        doc.xref_set_key(xref, "Filter", filt)
+    return xref
+
+
+def make_odd_stamps_pdf(path: Path) -> Path:
+    """One A4 page with ``/IT /StampImage`` stamps (all named by /NM, see
+    :data:`ODD_STAMP_RECTS`): "ok" (ours), "no_image" (an "Approved" text stamp with
+    /IT /StampImage), "dct" (opaque 200x80 JPEG, no /SMask), "mask1" (200x80 RGB with a
+    1-bit /SMask: top half opaque, bottom half clear), "no_rect" (/Rect null), "huge"
+    (coordinates beyond 1e6 pt) and "no_width" (image without /Width)."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QColor, QImage
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    r = ODD_STAMP_RECTS
+    image = _sig_image(doc, *sig_asym_samples())
+    _our_signature(doc, page, r["ok"], image, "ok")
+
+    text = page.add_stamp_annot(pymupdf.Rect(r["no_image"]))
+    doc.xref_set_key(text.xref, "IT", "/StampImage")
+    doc.xref_set_key(text.xref, "NM", pymupdf.get_pdf_str("no_image"))
+
+    q = QImage(200, 80, QImage.Format.Format_RGB32)
+    q.fill(QColor(*ODD_DCT_COLOR))
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    q.save(buf, "JPEG", 90)
+    buf.close()
+    rgb = "/ColorSpace/DeviceRGB/BitsPerComponent 8"
+    dct = _raw_image(doc, f"/Width 200/Height 80{rgb}", bytes(data.data()), "/DCTDecode")
+    _our_signature(doc, page, r["dct"], dct, "dct")
+
+    row = (200 + 7) // 8
+    bits = b"\xff" * (row * 40) + b"\x00" * (row * 40)
+    smask = _raw_image(doc, "/Width 200/Height 80/ColorSpace/DeviceGray/BitsPerComponent 1", bits)
+    mask1 = _raw_image(
+        doc, f"/Width 200/Height 80{rgb}/SMask {smask} 0 R", bytes(ODD_MASK1_COLOR) * (200 * 80)
+    )
+    _our_signature(doc, page, r["mask1"], mask1, "mask1")
+
+    no_rect = _our_signature(doc, page, r["no_rect"], image, "no_rect")
+    huge = _our_signature(doc, page, r["huge"], image, "huge")
+    no_width = _raw_image(doc, f"/Height 10{rgb}", b"\0" * 300)
+    _our_signature(doc, page, r["no_width"], no_width, "no_width")
+    del page
+    doc.xref_set_key(no_rect, "Rect", "null")
+    doc.xref_set_key(huge, "Rect", "[1000000 1000000 2000000 2000010]")
+    doc.save(path)
+    doc.close()
+    return path

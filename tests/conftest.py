@@ -169,3 +169,13 @@ def store_with_one(signature_store, signature_png):
 
     signature_store.add("My signature", QImage(str(signature_png)))
     return signature_store
+
+
+@pytest.fixture
+def many_signatures_pdf(tmp_path):
+    return fixtures.make_many_signatures_pdf(tmp_path / "many_signatures.pdf")
+
+
+@pytest.fixture
+def odd_stamps_pdf(tmp_path):
+    return fixtures.make_odd_stamps_pdf(tmp_path / "odd_stamps.pdf")

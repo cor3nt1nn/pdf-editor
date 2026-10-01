@@ -157,7 +157,7 @@ def test_no_ink_warns_instead_of_adding(qtbot, signature_store, blank_png, warni
     dialog.show()
     dialog.threshold_slider.setValue(0)
     dialog.accept()
-    assert warnings == ["No ink was found in the image; lower the threshold."]
+    assert warnings == ["No ink was found in the image; raise the threshold."]
     assert signature_store.records() == []
     assert dialog.isVisible()
     assert dialog.result_record is None

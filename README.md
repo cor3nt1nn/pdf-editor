@@ -5,9 +5,10 @@ Free, open-source (AGPL-3.0) PDF editor for Windows, bilingual French/English.
 Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stamps, sign with an
 image of a handwritten signature. Milestone 1 is a fast, crisp PDF viewer with page rotation,
 undo/redo and saving; Milestone 2 adds filling of standard PDF forms (AcroForm); Milestone 3
-(current) adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs).
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md) and
-[docs/M3_PLAN.md](docs/M3_PLAN.md).
+adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs); Milestone 4
+(current) adds signing with an image of a handwritten signature.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
+[docs/M3_PLAN.md](docs/M3_PLAN.md) and [docs/M4_PLAN.md](docs/M4_PLAN.md).
 
 ## Requirements
 
@@ -240,6 +241,89 @@ Run it on copies of your own samples: a form exported from Word (tables, "______
 13. **Save failure**: make the file read-only, add a text, Ctrl+S: an error offers Save As;
     cancel it: the title still shows `*`, the text is still there and Undo still works.
 14. **Flatten**: not available yet (Milestone 5): texts and stamps stay editable annotations.
+
+## Signature image (Milestone 4)
+
+Sign a document with a picture of your handwritten signature: photograph or scan it once,
+the editor removes the paper background, keeps the signature on this computer and places it
+on any page. A placed signature is a standard PDF stamp annotation with a transparent image:
+other viewers show and print it, and it stays movable and resizable here after reopening.
+This is **not** a certified digital signature.
+
+| Key | Tool / action |
+|---|---|
+| **S** | Signature Tool (with no saved signature it first opens the import dialog) |
+| Signatures ▸ *name* | Use that saved signature (it becomes the default) |
+| Signatures ▸ Add Signature… / Manage Signatures… | Import a signature; rename, delete, set the default |
+| **Alt** + click | Place without snapping, and over a form field |
+| **Delete** (or Backspace) | Delete the selected signature |
+
+- **Import** (Signatures ▸ Add Signature…, also on the toolbar button's arrow): choose or
+  drop a photo or scan (PNG, JPEG, BMP, TIFF, WebP; phone photos are turned upright). The
+  preview shows the result on a checkerboard (= transparent). Move **Threshold** to the right
+  to keep more ink (fainter strokes), to the left to remove more background (shadows,
+  grain). **Even out paper** removes shadows and gradients; **Crop to ink** trims the
+  margins; **Ink colour** keeps the photographed colour or forces black or blue.
+- **Place**: with the Signature Tool, click in a table cell (e.g. next to "Signature :") or
+  on a "______" line: the signature sits at the bottom-left of the cell, or on the line,
+  sized to fit (at most the default width, 150 pt). Elsewhere a click centres it on the
+  pointer; drag on empty space to choose its width. A dashed preview shows where it goes.
+- **Move, resize, delete**: click a signature to select it, drag it to move it, drag a
+  handle to resize it (its proportions are kept); Delete removes it. Each step is one Undo
+  step. The text and stamp tools can select signatures too.
+- The image is embedded once per document, however many times it is placed.
+
+Known limitations:
+
+- Background removal uses one global threshold: printed lines or text touching the
+  signature in the photo stay unless cropped away; light pixels inside thick strokes may be
+  slightly transparent.
+- Only signatures made by this editor (or MuPDF-based tools) are movable; image stamps from
+  other programs are shown but cannot be selected, and Locked ones cannot be changed.
+- Rotating a page after signing turns the signature with the page.
+- An image placed several times is shared in the file only while the document stays open
+  (and after a full save); undo keeps its own copy of the image, so deleting a signature
+  from the saved list never breaks undo.
+- No drag & drop of an image straight onto the page; no certified digital signatures.
+- Flattening (turning signatures into page content on export) comes with Milestone 5.
+
+### Manual signature checklist (Milestone 4)
+
+Run it on copies of your own documents (a form with a "Signature :" cell or a signature
+line); keep the originals.
+
+1. **Import a phone photo**: sign a white sheet, photograph it with a phone (portrait,
+   slight shadow), press S (or Signatures ▸ Add Signature…) and choose the photo: it is
+   upright, the paper is transparent on the checkerboard, the shadow is gone with "Even out
+   paper" and comes back without it.
+2. **Threshold**: move the slider right (more ink, faint strokes appear) and left (less
+   background): the preview follows at once; keep a value where the strokes are complete
+   and the paper is clean. Try "Crop to ink" and the Black/Blue ink colours; name it and OK.
+3. **Place in a cell**: hover over the "Signature :" cell (dashed preview), click: the
+   signature sits in the cell, bottom-left, not wider than the cell. Click on a "______"
+   line: it sits on the line. Alt+click places it centred on the pointer; drag on empty space
+   to choose its width.
+4. **Resize**: select it, drag a corner and a side handle: the proportions never change;
+   move it; Undo/Redo every step.
+5. **Incremental save**: Ctrl+S: the `*` disappears and the file grows by a few KB per
+   signature image (not by the size of the photo).
+6. **Other viewers**: open the saved file in Adobe Acrobat Reader, Edge and Chrome: the
+   signature is at the same place and size, with a transparent background (the cell lines
+   show through), and printing (or printing to PDF) from each includes it.
+7. **Reopen and move**: close and reopen the file here: select the signature placed in the
+   previous session, move and resize it, save, and check it once more in another viewer.
+8. **Rotated page**: rotate a page (Ctrl+R) and place a signature: it reads upright here
+   and in the other viewers.
+9. **Saved signatures**: restart the editor: the signature is still in the Signatures menu;
+   add a second one, switch the default from the menu, rename and delete one in Manage
+   Signatures…; undoing the deletion of a placed signature still works after deleting the
+   saved one.
+10. **Save failure**: make the file read-only, place a signature, Ctrl+S: an error offers
+    Save As; cancel it: the title still shows `*`, the signature is still there and Undo
+    still works.
+11. **Flatten**: not available yet (Milestone 5): signatures stay movable annotations, so
+    anyone with an editor can move or copy them; flatten on export will bake them into the
+    page.
 
 ## License
 
