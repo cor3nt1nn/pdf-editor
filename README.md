@@ -31,8 +31,8 @@ Where PDF Editor keeps its data:
 
 - settings: `%APPDATA%\PDFEditor\PDFEditor.ini`
 - saved signatures: `%LOCALAPPDATA%\PDFEditor\PDFEditor\signatures`
-- log file: `%LOCALAPPDATA%\PDFEditor\logs\pdfeditor.log` (its exact path is shown in
-  Help ▸ About; attach it when reporting a problem)
+- log file: `%LOCALAPPDATA%\PDFEditor\PDFEditor\logs\pdfeditor.log` (its exact path is
+  shown in Help ▸ About PDF Editor…; attach it when reporting a problem)
 
 Uninstall: **Settings ▸ Unregister from Windows** (if you registered it), then delete the
 `PDFEditor` folder and, to remove your settings, signatures and log too,
@@ -57,8 +57,9 @@ Où PDF Editor conserve ses données :
 
 - paramètres : `%APPDATA%\PDFEditor\PDFEditor.ini`
 - signatures enregistrées : `%LOCALAPPDATA%\PDFEditor\PDFEditor\signatures`
-- fichier journal : `%LOCALAPPDATA%\PDFEditor\logs\pdfeditor.log` (son chemin exact est
-  indiqué dans Aide ▸ À propos ; joignez-le pour signaler un problème)
+- fichier journal : `%LOCALAPPDATA%\PDFEditor\PDFEditor\logs\pdfeditor.log` (son chemin
+  exact est indiqué dans Aide ▸ À propos de PDF Editor… ; joignez-le pour signaler un
+  problème)
 
 Désinstallation : **Paramètres ▸ Retirer de Windows** (si vous l’aviez enregistré), puis
 supprimez le dossier `PDFEditor` et, pour effacer aussi vos paramètres, signatures et

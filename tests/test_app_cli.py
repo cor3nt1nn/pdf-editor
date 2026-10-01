@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QStandardPaths
 
 import pdfeditor.app as app_module
 import pdfeditor.ui.main_window as mw_module
@@ -166,9 +168,13 @@ def test_default_log_path_is_app_local_data(qapp, monkeypatch) -> None:
     qapp.setOrganizationName("PDFEditor")
     qapp.setApplicationName("PDFEditor")
     path = app_module.log_path()
-    assert path.name == "pdfeditor.log"
-    assert path.parent.name == "logs"
-    assert "PDFEditor" in path.parts
+    # %LOCALAPPDATA%\PDFEditor\PDFEditor\logs\pdfeditor.log (organisation\application),
+    # as documented in README.md and Deviation 52.
+    assert path.parts[-4:] == ("PDFEditor", "PDFEditor", "logs", "pdfeditor.log")
+    local = os.environ.get("LOCALAPPDATA")
+    if local and not QStandardPaths.isTestModeEnabled():
+        expected = Path(local) / "PDFEditor" / "PDFEditor" / "logs" / "pdfeditor.log"
+        assert os.path.normcase(path) == os.path.normcase(expected)
 
 
 def test_unwritable_log_dir_is_not_fatal(qapp, tmp_path, root_logging) -> None:
