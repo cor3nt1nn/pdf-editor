@@ -127,3 +127,8 @@ def word_form_rotated_pdf(tmp_path):
 @pytest.fixture
 def print_pdf(tmp_path):
     return fixtures.make_print_pdf(tmp_path / "print.pdf")
+
+
+@pytest.fixture
+def signed_pdf(tmp_path):
+    return fixtures.make_signed_pdf(tmp_path / "signed.pdf")

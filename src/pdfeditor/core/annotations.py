@@ -1,4 +1,4 @@
-"""FreeText annotations: text boxes and stamps (M3).
+"""FreeText annotations (text boxes and stamps, M3) and signatures (M4).
 
 Pure functions on ``pymupdf.Document``. Callers hold ``PdfDocument.lock``. Never keep
 ``pymupdf.Page`` / ``Annot`` objects across calls (every save replaces the document and
@@ -16,11 +16,14 @@ Geometry: callers work in *page space* (rotation applied, cropbox-relative, poin
 The unrotated rect stored in the file is ``page_to_unrotated(rect)`` and the text is
 drawn with ``/Rotate`` = the page rotation at creation, so it reads upright on screen.
 
-Only FreeText annotations are handled. Text uses Helvetica (``/Helv``), no border, no
-fill; stamps are FreeText annotations showing one ZapfDingbats glyph
-(:data:`STAMP_GLYPHS`). Other subtypes (and widgets) are ignored. Callout FreeText
-(/IT /FreeTextCallout) and those flagged ReadOnly or Locked are listed but
-:attr:`AnnotInfo.locked`: never changed or deleted; LockedContents keeps the text.
+FreeText annotations and signatures are handled. Text uses Helvetica (``/Helv``), no
+border, no fill; stamps are FreeText annotations showing one ZapfDingbats glyph
+(:data:`STAMP_GLYPHS`); signatures are Stamp annotations with ``/IT /StampImage`` and an
+image appearance (:mod:`pdfeditor.core.signature`; other Stamps are ignored; a
+signature only honours its rect). Other subtypes (and widgets) are ignored. Callout
+FreeText (/IT /FreeTextCallout), annotations flagged ReadOnly or Locked and signatures
+whose image has no valid size are listed but :attr:`AnnotInfo.locked`: never changed or
+deleted; LockedContents keeps the text.
 """
 
 from __future__ import annotations
@@ -34,8 +37,10 @@ from enum import StrEnum
 import pymupdf
 from PySide6.QtCore import QPointF, QRectF
 
+from pdfeditor.core import signature
 from pdfeditor.core.forms import ANNOT_HIDDEN, ANNOT_NO_VIEW, _page_rect
 from pdfeditor.core.geometry import fitz_from_qrect, page_to_unrotated
+from pdfeditor.core.signature import ImageData
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +50,7 @@ Color = tuple[float, float, float]
 class AnnotKind(StrEnum):
     TEXT = "text"
     STAMP = "stamp"
+    SIGNATURE = "signature"
 
 
 #: Stamp name -> ZapfDingbats character code (✓, ✗, ●).
@@ -78,7 +84,7 @@ _STAMP_FONT = "zadb"
 
 @dataclass(frozen=True)
 class AnnotInfo:
-    """Snapshot of one FreeText annotation (no live pymupdf object)."""
+    """Snapshot of one FreeText annotation or signature (no live pymupdf object)."""
 
     page: int
     #: Xref of the annotation (stale after a full save; identity is ``name``).
@@ -104,6 +110,10 @@ class AnnotInfo:
     locked: bool = False
     #: /F LockedContents: the text cannot be edited (moving and resizing can).
     locked_contents: bool = False
+    #: Signature only: xref of its image (stale after a full save) and its pixel size
+    #: as embedded (pre-rotated for the page).
+    image_xref: int = 0
+    image_size: tuple[int, int] = (0, 0)
 
     @property
     def editable(self) -> bool:
@@ -113,7 +123,7 @@ class AnnotInfo:
     @property
     def text_editable(self) -> bool:
         """The user can change the text of this (editable) annotation."""
-        return self.editable and not self.locked_contents
+        return self.editable and not self.locked_contents and self.kind is not AnnotKind.SIGNATURE
 
 
 @dataclass(frozen=True)
@@ -122,7 +132,8 @@ class AnnotSpec:
 
     page: int
     kind: AnnotKind
-    #: Text, or the ZapfDingbats code of a stamp (a value of :data:`STAMP_GLYPHS`).
+    #: Text, or the ZapfDingbats code of a stamp (a value of :data:`STAMP_GLYPHS`);
+    #: ignored for a signature.
     text: str
     font_size: float
     color: Color
@@ -132,6 +143,8 @@ class AnnotSpec:
     name: str = ""
     #: /Rotate of the text; None = the page rotation at creation (upright on screen).
     rotate: int | None = None
+    #: Signature only: the image samples, already turned for the page (required).
+    image: ImageData | None = None
 
 
 # -- /DA -------------------------------------------------------------------
@@ -211,7 +224,11 @@ def _info(
     index: int,
     annot: pymupdf.Annot,
     details: dict[str, str] | None = None,
+    *,
+    image_xref: int | None = None,
 ) -> AnnotInfo:
+    if annot.type[0] == pymupdf.PDF_ANNOT_STAMP:
+        return _signature_info(doc, page, index, annot, details, image_xref)
     xref = int(annot.xref)
     font, size, color = parse_da(_string_key(doc, xref, "DA"))
     if details is None:
@@ -237,6 +254,56 @@ def _info(
         locked=callout or bool(flags & (ANNOT_READ_ONLY | ANNOT_LOCKED)),
         locked_contents=bool(flags & ANNOT_LOCKED_CONTENTS),
     )
+
+
+def _signature_info(
+    doc: pymupdf.Document,
+    page: pymupdf.Page,
+    index: int,
+    annot: pymupdf.Annot,
+    details: dict[str, str] | None,
+    image_xref: int | None,
+) -> AnnotInfo:
+    """Snapshot of signature ``annot`` (locked when its image has no valid size)."""
+    xref = int(annot.xref)
+    if details is None:
+        details = annot.info
+    if image_xref is None:
+        image_xref = signature.signature_image_xref(doc, page, annot)
+    size = signature.image_size(doc, image_xref) if image_xref else (0, 0)
+    ok = size[0] > 0 and size[1] > 0
+    raw = pymupdf.Rect(annot.rect)
+    flags = int(annot.flags or 0)
+    return AnnotInfo(
+        page=index,
+        xref=xref,
+        name=str(details.get("id") or ""),
+        kind=AnnotKind.SIGNATURE,
+        text="",
+        font_size=DEFAULT_FONT_SIZE,
+        color=BLACK,
+        rotate=0,
+        hidden=bool(flags & (ANNOT_HIDDEN | ANNOT_NO_VIEW)),
+        rect=_page_rect(raw, page),
+        unrotated_rect=(raw.x0, raw.y0, raw.x1, raw.y1),
+        locked=not ok or bool(flags & (ANNOT_READ_ONLY | ANNOT_LOCKED)),
+        locked_contents=bool(flags & ANNOT_LOCKED_CONTENTS),
+        image_xref=image_xref,
+        image_size=size,
+    )
+
+
+def read_one(fitz_doc: pymupdf.Document, page_index: int, xref: int) -> AnnotInfo:
+    """Snapshot of annotation ``xref`` of a page (FreeText or signature; real /NM)."""
+    page = fitz_doc[page_index]
+    return _info(fitz_doc, page, page_index, page.load_annot(xref))
+
+
+def _candidate(fitz_doc: pymupdf.Document, xref: int, subtype: int) -> bool:
+    """Annotation ``xref`` of ``subtype`` may be one we list (cheap check)."""
+    if subtype == pymupdf.PDF_ANNOT_FREE_TEXT:
+        return True
+    return subtype == pymupdf.PDF_ANNOT_STAMP and signature.is_signature_intent(fitz_doc, xref)
 
 
 def new_name() -> str:
@@ -273,9 +340,10 @@ def read_annots(
     include_hidden: bool = False,
     scope: str = "",
 ) -> list[AnnotInfo]:
-    """FreeText annotations of a page, in /Annots order; hidden ones skipped by default.
+    """FreeText annotations and signatures of a page, in /Annots order; hidden ones
+    skipped by default.
 
-    Never modifies the document. A FreeText without /NM, whose /NM repeats an earlier
+    Never modifies the document. An annotation without /NM, whose /NM repeats an earlier
     one of the page or looks synthetic, is listed under ``synthetic_name(xref, scope)``.
     """
     page = fitz_doc[page_index]  # keep the Page alive while its annots are used
@@ -286,17 +354,23 @@ def read_annots(
     # instead: in PyMuPDF 1.28.2 that makes a FreeText without /AP (MuPDF-synthesised
     # appearance) vanish from renders once another annotation is added to the page.
     for xref, subtype, name in page.annot_xrefs():
-        if subtype != pymupdf.PDF_ANNOT_FREE_TEXT:
+        if not _candidate(fitz_doc, xref, subtype):
             continue
         try:
+            annot = page.load_annot(xref)
+            image = None
+            if subtype == pymupdf.PDF_ANNOT_STAMP:
+                image = signature.signature_image_xref(fitz_doc, page, annot)
+                if not image:
+                    continue  # a Stamp that is not a signature
             if not name or name in seen or is_synthetic(name):
                 name = synthetic_name(xref, scope)
             else:
                 seen.add(name)
-            annot = page.load_annot(xref)
-            info = _info(fitz_doc, page, page_index, annot, {**annot.info, "id": name})
+            details = {**annot.info, "id": name}
+            info = _info(fitz_doc, page, page_index, annot, details, image_xref=image)
         except Exception:  # one malformed annotation must not hide the others
-            log.warning("skipping unreadable FreeText xref %s", xref, exc_info=True)
+            log.warning("skipping unreadable annotation xref %s", xref, exc_info=True)
             continue
         if include_hidden or not info.hidden:
             out.append(info)
@@ -306,8 +380,8 @@ def read_annots(
 def resolve_annot(
     fitz_doc: pymupdf.Document, page_index: int, name: str
 ) -> tuple[pymupdf.Page, pymupdf.Annot] | None:
-    """The live FreeText annotation named ``name`` on a page, as ``(page, annot)`` — keep
-    the page referenced while using the annot — or None.
+    """The live FreeText annotation or signature named ``name`` on a page, as
+    ``(page, annot)`` — keep the page referenced while using the annot — or None.
 
     A synthetic name is resolved by its xref (the caller checks its scope).
     """
@@ -316,10 +390,15 @@ def resolve_annot(
     page = fitz_doc[page_index]
     parts = synthetic_parts(name)
     for xref, subtype, nm in page.annot_xrefs():
-        if subtype != pymupdf.PDF_ANNOT_FREE_TEXT:
+        if not _candidate(fitz_doc, xref, subtype):
             continue
         if (xref == parts[1]) if parts is not None else (nm == name):
-            return page, page.load_annot(xref)
+            annot = page.load_annot(xref)
+            if subtype == pymupdf.PDF_ANNOT_STAMP and not signature.signature_image_xref(
+                fitz_doc, page, annot
+            ):
+                continue
+            return page, annot
     return None
 
 
@@ -334,7 +413,7 @@ def claim_name(fitz_doc: pymupdf.Document, page_index: int, name: str) -> str:
     _page, annot = found
     real = new_name()
     _set_name(fitz_doc, annot.xref, real)
-    log.info("assigned /NM %s to FreeText xref %s", real, annot.xref)
+    log.info("assigned /NM %s to annotation xref %s", real, annot.xref)
     return real
 
 
@@ -351,11 +430,17 @@ def _fontname(kind: AnnotKind) -> str:
 def create_annot(
     fitz_doc: pymupdf.Document, page_index: int, spec: AnnotSpec, *, fit_height: bool = False
 ) -> AnnotInfo:
-    """Create a FreeText annotation from ``spec`` and return its snapshot.
+    """Create a FreeText annotation or signature from ``spec`` and return its snapshot.
 
     ``fit_height`` (text only): the height then hugs the wrapped text (see
-    :func:`update_annot`); otherwise ``spec.rect`` is used as is.
+    :func:`update_annot`); otherwise ``spec.rect`` is used as is. A signature gets an
+    image object of its own (``PdfDocument.add_annot`` shares them instead).
     """
+    if spec.kind is AnnotKind.SIGNATURE:
+        if spec.image is None:
+            raise ValueError("a signature spec needs an image")
+        image_xref = signature.add_image_xobject(fitz_doc, spec.image)
+        return signature.create_signature_annot(fitz_doc, page_index, spec, image_xref)
     page = fitz_doc[page_index]
     rotate = page.rotation if spec.rotate is None else int(spec.rotate) % 360
     unrotated = page_to_unrotated(fitz_from_qrect(spec.rect), page.derotation_matrix)
@@ -441,8 +526,9 @@ def update_annot(
     top edge and the width, capped at the page edge (longer text is clipped). Foreign
     annotations are normalised to Helvetica (stamps to ZapfDingbats) and lose their rich
     text (/RC, /DS); /CL is always removed. The returned snapshot keeps ``name`` (even
-    synthetic). Raises ``LookupError`` if the annotation is gone, ``PermissionError`` if
-    it is :attr:`AnnotInfo.locked`.
+    synthetic). A signature honours ``rect`` only (the rest is ignored; without a rect
+    nothing is written). Raises ``LookupError`` if the annotation is gone,
+    ``PermissionError`` if it is :attr:`AnnotInfo.locked`.
     """
     found = resolve_annot(fitz_doc, page_index, name)
     if found is None:
@@ -452,6 +538,14 @@ def update_annot(
     current = _info(fitz_doc, page, page_index, annot)
     if current.locked:
         raise PermissionError(f"annotation {name!r} is locked")
+    if current.kind is AnnotKind.SIGNATURE:
+        if rect is not None:
+            unrotated = page_to_unrotated(fitz_from_qrect(rect), page.derotation_matrix)
+            signature.set_signature_rect(annot, unrotated)
+            if _key(fitz_doc, xref, "CL")[0] != "null":
+                fitz_doc.xref_set_key(xref, "CL", "null")
+        details = {**annot.info, "id": name}
+        return _info(fitz_doc, page, page_index, page.load_annot(xref), details)
     kind = current.kind
     if text is not None and text not in STAMP_CENTRE:
         kind = AnnotKind.TEXT  # a stamp given ordinary text becomes a text box
@@ -511,8 +605,9 @@ def delete_annot(fitz_doc: pymupdf.Document, page_index: int, name: str) -> bool
 
 
 # -- geometry helpers --------------------------------------------------------
-def spec_from(info: AnnotInfo) -> AnnotSpec:
-    """The spec re-creating ``info`` (same /NM, rect, rotation, style)."""
+def spec_from(info: AnnotInfo, image: ImageData | None = None) -> AnnotSpec:
+    """The spec re-creating ``info`` (same /NM, rect, rotation, style; a signature also
+    needs its ``image``, e.g. from ``PdfDocument.annot_image``)."""
     return AnnotSpec(
         page=info.page,
         kind=info.kind,
@@ -522,6 +617,7 @@ def spec_from(info: AnnotInfo) -> AnnotSpec:
         rect=QRectF(info.rect),
         name=info.name,
         rotate=info.rotate,
+        image=image,
     )
 
 

@@ -23,8 +23,8 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations, snapping
-from pdfeditor.core.annotations import AnnotInfo, AnnotSpec
+from pdfeditor.core import annotations, signature, snapping
+from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.forms import (
     FieldKind,
     WidgetInfo,
@@ -39,6 +39,7 @@ from pdfeditor.core.forms import (
     widget_kind,
 )
 from pdfeditor.core.geometry import fitz_from_qrect
+from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import PageShapes
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,9 @@ class PdfDocument(QObject):
         self._size_cache: dict[int, QSizeF] = {}
         self._widget_cache: dict[int, list[WidgetInfo]] = {}
         self._annot_cache: dict[int, list[AnnotInfo]] = {}
+        # Signature image objects of the current load: content digest -> image xref.
+        # Dropped with the annotation cache (reloads, full writes renumber xrefs).
+        self._image_xrefs: dict[str, int] = {}
         # Snapping shapes by page (read without the lock, written under it).
         self._shapes_cache: dict[int, PageShapes] = {}
         # Scope of synthetic annotation names: bumped whenever xrefs may change.
@@ -455,12 +459,12 @@ class PdfDocument(QObject):
     def _clear_widget_cache(self, *_args: object) -> None:
         self._widget_cache.clear()
 
-    # -- annotations (FreeText text boxes and stamps) ----------------------
+    # -- annotations (FreeText text boxes and stamps, signatures) -----------
     def annots(self, i: int) -> list[AnnotInfo]:
-        """Visible FreeText annotations of page ``i`` (in /Annots order), cached like
-        :meth:`widgets` (same drop rules).
+        """Visible FreeText annotations and signatures of page ``i`` (in /Annots order),
+        cached like :meth:`widgets` (same drop rules).
 
-        Identity is ``(page, name)``. Reading never modifies the document: a FreeText
+        Identity is ``(page, name)``. Reading never modifies the document: an annotation
         without a unique /NM has a synthetic name (``annotations.is_synthetic``) valid
         until the next reload (save) or close; commands turn it into a real /NM with
         :meth:`claim_annot_name` when they first change the annotation.
@@ -474,7 +478,7 @@ class PdfDocument(QObject):
         return list(cached)
 
     def annot(self, page: int, name: str) -> AnnotInfo | None:
-        """The visible FreeText annotation ``name`` on ``page``, or None.
+        """The visible annotation ``name`` on ``page``, or None.
 
         A synthetic name of the current load also finds the annotation after it was
         given a real /NM (the snapshot then carries the real name).
@@ -525,20 +529,89 @@ class PdfDocument(QObject):
             raise AnnotError("annotations are not permitted by this document")
 
     def add_annot(self, spec: AnnotSpec, *, fit_height: bool = False) -> AnnotInfo:
-        """Create a FreeText annotation (``spec.name`` "" = new uuid4). Emits page_changed.
+        """Create a FreeText annotation or signature (``spec.name`` "" = new uuid4).
+        Emits page_changed.
 
         ``fit_height``: a text box's height then hugs its wrapped text; otherwise
-        ``spec.rect`` is used as is. Raises :class:`AnnotError`.
+        ``spec.rect`` is used as is. A signature (``spec.image`` required, already turned
+        for the page) draws the document's image object with the same samples when there
+        is one, else a new one. Raises :class:`AnnotError`.
         """
         self._check_index(spec.page)
         self._check_annotate()
+        image = spec.image
+        if spec.kind is AnnotKind.SIGNATURE and image is None:
+            raise AnnotError("a signature needs an image")
         with self.lock:
             try:
-                info = annotations.create_annot(self.fitz, spec.page, spec, fit_height=fit_height)
+                if image is not None and spec.kind is AnnotKind.SIGNATURE:
+                    xref = self._image_xref(image)
+                    info = signature.create_signature_annot(self.fitz, spec.page, spec, xref)
+                else:
+                    info = annotations.create_annot(
+                        self.fitz, spec.page, spec, fit_height=fit_height
+                    )
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise AnnotError(str(exc)) from exc
         self.page_changed.emit(spec.page)
         return info
+
+    def _image_xref(self, data: ImageData) -> int:
+        """Xref of an image object holding ``data`` (shared: cached, found by a scan of
+        the signatures, or created). Under the lock."""
+        key = signature.digest(data)
+        xref = self._image_xrefs.get(key)
+        if xref is None:
+            xref = self._find_image(data)
+        if xref is None:
+            xref = signature.add_image_xobject(self.fitz, data)
+            log.debug("added signature image xref %d (%dx%d)", xref, data.width, data.height)
+        self._image_xrefs[key] = xref
+        return xref
+
+    def _find_image(self, data: ImageData) -> int | None:
+        """Image xref of a signature of the document showing ``data``'s samples, or
+        None. Records every image hashed on the way. Under the lock."""
+        key = signature.digest(data)
+        known = set(self._image_xrefs.values())
+        for i in range(self._page_count):
+            listed = annotations.read_annots(
+                self.fitz, i, include_hidden=True, scope=self._annot_scope()
+            )
+            for info in listed:
+                xref = info.image_xref
+                if not xref or xref in known or info.image_size != (data.width, data.height):
+                    continue
+                known.add(xref)
+                try:
+                    found = signature.digest(signature.read_image(self.fitz, xref))
+                except ValueError:
+                    continue
+                self._image_xrefs.setdefault(found, xref)
+                if found == key:
+                    return xref
+        return None
+
+    def annot_image(self, page: int, name: str) -> ImageData:
+        """The image samples of signature ``name`` on ``page`` (as embedded: turned for
+        the page), for undo snapshots. Raises :class:`AnnotError` if it is gone, not a
+        signature, or its image cannot be read back."""
+        self._check_index(page)
+        self._check_name(page, name)
+        with self.lock:
+            try:
+                found = annotations.resolve_annot(self.fitz, page, name)
+                if found is None:
+                    raise AnnotError(f"annotation {name!r} not found on page {page}")
+                fitz_page, annot = found
+                xref = signature.signature_image_xref(self.fitz, fitz_page, annot)
+                if not xref:
+                    raise AnnotError(f"annotation {name!r} is not a signature")
+                return signature.read_image(self.fitz, xref)
+            except AnnotError:
+                raise
+            except Exception as exc:  # ValueError, MuPDF FzError*
+                raise AnnotError(str(exc)) from exc
 
     def update_annot(
         self,
@@ -597,6 +670,7 @@ class PdfDocument(QObject):
 
     def _clear_annot_cache(self, *_args: object) -> None:
         self._annot_cache.clear()
+        self._image_xrefs.clear()
 
     # -- snapping ------------------------------------------------------------
     def page_shapes(self, i: int) -> PageShapes:
@@ -629,7 +703,7 @@ class PdfDocument(QObject):
 
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
-        self._annot_cache.clear()
+        self._clear_annot_cache()
         self._load_generation += 1
         self._clear_shapes_cache()
         self._read_form_state()
@@ -722,7 +796,7 @@ class PdfDocument(QObject):
                         # garbage=3 renumbers the in-memory objects: cached xrefs are
                         # stale even if writing the file (or the reload) fails.
                         self._widget_cache.clear()
-                        self._annot_cache.clear()
+                        self._clear_annot_cache()
                         self._load_generation += 1
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise SaveError(str(exc)) from exc
@@ -772,7 +846,7 @@ class PdfDocument(QObject):
         self._page_count = 0
         self._size_cache.clear()
         self._widget_cache.clear()
-        self._annot_cache.clear()
+        self._clear_annot_cache()
         self._clear_shapes_cache()
         self._is_form = self._can_fill_forms = self._can_annotate = self._form_edited = False
         self._xfa_kind = XfaKind.NONE
@@ -788,7 +862,7 @@ class PdfDocument(QObject):
             self._page_count = int(self._doc.page_count) if self._doc is not None else 0
         self._size_cache.clear()
         self._widget_cache.clear()
-        self._annot_cache.clear()
+        self._clear_annot_cache()
         self._clear_shapes_cache()
 
 

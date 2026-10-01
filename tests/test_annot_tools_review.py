@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import pymupdf
 import pytest
-from fixtures import FOREIGN_RECT, PASSWORD, WORD_SHAPES
+from fixtures import (
+    FOREIGN_RECT,
+    LOCKED_SIGNATURE_RECT,
+    MUPDF_STAMP_RECT,
+    PASSWORD,
+    SIGNED_RECT,
+    WORD_SHAPES,
+)
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QUndoStack
 from PySide6.QtWidgets import QMessageBox, QPlainTextEdit
@@ -295,6 +302,19 @@ def test_hover_and_save_clean_foreign_document_writes_nothing(qtbot, window, ann
         qtbot.mouseMove(w.page_view.viewport(), _vp(w, p))
     assert w.save()
     assert annotated_pdf.read_bytes() == original
+
+
+def test_hover_and_save_clean_signed_document_writes_nothing(qtbot, window, signed_pdf) -> None:
+    w = window
+    original = signed_pdf.read_bytes()
+    assert w.open_file(str(signed_pdf))
+    w.act_text_tool.trigger()
+    for x0, y0, x1, y1 in (SIGNED_RECT, MUPDF_STAMP_RECT, LOCKED_SIGNATURE_RECT):
+        qtbot.mouseMove(w.page_view.viewport(), _vp(w, QPointF((x0 + x1) / 2, (y0 + y1) / 2)))
+        qtbot.mouseMove(w.page_view.viewport(), _vp(w, QPointF(x1 - 1, y1 - 1)))
+    qtbot.mouseMove(w.page_view.viewport(), _vp(w, EMPTY))
+    assert w.save()
+    assert signed_pdf.read_bytes() == original
 
 
 def test_move_foreign_then_click_again_opens_editor(qtbot, window, annotated_pdf) -> None:

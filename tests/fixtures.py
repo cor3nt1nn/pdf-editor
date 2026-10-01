@@ -893,3 +893,166 @@ def make_busy_drawings_pdf(path: Path, n: int = 3000) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M4: signatures --------------------------------------------------------------------
+#: Pixel size of the asymmetric signature image of :func:`make_signed_pdf`.
+SIG_IMAGE_SIZE = (400, 160)
+#: Its red top-left square side and blue bottom band height (pixels); the rest is clear.
+SIG_RED_SIDE = 60
+SIG_BLUE_BAND = 30
+SIGNED_NAME = "5b0e8f3a-6c1d-4f2e-9a7b-3d4c5e6f7a81"
+SIGNED_RECT: Rect4 = (100, 100, 300, 180)
+#: MuPDF-made image stamp (pdf_set_annot_stamp_image, /IT /StampImage) without /NM.
+MUPDF_STAMP_RECT: Rect4 = (100, 220, 300, 300)
+#: MuPDF "Approved" text stamp (not a signature).
+TEXT_STAMP_NAME = "text-stamp"
+TEXT_STAMP_RECT: Rect4 = (100, 320, 300, 360)
+#: Adobe-like image stamp without /IT (not a signature).
+FOREIGN_STAMP_NAME = "foreign-image-stamp"
+FOREIGN_STAMP_RECT: Rect4 = (320, 100, 520, 180)
+#: Our signature flagged Locked (/F 132).
+LOCKED_SIGNATURE_NAME = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+LOCKED_SIGNATURE_RECT: Rect4 = (320, 220, 520, 300)
+SIGNED_TEXT_NAME = "7e8f9a0b-1c2d-4e3f-8a5b-6c7d8e9f0a1b"
+SIGNED_TEXT_RECT: Rect4 = (100, 400, 300, 420)
+#: Page 2 (/Rotate 90): our signature with pre-rotated pixels, page-space rect.
+ROTATED_SIGNED_NAME = "2f3a4b5c-6d7e-4f8a-9b0c-1d2e3f4a5b6c"
+ROTATED_SIGNED_RECT: Rect4 = (100, 100, 300, 180)
+#: (fraction of the rect width, of its height) -> expected colour of a rendering of the
+#: asymmetric image upright in a rect: "red", "blue" or "white" (transparent).
+SIG_ASYM_PROBES: dict[tuple[float, float], str] = {
+    (0.05, 0.1): "red",
+    (0.05, 0.95): "blue",
+    (0.95, 0.95): "blue",
+    (0.95, 0.1): "white",
+    (0.5, 0.5): "white",
+}
+
+
+def sig_asym_samples(rotation: int = 0) -> tuple[int, int, bytes, bytes]:
+    """(width, height, rgb, alpha) of the asymmetric signature image turned by
+    ``-rotation`` degrees (pixels pre-rotated for a page with that /Rotate)."""
+    w, h = SIG_IMAGE_SIZE
+
+    def pixel(x: int, y: int) -> tuple[int, int, int, int]:
+        if x < SIG_RED_SIDE and y < SIG_RED_SIDE:
+            return (255, 0, 0, 255)
+        if y >= h - SIG_BLUE_BAND:
+            return (0, 0, 255, 255)
+        return (0, 0, 0, 0)
+
+    rotation %= 360
+    # (x', y') of the turned image -> (x, y) of the upright one.
+    if rotation == 90:
+        out_w, out_h, src = h, w, lambda x, y: (w - 1 - y, x)
+    elif rotation == 180:
+        out_w, out_h, src = w, h, lambda x, y: (w - 1 - x, h - 1 - y)
+    elif rotation == 270:
+        out_w, out_h, src = h, w, lambda x, y: (y, h - 1 - x)
+    else:
+        out_w, out_h, src = w, h, lambda x, y: (x, y)
+    rgb, alpha = bytearray(), bytearray()
+    for y in range(out_h):
+        for x in range(out_w):
+            r, g, b, a = pixel(*src(x, y))
+            rgb += bytes((r, g, b))
+            alpha.append(a)
+    return out_w, out_h, bytes(rgb), bytes(alpha)
+
+
+def _sig_image(doc: pymupdf.Document, w: int, h: int, rgb: bytes, alpha: bytes) -> int:
+    smask = doc.get_new_xref()
+    doc.update_object(
+        smask,
+        f"<</Type/XObject/Subtype/Image/Width {w}/Height {h}"
+        "/ColorSpace/DeviceGray/BitsPerComponent 8>>",
+    )
+    doc.update_stream(smask, alpha, compress=True)
+    xref = doc.get_new_xref()
+    doc.update_object(
+        xref,
+        f"<</Type/XObject/Subtype/Image/Width {w}/Height {h}"
+        f"/ColorSpace/DeviceRGB/BitsPerComponent 8/SMask {smask} 0 R>>",
+    )
+    doc.update_stream(xref, rgb, compress=True)
+    return xref
+
+
+def _image_stamp(page: pymupdf.Page, rect: Rect4, image: object) -> int:
+    """A Stamp drawing ``image`` (a mupdf image object or FzImage) at the page-space
+    ``rect``; MuPDF's own appearance. Returns its xref."""
+    mupdf = pymupdf.mupdf
+    unrotated = (pymupdf.Rect(rect) * page.derotation_matrix).normalize()
+    a = page.add_stamp_annot(unrotated)
+    if isinstance(image, mupdf.FzImage):
+        mupdf.pdf_set_annot_stamp_image(a.this, image)
+    else:
+        mupdf.pdf_set_annot_stamp_image_obj(a.this, image)
+    a.set_rect(unrotated)
+    mupdf.pdf_update_annot(a.this)
+    return a.xref
+
+
+def _our_signature(doc: pymupdf.Document, page: pymupdf.Page, rect: Rect4, image: int, name: str):
+    mupdf = pymupdf.mupdf
+    obj = mupdf.pdf_new_indirect(pymupdf._as_pdf_document(doc), image, 0)
+    xref = _image_stamp(page, rect, obj)
+    doc.xref_set_key(xref, "NM", pymupdf.get_pdf_str(name))
+    doc.xref_set_key(xref, "IT", "/StampImage")
+    for key in ("Name", "Contents", "C"):
+        doc.xref_set_key(xref, key, "null")
+    return xref
+
+
+def make_signed_pdf(path: Path) -> Path:
+    """Two A4 pages. Page 1: our signature (``SIGNED_NAME`` at ``SIGNED_RECT``, the
+    asymmetric 400x160 image), a MuPDF-made image stamp with /IT /StampImage and no /NM
+    (``MUPDF_STAMP_RECT``), a MuPDF "Approved" text stamp, an Adobe-like image stamp
+    without /IT (``FOREIGN_STAMP_NAME``), a Locked signature (/F 132,
+    ``LOCKED_SIGNATURE_NAME``, sharing the first image) and a FreeText. Page 2
+    (/Rotate 90): our signature with pre-rotated pixels at ``ROTATED_SIGNED_RECT``."""
+    mupdf = pymupdf.mupdf
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    page.insert_text((72, 60), "Signed", fontsize=14)
+    w, h, rgb, alpha = sig_asym_samples()
+    image = _sig_image(doc, w, h, rgb, alpha)
+    _our_signature(doc, page, SIGNED_RECT, image, SIGNED_NAME)
+
+    rgba = bytearray()
+    for i in range(w * h):
+        rgba += rgb[3 * i : 3 * i + 3] + alpha[i : i + 1]
+    pix = pymupdf.Pixmap(pymupdf.csRGB, w, h, bytes(rgba), 1)
+    fz_image = mupdf.fz_new_image_from_pixmap(pix.this, mupdf.FzImage())
+    lazy = _image_stamp(page, MUPDF_STAMP_RECT, fz_image)
+    doc.xref_set_key(lazy, "IT", "/StampImage")
+    doc.xref_set_key(lazy, "NM", "null")
+
+    text_stamp = page.add_stamp_annot(pymupdf.Rect(TEXT_STAMP_RECT))
+    doc.xref_set_key(text_stamp.xref, "NM", pymupdf.get_pdf_str(TEXT_STAMP_NAME))
+
+    foreign = _image_stamp(
+        page, FOREIGN_STAMP_RECT, mupdf.pdf_new_indirect(pymupdf._as_pdf_document(doc), image, 0)
+    )
+    doc.xref_set_key(foreign, "NM", pymupdf.get_pdf_str(FOREIGN_STAMP_NAME))
+    doc.xref_set_key(foreign, "Name", "null")
+
+    locked = _our_signature(doc, page, LOCKED_SIGNATURE_RECT, image, LOCKED_SIGNATURE_NAME)
+    doc.xref_set_key(locked, "F", "132")
+
+    text = page.add_freetext_annot(
+        pymupdf.Rect(SIGNED_TEXT_RECT), "Signed by", fontsize=11, border_width=0
+    )
+    doc.xref_set_key(text.xref, "NM", pymupdf.get_pdf_str(SIGNED_TEXT_NAME))
+    doc.xref_set_key(text.xref, "CL", "null")
+
+    page2 = doc.new_page(width=A4[0], height=A4[1])
+    page2.set_rotation(90)
+    w2, h2, rgb2, alpha2 = sig_asym_samples(90)
+    _our_signature(
+        doc, page2, ROTATED_SIGNED_RECT, _sig_image(doc, w2, h2, rgb2, alpha2), ROTATED_SIGNED_NAME
+    )
+    doc.save(path)
+    doc.close()
+    return path
