@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
 
 from pdfeditor.constants import APP_ID, ORG_NAME, ZoomMode
+from pdfeditor.core.recent import RECENT_MAX
 
 LANGUAGES = ("en", "fr")
 
@@ -135,11 +136,12 @@ class Settings:
             return []
         if isinstance(value, str):
             return [value]
-        return [str(v) for v in value]
+        return [str(v) for v in value if v][:RECENT_MAX]
 
     @recent_files.setter
     def recent_files(self, value: list[str]) -> None:
-        self._s.setValue("files/recent", list(value))
+        """Paths only (never passwords), most recent first, at most ``RECENT_MAX``."""
+        self._s.setValue("files/recent", [str(v) for v in value][:RECENT_MAX])
 
     # Export Copy dialog choices (docs/M5_PLAN.md 1.1), all on by default.
     @property

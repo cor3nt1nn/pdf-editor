@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QDir, QProcess, Qt
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.constants import APP_NAME, ZoomMode
+from pdfeditor.core import recent
 from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired, SaveError
@@ -166,6 +167,9 @@ class MainWindow(QMainWindow):
         )
         self.act_export = self._action(
             self.tr("&Export Copy…"), QKeySequence("Ctrl+E"), self.export_copy, "export"
+        )
+        self.act_clear_recent = self._action(
+            self.tr("&Clear List"), None, self.clear_recent_files, "clear_recent"
         )
         self.act_close = self._action(
             self.tr("&Close"), QKeySequence("Ctrl+W"), self.close_document, "close"
@@ -364,8 +368,16 @@ class MainWindow(QMainWindow):
     def _create_menus(self) -> None:
         bar = self.menuBar()
         self.menu_file = bar.addMenu(self.tr("&File"))
+        self.menu_file.addAction(self.act_open)
+        # Open Recent: rebuilt (and pruned of vanished files) each time it is shown, so
+        # that building the window never touches the disk.
+        self.menu_recent = QMenu(self.tr("Open &Recent"), self)
+        self.menu_recent.setObjectName("recent_menu")
+        self.menu_recent.setToolTipsVisible(True)  # needed for the full-path tooltips
+        self.menu_recent.aboutToShow.connect(self._rebuild_recent_menu)
+        self.menu_file.addMenu(self.menu_recent)
+        self._populate_recent_menu(self.settings.recent_files)
         for act in (
-            self.act_open,
             self.act_save,
             self.act_save_as,
             self.act_export,
@@ -914,6 +926,7 @@ class MainWindow(QMainWindow):
             )
             return False
         self.settings.last_open_dir = os.path.dirname(path)
+        self._add_recent(path)
         doc = self.document_view.document
         if doc is not None and not doc.can_annotate:
             self.statusBar().showMessage(
@@ -928,6 +941,67 @@ class MainWindow(QMainWindow):
                 10000,
             )
         return True
+
+    # -- recent files -----------------------------------------------------------
+    def _add_recent(self, path: str) -> None:
+        self.settings.recent_files = recent.push(self.settings.recent_files, path)
+
+    def _rebuild_recent_menu(self) -> None:
+        """Drop vanished files from the recent list, then rebuild File ▸ Open Recent."""
+        paths = self.settings.recent_files
+        kept = recent.prune(paths, file_exists)
+        if kept != paths:
+            self.settings.recent_files = kept
+        self._populate_recent_menu(kept)
+
+    def _populate_recent_menu(self, paths: list[str]) -> None:
+        menu = self.menu_recent
+        menu.clear()  # deletes the entries (owned by the menu), not Clear List
+        if not paths:
+            placeholder = QAction(self.tr("No recent files"), menu)
+            placeholder.setEnabled(False)
+            menu.addAction(placeholder)
+            self.act_clear_recent.setEnabled(False)
+            return
+        for number, path in enumerate(paths, start=1):
+            label = str(number)
+            # "&1" … "&9", then "1&0": the mnemonic is the last digit.
+            label = f"&{label}" if number < 10 else f"{label[:-1]}&{label[-1]}"
+            name = os.path.basename(path).replace("&", "&&")
+            act = QAction(f"{label} {name}", menu)
+            native = QDir.toNativeSeparators(path)
+            act.setToolTip(native)
+            act.setStatusTip(native)
+            act.setData(path)
+            act.triggered.connect(lambda _checked=False, p=path: self.open_recent(p))
+            menu.addAction(act)
+        menu.addSeparator()
+        self.act_clear_recent.setEnabled(True)
+        menu.addAction(self.act_clear_recent)
+
+    def recent_actions(self) -> list[QAction]:
+        """The file entries of File ▸ Open Recent, most recent first."""
+        return [a for a in self.menu_recent.actions() if isinstance(a.data(), str)]
+
+    def open_recent(self, path: str) -> bool:
+        """A File ▸ Open Recent entry: open it, or drop it if the file has vanished."""
+        if not file_exists(path):
+            log.info("recent file vanished: %s", path)
+            self.settings.recent_files = recent.remove(self.settings.recent_files, path)
+            self._populate_recent_menu(self.settings.recent_files)
+            dialogs.warn(
+                self,
+                self.tr("Cannot open file"),
+                self.tr("“{path}” could not be opened as a PDF document.\n\n{error}").format(
+                    path=QDir.toNativeSeparators(path), error=self.tr("The file does not exist.")
+                ),
+            )
+            return False
+        return self.open_file(path)
+
+    def clear_recent_files(self) -> None:
+        self.settings.recent_files = []
+        self._populate_recent_menu([])
 
     def _open_error_text(self, exc: OpenError) -> str:
         messages = {
@@ -1022,6 +1096,7 @@ class MainWindow(QMainWindow):
             )
             return False
         self.settings.last_open_dir = os.path.dirname(path)
+        self._add_recent(path)
         self._update_title()
         return True
 
