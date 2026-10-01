@@ -6,7 +6,7 @@ import time
 
 import pytest
 from fixtures import SIG_INK_COLOR, SIG_STROKE_POINTS, make_signature_image
-from PySide6.QtGui import QColor, QImage, QImageIOHandler, QImageReader, QTransform
+from PySide6.QtGui import QColor, QImage, QImageIOHandler, QImageReader, QPainter, QTransform
 
 from pdfeditor.core import image_tools
 from pdfeditor.core.image_tools import (
@@ -58,7 +58,10 @@ def test_photo_without_even_paper_shadow_corner_not_clean(signature_photo):
     assert corner(flat) == 0
     assert corner(raw) > 100
     ((fx, fy),) = SIG_STROKE_POINTS["shadow"]
-    assert _alpha_at(raw, fx, fy) > 0
+    # Near the ramp's edge (noisy JPEG paper): look at a 9x9 neighbourhood.
+    w, h = raw.width, raw.height
+    x, y = int(fx * w), int(fy * h)
+    assert max(raw.alpha[j * w + i] for j in range(y - 4, y + 5) for i in range(x - 4, x + 5)) > 0
 
 
 def test_soft_ramp_has_partial_alpha(signature_photo):
@@ -90,8 +93,52 @@ def test_color_replaces_rgb(signature_photo):
         out = _otsu(prepared, color=color)
         assert out.rgb == bytes(color) * (out.width * out.height)
     kept = _otsu(prepared, crop=False)
-    assert kept.rgb == prepared.rgb
+    # Colours kept where there is any alpha; one constant colour under alpha 0.
+    for i, a in enumerate(kept.alpha):
+        if a:
+            assert kept.rgb[3 * i : 3 * i + 3] == prepared.rgb[3 * i : 3 * i + 3]
     assert INK_COLORS["black"] == (0, 0, 0)
+
+
+def _clear_colors(out: ProcessedImage) -> set[bytes]:
+    return {out.rgb[3 * i : 3 * i + 3] for i, a in enumerate(out.alpha) if a == 0}
+
+
+@pytest.mark.parametrize("crop", [True, False])
+def test_keep_colour_hides_the_photo_under_alpha_0(signature_photo, crop):
+    """Privacy (M4 review 1): the paper of the photo never survives under alpha 0."""
+    prepared = prepare(load_image(signature_photo))
+    out = _otsu(prepared, crop=crop)
+    assert out.alpha.count(0) > 0
+    (clear,) = _clear_colors(out)
+    ink = image_tools.ink_color(out.rgb, out.alpha)
+    assert tuple(clear) == ink
+    assert all(abs(c - s) < 40 for c, s in zip(ink, SIG_INK_COLOR, strict=True))
+
+
+def test_keep_colour_png_transparent_areas_constant(signature_png):
+    out = _otsu(prepare(load_image(signature_png)), crop=False)
+    (clear,) = _clear_colors(out)
+    assert tuple(clear) == SIG_INK_COLOR
+
+
+def test_fill_transparent_and_ink_color():
+    rgb = bytes(range(12))
+    alpha = bytes((0, 255, 7, 0))
+    out = image_tools.fill_transparent(rgb, alpha, (200, 201, 202))
+    assert out == bytes((200, 201, 202, 3, 4, 5, 6, 7, 8, 200, 201, 202))
+    assert image_tools.fill_transparent(rgb, b"\x01" * 4, (0, 0, 0)) == rgb
+    with pytest.raises(ValueError):
+        image_tools.fill_transparent(rgb, alpha[:3], (0, 0, 0))
+    assert image_tools.ink_color(rgb, alpha) == (3, 4, 5)
+    assert image_tools.ink_color(rgb, bytes(4)) == (0, 0, 0)
+    # A thin stroke missed by the sampling stride is still found.
+    n = 100_000
+    thin = bytearray(n)
+    thin[12345] = 255
+    color = bytearray(3 * n)
+    color[3 * 12345 : 3 * 12346] = bytes((9, 8, 7))
+    assert image_tools.ink_color(bytes(color), bytes(thin)) == (9, 8, 7)
 
 
 def test_crop_contains_ink_excludes_margins(signature_photo):
@@ -162,6 +209,43 @@ def test_exif_orientation_loads_upright(tmp_path):
     left, right = image.pixelColor(30, 60), image.pixelColor(250, 60)
     assert left.red() > 200 and left.green() < 60
     assert right.green() > 200
+
+
+def test_big_photo_is_decoded_scaled_down(tmp_path):
+    """A large photo is decoded at most MAX_SIDE wide (M4 review 4)."""
+    big = QImage(4000, 1600, QImage.Format.Format_RGB32)
+    big.fill(QColor(240, 240, 230))
+    path = tmp_path / "big.jpg"
+    assert big.save(str(path), "JPEG", 80)
+    image = load_image(path)
+    assert image.size().toTuple() == (MAX_SIDE, 400)
+    small = load_image(path, max_side=5000)
+    assert small.size().toTuple() == (4000, 1600)
+
+
+def test_big_exif_rotated_photo_scaled_and_upright(tmp_path):
+    upright = QImage(2400, 1000, QImage.Format.Format_RGB32)
+    upright.fill(QColor(255, 255, 255))
+    painter = QPainter(upright)
+    painter.fillRect(0, 0, 800, 1000, QColor(255, 0, 0))
+    painter.end()
+    path = _with_exif_orientation_6(upright, tmp_path / "big_phone.jpg")
+    image = load_image(path)
+    assert image.width() == MAX_SIDE and image.height() in (416, 417)
+    left, right = image.pixelColor(100, 200), image.pixelColor(900, 200)
+    assert left.red() > 200 and left.green() < 60
+    assert right.green() > 200
+
+
+def _with_exif_orientation_6(upright: QImage, path):
+    sensor = upright.transformed(QTransform().rotate(-90))
+    assert sensor.save(str(path), "JPEG", 90)
+    data = path.read_bytes()
+    tiff = bytes.fromhex("4d4d002a00000008000101120003000000010006000000000000")
+    payload = b"Exif" + bytes(2) + tiff
+    app1 = bytes.fromhex("ffe1") + (len(payload) + 2).to_bytes(2, "big") + payload
+    path.write_bytes(data[:2] + app1 + data[2:])
+    return path
 
 
 def test_load_image_unreadable(tmp_path):

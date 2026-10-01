@@ -11,6 +11,8 @@ A photo or scan of a signature is turned into ink colour + alpha in two steps:
 * :func:`process` (on every slider move, a few ms): alpha from the grey bytes through a
   256-entry lookup table (``bytes.translate``, a soft ramp around the threshold),
   multiplied by the image's own alpha, optional constant ink colour, crop to the ink.
+  Fully transparent pixels always get one constant colour (the ink colour): with the
+  colours kept they would otherwise carry the whole photo into the PDF (privacy, size).
 
 Everything heavy runs in Qt or in ``bytes`` methods (C speed).
 """
@@ -18,6 +20,7 @@ Everything heavy runs in Qt or in ``bytes`` methods (C speed).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +39,10 @@ INK_ALPHA = 16
 CROP_PADDING = 2
 #: Ink colour presets (RGB).
 INK_COLORS: dict[str, tuple[int, int, int]] = {"black": (0, 0, 0), "blue": (0, 40, 160)}
+#: Alpha from which a pixel is solid ink for :func:`ink_color`.
+SOLID_ALPHA = 128
+#: Pixels sampled by :func:`ink_color`.
+INK_SAMPLES = 4096
 
 _FLAT_CELL = 32
 
@@ -74,11 +81,17 @@ class ProcessedImage:
 
 
 # -- loading -------------------------------------------------------------------------
-def load_image(path: str | Path) -> QImage | None:
+def load_image(path: str | Path, max_side: int = MAX_SIDE) -> QImage | None:
     """The image at ``path`` turned upright from its EXIF orientation, or None (logged)
-    when it cannot be read."""
+    when it cannot be read.
+
+    An image larger than ``max_side`` is decoded at that size (aspect kept): a 50 MP
+    photo is never decoded at full size on the UI thread."""
     reader = QImageReader(str(path))
     reader.setAutoTransform(True)
+    size = reader.size()  # stored size, before the EXIF transform (scaling is symmetric)
+    if size.isValid() and max(size.width(), size.height()) > max_side:
+        reader.setScaledSize(size.scaled(max_side, max_side, Qt.AspectRatioMode.KeepAspectRatio))
     image = reader.read()
     if image.isNull():
         log.warning("cannot read image %s: %s", path, reader.errorString())
@@ -206,6 +219,44 @@ def _multiply_alpha(a: bytes, b: bytes, w: int, h: int) -> bytes:
     return _tight(dest.convertToFormat(QImage.Format.Format_Alpha8), 1)
 
 
+_KEEP_OPAQUE = bytes(0 if v == 0 else 255 for v in range(256))
+_SOLID = bytes(1 if v >= SOLID_ALPHA else 0 for v in range(256))
+
+
+def ink_color(rgb: bytes, alpha: bytes) -> tuple[int, int, int]:
+    """Per-channel median colour of the solid ink pixels (alpha >= :data:`SOLID_ALPHA`;
+    about :data:`INK_SAMPLES` of them), or black when there are none."""
+    n = len(alpha)
+    step = max(1, n // INK_SAMPLES)
+    picked = [i for i in range(0, n, step) if alpha[i] >= SOLID_ALPHA]
+    if len(picked) < 16:  # thin ink missed by the stride: find every solid pixel
+        found = re.finditer(b"\x01", alpha.translate(_SOLID))
+        picked = [m.start() for _, m in zip(range(INK_SAMPLES), found, strict=False)]
+    if not picked:
+        return (0, 0, 0)
+    mid = len(picked) // 2
+    r, g, b = (sorted(rgb[3 * i + c] for i in picked)[mid] for c in range(3))
+    return (r, g, b)
+
+
+def fill_transparent(rgb: bytes, alpha: bytes, color: tuple[int, int, int]) -> bytes:
+    """``rgb`` with every fully transparent pixel (alpha 0) set to ``color``; pixels with
+    any alpha keep their colour. Big-integer bit operations (C speed)."""
+    n = len(alpha)
+    if len(rgb) != 3 * n:
+        raise ValueError("sample lengths do not match")
+    if alpha.count(0) == 0:
+        return rgb
+    keep = alpha.translate(_KEEP_OPAQUE)
+    mask = bytearray(3 * n)
+    mask[0::3] = keep
+    mask[1::3] = keep
+    mask[2::3] = keep
+    m = int.from_bytes(mask, "big")
+    fill = int.from_bytes(bytes(color) * n, "big") & ~m
+    return ((int.from_bytes(rgb, "big") & m) | fill).to_bytes(3 * n, "big")
+
+
 def _ink_bbox(alpha: bytes, w: int, h: int) -> tuple[int, int, int, int] | None:
     ink = alpha.translate(bytes(0 if v <= INK_ALPHA else 1 for v in range(256)))
     if ink.count(1) == 0:
@@ -227,22 +278,29 @@ def process(
 ) -> ProcessedImage:
     """Ink alpha of ``prepared`` for ``threshold`` (see :func:`alpha_lut`), times its own
     alpha; colour kept (``color`` None) or replaced by ``color``; cropped to the ink
-    (plus :data:`CROP_PADDING`) when ``crop`` and some ink was found."""
+    (plus :data:`CROP_PADDING`) when ``crop`` and some ink was found.
+
+    With the colours kept, fully transparent pixels get the median ink colour
+    (:func:`ink_color`, :func:`fill_transparent`): the photo never survives under alpha 0.
+    """
     w, h = prepared.width, prepared.height
     alpha = prepared.gray.translate(alpha_lut(threshold, softness))
     if prepared.source_alpha is not None:
         alpha = _multiply_alpha(alpha, prepared.source_alpha, w, h)
     rgb = prepared.rgb if color is None else bytes(color) * (w * h)
     bbox = _ink_bbox(alpha, w, h)
-    if not crop or bbox is None:
-        return ProcessedImage(w, h, rgb, alpha, bbox)
-    x0, y0, x1, y1 = bbox
-    x0, y0 = max(0, x0 - CROP_PADDING), max(0, y0 - CROP_PADDING)
-    x1, y1 = min(w, x1 + CROP_PADDING), min(h, y1 + CROP_PADDING)
-    cw = x1 - x0
-    alpha = b"".join(alpha[y * w + x0 : y * w + x1] for y in range(y0, y1))
-    rgb = b"".join(rgb[3 * (y * w + x0) : 3 * (y * w + x1)] for y in range(y0, y1))
-    return ProcessedImage(cw, y1 - y0, rgb, alpha, (x0, y0, x1, y1))
+    if crop and bbox is not None:
+        x0, y0, x1, y1 = bbox
+        x0, y0 = max(0, x0 - CROP_PADDING), max(0, y0 - CROP_PADDING)
+        x1, y1 = min(w, x1 + CROP_PADDING), min(h, y1 + CROP_PADDING)
+        alpha = b"".join(alpha[y * w + x0 : y * w + x1] for y in range(y0, y1))
+        rgb = b"".join(rgb[3 * (y * w + x0) : 3 * (y * w + x1)] for y in range(y0, y1))
+        w, h, box = x1 - x0, y1 - y0, (x0, y0, x1, y1)
+    else:
+        box = bbox
+    if color is None:
+        rgb = fill_transparent(rgb, alpha, ink_color(rgb, alpha))
+    return ProcessedImage(w, h, rgb, alpha, box)
 
 
 def to_qimage(processed: ProcessedImage) -> QImage:

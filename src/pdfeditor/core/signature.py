@@ -27,6 +27,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QTransform
 
 from pdfeditor.core.geometry import fitz_from_qrect, page_to_unrotated
+from pdfeditor.core.image_tools import fill_transparent
 
 if TYPE_CHECKING:
     from pdfeditor.core.annotations import AnnotInfo, AnnotSpec
@@ -98,7 +99,12 @@ class ImageData:
     def from_qimage(cls, image: QImage, rotation: int = 0) -> ImageData:
         """Samples of ``image`` (any format; alpha kept, not premultiplied), scaled down
         to :data:`MAX_IMAGE_SIDE` and turned by ``-rotation`` degrees (the page rotation,
-        so that the image reads upright on that page)."""
+        so that the image reads upright on that page).
+
+        Fully transparent pixels all get the colour of the first of them
+        (:func:`image_tools.fill_transparent`): whatever an image hides under alpha 0
+        never reaches the PDF, and an image already neutralised (``image_tools.process``)
+        is unchanged."""
         if image.isNull():
             raise ValueError("null image")
         if max(image.width(), image.height()) > MAX_IMAGE_SIDE:
@@ -117,8 +123,13 @@ class ImageData:
         if stride != w * 4:  # never for 32-bit formats, but stay safe
             raw = b"".join(raw[y * stride : y * stride + w * 4] for y in range(h))
         # De-interleave at C speed: drop the alpha channel through a Pixmap.
-        rgb = pymupdf.Pixmap(pymupdf.Pixmap(pymupdf.csRGB, w, h, raw, 1), 0).samples
-        return cls(w, h, bytes(rgb), raw[3::4])
+        rgb = bytes(pymupdf.Pixmap(pymupdf.Pixmap(pymupdf.csRGB, w, h, raw, 1), 0).samples)
+        alpha = raw[3::4]
+        clear = alpha.find(0)
+        if clear >= 0:
+            r, g, b = rgb[3 * clear : 3 * clear + 3]
+            rgb = fill_transparent(rgb, alpha, (r, g, b))
+        return cls(w, h, rgb, alpha)
 
     def to_qimage(self) -> QImage:
         """The image as a non-premultiplied RGBA8888 QImage."""
