@@ -1056,3 +1056,89 @@ def make_signed_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M4: signature images (fixture 1) ----------------------------------------------------
+#: Colour of the signature stroke in :func:`make_signature_image`.
+SIG_INK_COLOR = (25, 35, 120)
+#: Default pixel size of :func:`make_signature_image`.
+SIG_PHOTO_SIZE = (1600, 640)
+#: Stroke polyline and loop of the signature (fractions of the image size).
+_SIG_POLYLINE = ((0.12, 0.62), (0.28, 0.22), (0.42, 0.66), (0.58, 0.24), (0.72, 0.6))
+_SIG_LOOP = (0.84, 0.42, 0.06, 0.25)  # centre x, y, radius x, y
+#: Probes (fractions of the image size): "ink" on the 22 px stroke, "paper" away from
+#: any mark (corners, the hole of the loop, between strokes). "shadow" is the darkest
+#: corner of the photo's paper gradient (also in "paper").
+SIG_STROKE_POINTS: dict[str, tuple[tuple[float, float], ...]] = {
+    "ink": (
+        (0.20, 0.42),
+        (0.35, 0.44),
+        (0.50, 0.45),
+        (0.65, 0.42),
+        (0.78, 0.42),
+        (0.84, 0.17),
+    ),
+    "paper": (
+        (0.02, 0.03),
+        (0.98, 0.03),
+        (0.02, 0.97),
+        (0.98, 0.97),
+        (0.84, 0.42),
+        (0.28, 0.55),
+        (0.50, 0.10),
+        (0.50, 0.95),
+        (0.95, 0.50),
+    ),
+    "shadow": ((0.98, 0.97),),
+}
+
+
+def make_signature_image(path: Path, *, kind: str = "clean", size=SIG_PHOTO_SIZE) -> Path:
+    """A signature image. ``kind="clean"``: transparent PNG with an anti-aliased
+    ``SIG_INK_COLOR`` stroke and a loop (its hole is transparent). ``kind="photo"``: JPEG
+    of the same stroke on paper with a 250 -> 150 brightness gradient (darkest at the
+    bottom-right), speckle noise, a lighter 9 px line and a grey printed rule."""
+    import random
+
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen
+
+    w, h = size
+    if kind == "clean":
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        img.fill(QColor(0, 0, 0, 0))
+    elif kind == "photo":
+        img = QImage(w, h, QImage.Format.Format_RGB32)
+    else:
+        raise ValueError(kind)
+    p = QPainter(img)
+    if kind == "photo":
+        g = QLinearGradient(0, 0, w, h)
+        g.setColorAt(0, QColor(250, 246, 236))
+        g.setColorAt(1, QColor(150, 145, 135))
+        p.fillRect(0, 0, w, h, QBrush(g))
+        rnd = random.Random(1)
+        noise = QImage(w // 8, h // 8, QImage.Format.Format_ARGB32)
+        for y in range(noise.height()):
+            for x in range(noise.width()):
+                noise.setPixel(x, y, rnd.randint(0, 40) << 24)  # translucent dark speckle
+        p.drawImage(img.rect(), noise)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(QColor(*SIG_INK_COLOR), 22, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    path_ = QPainterPath(QPointF(_SIG_POLYLINE[0][0] * w, _SIG_POLYLINE[0][1] * h))
+    for fx, fy in _SIG_POLYLINE[1:]:
+        path_.lineTo(fx * w, fy * h)
+    p.drawPath(path_)
+    cx, cy, rx, ry = _SIG_LOOP
+    p.drawEllipse(QRectF((cx - rx) * w, (cy - ry) * h, 2 * rx * w, 2 * ry * h))
+    if kind == "photo":
+        p.setPen(QPen(QColor(*SIG_INK_COLOR, 140), 9))
+        p.drawLine(QPointF(0.15 * w, 0.80 * h), QPointF(0.85 * w, 0.78 * h))
+        p.setPen(QPen(QColor(90, 90, 90), 3))
+        p.drawLine(QPointF(0.10 * w, 0.88 * h), QPointF(0.90 * w, 0.88 * h))
+    p.end()
+    if not img.save(str(path), "PNG" if kind == "clean" else "JPEG", -1 if kind == "clean" else 85):
+        raise OSError(f"cannot write {path}")
+    return Path(path)

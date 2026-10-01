@@ -132,3 +132,13 @@ def print_pdf(tmp_path):
 @pytest.fixture
 def signed_pdf(tmp_path):
     return fixtures.make_signed_pdf(tmp_path / "signed.pdf")
+
+
+@pytest.fixture
+def signature_png(tmp_path):
+    return fixtures.make_signature_image(tmp_path / "signature.png", kind="clean")
+
+
+@pytest.fixture
+def signature_photo(tmp_path):
+    return fixtures.make_signature_image(tmp_path / "signature.jpg", kind="photo")
