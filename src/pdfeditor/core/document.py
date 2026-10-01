@@ -26,6 +26,7 @@ from PySide6.QtGui import QImage
 
 from pdfeditor.core import annotations, orphans, signature, snapping
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
+from pdfeditor.core.files import same_file
 from pdfeditor.core.forms import (
     FieldKind,
     WidgetInfo,
@@ -804,7 +805,7 @@ class PdfDocument(QObject):
         Raises :class:`SaveError`; the path is unchanged after a failure.
         """
         new_path = str(new_path)
-        same = self._path is not None and _same_file(new_path, self._path)
+        same = self._path is not None and same_file(new_path, self._path)
         self._save_to(new_path, incremental=False)
         if not same:
             self._path = new_path
@@ -828,7 +829,7 @@ class PdfDocument(QObject):
         """
         options = options if options is not None else ExportOptions()
         path = str(path)
-        if self._path is not None and _same_file(path, self._path):
+        if self._path is not None and same_file(path, self._path):
             raise ValueError("an exported copy cannot replace the open document")
         if self._xfa_kind is XfaKind.DYNAMIC and options.flatten_forms:
             log.info("dynamic XFA form: exporting without flattening the fields")
@@ -1070,7 +1071,3 @@ def _remove_quietly(path: str) -> None:
         os.remove(path)
     except OSError:
         pass
-
-
-def _same_file(a: str, b: str) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))

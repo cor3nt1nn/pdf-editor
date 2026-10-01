@@ -36,6 +36,7 @@ from pdfeditor.core import file_assoc, recent
 from pdfeditor.core.annotations import AnnotKind
 from pdfeditor.core.commands import RotatePageCommand
 from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired, SaveError
+from pdfeditor.core.files import same_file
 from pdfeditor.core.forms import XfaKind
 from pdfeditor.core.settings import Settings
 from pdfeditor.core.signature_store import SignatureStore
@@ -97,8 +98,9 @@ def file_exists(path: str) -> bool:
 
 
 def same_path(a: str, b: str) -> bool:
-    """``a`` and ``b`` name the same file (Windows: case-insensitive, any separator)."""
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    """``a`` and ``b`` name the same file (spelling, then identity: see
+    :func:`pdfeditor.core.files.same_file`)."""
+    return same_file(a, b)
 
 
 def restart_command(path: str | None) -> tuple[str, list[str]]:
