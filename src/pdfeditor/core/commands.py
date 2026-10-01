@@ -18,6 +18,7 @@ from pdfeditor.core.annotations import (
 )
 from pdfeditor.core.document import PdfDocument
 from pdfeditor.core.forms import FieldKind, WidgetInfo
+from pdfeditor.core.signature import ImageData
 
 
 class DocumentCommand(QUndoCommand):
@@ -180,7 +181,7 @@ def _claimed(doc: PdfDocument, info: AnnotInfo) -> AnnotInfo:
 
 
 class AddAnnotCommand(_ImmediateCommand):
-    """Create a text box or stamp from ``spec`` (one undo step).
+    """Create a text box, stamp or signature from ``spec`` (one undo step).
 
     The /NM is fixed here (``spec.name``, or a new uuid4), so undo/redo cycles and saves
     keep the same identity. The first redo creates the annotation (a text box's height
@@ -188,11 +189,12 @@ class AddAnnotCommand(_ImmediateCommand):
     """
 
     def __init__(self, doc: PdfDocument, spec: AnnotSpec) -> None:
-        text = (
-            QCoreApplication.translate("Commands", "Add stamp")
-            if spec.kind is AnnotKind.STAMP
-            else QCoreApplication.translate("Commands", "Add text")
-        )
+        if spec.kind is AnnotKind.SIGNATURE:
+            text = QCoreApplication.translate("Commands", "Add signature")
+        elif spec.kind is AnnotKind.STAMP:
+            text = QCoreApplication.translate("Commands", "Add stamp")
+        else:
+            text = QCoreApplication.translate("Commands", "Add text")
         super().__init__(doc, text)
         self.spec = replace(spec, name=spec.name or new_name())
         # Snapshot of the created annotation (None before the first redo).
@@ -211,7 +213,9 @@ class AddAnnotCommand(_ImmediateCommand):
             fit = self.spec.kind is AnnotKind.TEXT
             self.info = self.doc.add_annot(self.spec, fit_height=fit)
         else:
-            self.info = self.doc.add_annot(spec_from(self.info))
+            # A signature keeps the spec's samples (shared with the document's image
+            # object when it still exists, re-created after a full save dropped it).
+            self.info = self.doc.add_annot(spec_from(self.info, image=self.spec.image))
 
     def _undo(self) -> None:
         self.doc.delete_annot(self.spec.page, self.spec.name)
@@ -302,11 +306,18 @@ class EditAnnotCommand(_ImmediateCommand):
 
 class DeleteAnnotCommand(_ImmediateCommand):
     """Delete annotation ``info``; undo re-creates it from the snapshot (same /NM, rect,
-    rotation and style; appended at the end of the page's /Annots)."""
+    rotation and style; appended at the end of the page's /Annots).
+
+    A signature's image samples (:attr:`image`) are read from the document by the first
+    redo, before deleting, so undo does not depend on the image object surviving a full
+    save (or on the signature store).
+    """
 
     def __init__(self, doc: PdfDocument, info: AnnotInfo) -> None:
         super().__init__(doc, QCoreApplication.translate("Commands", "Delete annotation"))
         self.info = info
+        # Signature samples (None until the first redo, and for other kinds).
+        self.image: ImageData | None = None
 
     @property
     def page(self) -> int:
@@ -318,7 +329,11 @@ class DeleteAnnotCommand(_ImmediateCommand):
 
     def _redo(self) -> None:
         self.info = _claimed(self.doc, self.info)
+        image = self.image
+        if self.info.kind is AnnotKind.SIGNATURE and image is None:
+            image = self.doc.annot_image(self.info.page, self.info.name)
         self.doc.delete_annot(self.info.page, self.info.name)
+        self.image = image
 
     def _undo(self) -> None:
-        self.doc.add_annot(spec_from(self.info))
+        self.doc.add_annot(spec_from(self.info, image=self.image))
