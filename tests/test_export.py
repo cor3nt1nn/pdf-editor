@@ -357,8 +357,10 @@ def test_aes256_copy_keeps_password(lo_form_encrypted_pdf, tmp_path) -> None:
     assert strict_read(out, PASSWORD).fields is None
 
 
-def test_copy_without_password(lo_form_encrypted_pdf, tmp_path) -> None:
-    doc = PdfDocument.open(lo_form_encrypted_pdf, password=PASSWORD)
+def test_copy_without_password(lo_form_full_access_pdf, tmp_path) -> None:
+    doc = PdfDocument.open(lo_form_full_access_pdf, password=PASSWORD)
+    assert not doc.has_owner_access
+    assert not doc.must_keep_encryption  # user password, full permissions
     fill_lo_form(doc)
     out = tmp_path / "enc_none.pdf"
     doc.export_copy(out, ExportOptions(keep_encryption=False))
@@ -381,7 +383,7 @@ def test_owner_restrictions_kept(tmp_path, kind, keep) -> None:
     else:
         path = fixtures.make_owner_locked_pdf(tmp_path / "locked.pdf")
     doc = PdfDocument.open(path)
-    assert doc.has_restrictions
+    assert doc.has_restrictions and doc.must_keep_encryption
     assert doc.encryption_method is not None
     permissions = doc.permissions
     out = tmp_path / "copy.pdf"
@@ -392,6 +394,49 @@ def test_owner_restrictions_kept(tmp_path, kind, keep) -> None:
         assert not pdf.needs_pass
         assert pdf.metadata.get("encryption")
         assert pdf.permissions == permissions
+    finally:
+        pdf.close()
+    strict_read(out)
+
+
+def test_user_password_with_restrictions_keeps_protection(lo_form_encrypted_pdf, tmp_path):
+    """Review finding 4: a user-password file whose author restricted it (no copy, no
+    modify...) keeps its protection when opened with the user password."""
+    doc = PdfDocument.open(lo_form_encrypted_pdf, password=PASSWORD)
+    assert doc.is_encrypted and not doc.has_restrictions and not doc.has_owner_access
+    assert doc.must_keep_encryption
+    permissions = doc.permissions
+    assert permissions & fixtures.LO_PERMISSIONS == fixtures.LO_PERMISSIONS
+    fill_lo_form(doc)
+    out = tmp_path / "restricted.pdf"
+    doc.export_copy(out, ExportOptions(keep_encryption=False))
+    doc.close()
+    pdf = pymupdf.open(out)
+    try:
+        assert pdf.needs_pass
+        assert pdf.authenticate(PASSWORD) == 2  # still the same user password
+        assert pdf.permissions == permissions
+        assert "Madame" in _text(pdf)
+    finally:
+        pdf.close()
+    pdf = pymupdf.open(out)
+    try:
+        assert pdf.authenticate("owner-" + PASSWORD) & 4  # owner password unchanged
+    finally:
+        pdf.close()
+
+
+def test_owner_password_allows_removing_protection(lo_form_encrypted_pdf, tmp_path) -> None:
+    doc = PdfDocument.open(lo_form_encrypted_pdf, password="owner-" + PASSWORD)
+    assert doc.is_encrypted and doc.has_owner_access
+    assert not doc.must_keep_encryption
+    out = tmp_path / "unprotected.pdf"
+    doc.export_copy(out, ExportOptions(keep_encryption=False))
+    doc.close()
+    pdf = pymupdf.open(out)
+    try:
+        assert not pdf.needs_pass
+        assert not pdf.metadata.get("encryption")
     finally:
         pdf.close()
     strict_read(out)

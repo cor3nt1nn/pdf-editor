@@ -125,8 +125,23 @@ def test_dialog_owner_locked_keeps_encryption(window, settings, owner_locked_pdf
     assert settings.export_keep_encryption is False  # the forced value is not remembered
 
 
-def test_dialog_user_password_box_enabled(window, settings, lo_form_encrypted_pdf) -> None:
+def test_dialog_user_password_restricted_keeps_encryption(
+    window, settings, lo_form_encrypted_pdf
+) -> None:
+    settings.export_keep_encryption = False
     assert window.open_file(str(lo_form_encrypted_pdf))
+    d = _dialog(window, settings)
+    box = d.keep_encryption_box
+    assert not box.isHidden()
+    assert box.isChecked() and not box.isEnabled()
+    assert "owner password" in box.toolTip()
+    assert d.options().keep_encryption
+    d.save_choices()
+    assert settings.export_keep_encryption is False  # the forced value is not remembered
+
+
+def test_dialog_user_password_box_enabled(window, settings, lo_form_full_access_pdf) -> None:
+    assert window.open_file(str(lo_form_full_access_pdf))
     d = _dialog(window, settings)
     box = d.keep_encryption_box
     assert not box.isHidden() and box.isEnabled() and box.isChecked()

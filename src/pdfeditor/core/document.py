@@ -97,8 +97,8 @@ class ExportOptions:
     (``Document.bake(widgets=True)``). ``flatten_annots``: same for the other
     annotations (text boxes, stamps, signatures, highlights; links are kept, hidden
     annotations disappear). Both off = a clean copy (full rewrite, no earlier revisions).
-    ``keep_encryption``: keep the password protection (ignored, i.e. always kept, for
-    owner-password restrictions: see :attr:`PdfDocument.has_restrictions`).
+    ``keep_encryption``: keep the password protection (ignored, i.e. always kept, when
+    the author restricted the file: see :attr:`PdfDocument.must_keep_encryption`).
     ``keep_metadata``: keep the document properties (Info dictionary and XMP metadata);
     off also drops the pages' XMP (/Metadata) and /PieceInfo of the pages and catalog.
     The trailer /ID and MuPDF's "% Written by MuPDF" header comment remain
@@ -109,6 +109,22 @@ class ExportOptions:
     flatten_annots: bool = True
     keep_encryption: bool = True
     keep_metadata: bool = True
+
+
+#: ``authenticate()`` bit: the owner password was given.
+AUTH_OWNER = 4
+#: Every permission bit of the standard security handler: a file whose permissions lack
+#: one of them was restricted by its author.
+FULL_PERMISSIONS = (
+    pymupdf.PDF_PERM_PRINT
+    | pymupdf.PDF_PERM_MODIFY
+    | pymupdf.PDF_PERM_COPY
+    | pymupdf.PDF_PERM_ANNOTATE
+    | pymupdf.PDF_PERM_FORM
+    | pymupdf.PDF_PERM_ACCESSIBILITY
+    | pymupdf.PDF_PERM_ASSEMBLE
+    | pymupdf.PDF_PERM_PRINT_HQ
+)
 
 
 class PdfDocument(QObject):
@@ -135,6 +151,7 @@ class PdfDocument(QObject):
         encrypted: bool = False,
         parent: QObject | None = None,
         disk_stamp: DiskStamp | None = None,
+        owner_access: bool = False,
     ) -> None:
         super().__init__(parent)
         self.lock = threading.RLock()
@@ -142,6 +159,8 @@ class PdfDocument(QObject):
         self._path = str(path) if path else None
         self._password = password
         self._encrypted = encrypted
+        # Authenticated with the owner password (full access to an encrypted file).
+        self._owner_access = owner_access
         # Stamp of the file on disk when its content last matched what we loaded/saved;
         # None = unknown (not loaded from disk).
         self._disk_stamp = disk_stamp
@@ -195,17 +214,22 @@ class PdfDocument(QObject):
         fitz_doc, stamp = cls._open_fitz(path)
         encrypted = bool(fitz_doc.needs_pass)
         used_password: str | None = None
+        owner_access = False
         if encrypted:
-            used_password = cls._authenticate(fitz_doc, password_cb, password)
+            used_password, owner_access = cls._authenticate(fitz_doc, password_cb, password)
         if fitz_doc.page_count == 0:
             fitz_doc.close()
             raise OpenError(f"document has no pages: {path}", reason="no_pages")
-        return cls(fitz_doc, path, used_password, encrypted, disk_stamp=stamp)
+        return cls(
+            fitz_doc, path, used_password, encrypted, disk_stamp=stamp, owner_access=owner_access
+        )
 
     @staticmethod
     def _authenticate(
         fitz_doc: pymupdf.Document, password_cb: PasswordCallback | None, password: str | None
-    ) -> str:
+    ) -> tuple[str, bool]:
+        """(password, owner access): ``authenticate()`` returns 2 for the user password,
+        4 for the owner password, 6 when both are the same."""
         attempt = 0
         candidate = password
         while True:
@@ -214,8 +238,9 @@ class PdfDocument(QObject):
             if candidate is None:
                 fitz_doc.close()
                 raise PasswordRequired(wrong_password=attempt > 0)
-            if fitz_doc.authenticate(candidate):
-                return candidate
+            level = int(fitz_doc.authenticate(candidate))
+            if level:
+                return candidate, bool(level & AUTH_OWNER)
             attempt += 1
             candidate = None
             if password_cb is None:
@@ -291,6 +316,27 @@ class PdfDocument(QObject):
         """Encrypted with an owner password only (opens without a password, permissions
         set by the author): exports always keep that protection."""
         return self.encryption_method is not None and not self._encrypted
+
+    @property
+    def has_owner_access(self) -> bool:
+        """Opened with the owner password (an encrypted file only)."""
+        return self._owner_access
+
+    @property
+    def must_keep_encryption(self) -> bool:
+        """Exports keep the password protection whatever ``keep_encryption`` says.
+
+        True for owner-password restrictions (:attr:`has_restrictions`) and for a file
+        opened with its user password whose author restricted it (``permissions`` lack
+        one of :data:`FULL_PERMISSIONS`). Only a file with a user password and full
+        permissions, or one opened with the owner password, may be exported unprotected
+        (docs/ARCHITECTURE.md Deviation 58).
+        """
+        if self.has_restrictions:
+            return True
+        if not self._encrypted or self._owner_access:
+            return False
+        return self.permissions & FULL_PERMISSIONS != FULL_PERMISSIONS
 
     @property
     def is_form(self) -> bool:
@@ -837,8 +883,8 @@ class PdfDocument(QObject):
         if self._xfa_kind is XfaKind.DYNAMIC and options.flatten_forms:
             log.info("dynamic XFA form: exporting without flattening the fields")
             options = replace(options, flatten_forms=False)
-        if self.has_restrictions and not options.keep_encryption:
-            log.info("owner-password restrictions are kept in the exported copy")
+        if self.must_keep_encryption and not options.keep_encryption:
+            log.info("the author's restrictions are kept in the exported copy")
             options = replace(options, keep_encryption=True)
         strip = self._xfa_kind is XfaKind.STATIC and self._form_edited
         with self.lock:

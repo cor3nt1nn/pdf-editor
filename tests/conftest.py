@@ -85,6 +85,14 @@ def lo_form_encrypted_pdf(tmp_path):
 
 
 @pytest.fixture
+def lo_form_full_access_pdf(tmp_path):
+    """User password, every permission granted (no author restrictions)."""
+    return fixtures.make_lo_form_pdf(
+        tmp_path / "lo_form_full_access.pdf", encrypted=True, permissions=-4
+    )
+
+
+@pytest.fixture
 def owner_locked_pdf(tmp_path):
     return fixtures.make_owner_locked_pdf(tmp_path / "owner_locked.pdf")
 

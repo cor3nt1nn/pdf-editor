@@ -384,17 +384,22 @@ Redémarrer maintenant ?</translation>
         <translation>Décoché : le titre, l’auteur, les mots-clés, les métadonnées XMP et les données privées des applications sont supprimés. L’identifiant du fichier et le nom de la bibliothèque PDF qui a écrit la copie sont conservés.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="65"/>
+        <location filename="../ui/export_dialog.py" line="63"/>
+        <source>The author restricted this document (printing, copying or editing): the copy keeps its protection. Open it with the owner password to remove it.</source>
+        <translation>L’auteur a restreint ce document (impression, copie ou modification) : la copie conserve sa protection. Ouvrez-le avec le mot de passe du propriétaire pour la retirer.</translation>
+    </message>
+    <message>
+        <location filename="../ui/export_dialog.py" line="71"/>
         <source>This form uses dynamic XFA: its fields cannot be flattened here.</source>
         <translation>Ce formulaire utilise XFA dynamique : ses champs ne peuvent pas être aplatis ici.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="71"/>
+        <location filename="../ui/export_dialog.py" line="77"/>
         <source>A copy is written; the open document is not changed. Flattened fields and annotations can no longer be edited. Earlier saved versions (deleted signatures, previous values) are not carried over.</source>
         <translation>Une copie est écrite ; le document ouvert n’est pas modifié. Les champs et annotations aplatis ne sont plus modifiables. Les versions enregistrées précédentes (signatures supprimées, anciennes valeurs) ne sont pas reprises.</translation>
     </message>
     <message>
-        <location filename="../ui/export_dialog.py" line="81"/>
+        <location filename="../ui/export_dialog.py" line="87"/>
         <source>Export</source>
         <translation>Exporter</translation>
     </message>

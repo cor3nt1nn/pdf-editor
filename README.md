@@ -422,6 +422,10 @@ Known limitations:
    title, author, keywords, XMP metadata (document and pages) and application private
    data (/PieceInfo), but it still has a file identifier (trailer /ID, needed by PDF
    readers) and a header comment naming the PDF library that wrote it (MuPDF).
+2. **Password protection**: "Keep password protection" can be unchecked only for a file
+   opened with its owner password, or protected by a user password without any
+   restriction. When the author restricted the file (printing, copying, editing…), the
+   copy always keeps the protection and its restrictions.
 
 ### Manual checklist (Milestone 5)
 

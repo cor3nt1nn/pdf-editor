@@ -186,6 +186,7 @@ def make_lo_form_pdf(
     owner_only: bool = False,
     need_appearances: bool = False,
     prefill_choices: bool = False,
+    permissions: int | None = None,
 ) -> Path:
     """A form shaped like LibreOffice exports (see ``LO_EDITABLE`` / ``LO_NOT_EDITABLE``).
 
@@ -345,7 +346,7 @@ def make_lo_form_pdf(
             encryption=encryption,
             user_pw=PASSWORD,
             owner_pw="owner-" + PASSWORD,
-            permissions=LO_PERMISSIONS,
+            permissions=LO_PERMISSIONS if permissions is None else permissions,
         )
     elif owner_only:
         kwargs.update(

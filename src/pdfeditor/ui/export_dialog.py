@@ -20,8 +20,9 @@ class ExportDialog(QDialog):
     """Four options of :class:`ExportOptions`, initialised from ``settings``.
 
     "Keep password protection" is shown only for an encrypted file; it is checked and
-    disabled for owner-password restrictions (always kept). A dynamic XFA form cannot
-    be flattened: both flatten boxes are unchecked, disabled and explained by a note.
+    disabled when the author restricted the file (``must_keep_encryption``: always kept).
+    A dynamic XFA form cannot be flattened: both flatten boxes are unchecked, disabled and
+    explained by a note.
     """
 
     def __init__(
@@ -33,7 +34,7 @@ class ExportDialog(QDialog):
         self._settings = settings
         self._dynamic_xfa = document.xfa_kind is XfaKind.DYNAMIC
         self._encrypted = document.encryption_method is not None
-        self._restricted = document.has_restrictions
+        self._restricted = document.must_keep_encryption
 
         self.flatten_forms_box = QCheckBox(self.tr("Flatten form fields"), self)
         self.flatten_annots_box = QCheckBox(self.tr("Flatten text, stamps and signatures"), self)
@@ -58,6 +59,12 @@ class ExportDialog(QDialog):
         if self._restricted:
             self.keep_encryption_box.setChecked(True)
             self.keep_encryption_box.setEnabled(False)
+            self.keep_encryption_box.setToolTip(
+                self.tr(
+                    # Single literal: lupdate does not join implicitly concatenated strings.
+                    "The author restricted this document (printing, copying or editing): the copy keeps its protection. Open it with the owner password to remove it."  # noqa: E501
+                )
+            )
         else:
             self.keep_encryption_box.setChecked(settings.export_keep_encryption)
 
