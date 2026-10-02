@@ -391,7 +391,8 @@ class PdfDocument(QObject):
                 return
             self._is_form = bool(doc.is_form_pdf)
             try:
-                self._xfa_kind = detect_xfa(doc)
+                was_static = self._xfa_kind is XfaKind.STATIC
+                self._xfa_kind = detect_xfa(doc, was_static=was_static)
             except Exception:  # malformed AcroForm: treat as plain PDF
                 log.warning("could not inspect XFA", exc_info=True)
                 self._xfa_kind = XfaKind.NONE
@@ -1269,7 +1270,8 @@ class PdfDocument(QObject):
         if self.must_keep_encryption and not options.keep_encryption:
             log.info("the author's restrictions are kept in the exported copy")
             options = replace(options, keep_encryption=True)
-        strip = self._xfa_kind is XfaKind.STATIC and self._form_edited
+        # Same rule as DocumentView._prepare_save: filled or restructured static XFA.
+        strip = self._xfa_kind is XfaKind.STATIC and (self._form_edited or self._structure_edited)
         with self.lock:
             try:
                 try:

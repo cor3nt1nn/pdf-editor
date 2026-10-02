@@ -7,6 +7,7 @@ import shutil
 import fixtures
 import pymupdf
 import pytest
+from PySide6.QtCore import QSizeF
 from PySide6.QtGui import QUndoStack
 
 from pdfeditor.core import pages
@@ -15,9 +16,12 @@ from pdfeditor.core.commands import (
     DeleteAnnotCommand,
     DeletePagesCommand,
     EditAnnotCommand,
+    InsertBlankPageCommand,
+    MovePagesCommand,
     RotatePagesCommand,
 )
 from pdfeditor.core.document import PageError, PdfDocument
+from pdfeditor.core.forms import XfaKind, detect_xfa
 from pdfeditor.core.snapshots import SnapshotStore
 
 
@@ -204,5 +208,66 @@ def test_prune_still_drops_a_field_whose_widgets_are_gone(lo_form_pdf) -> None:
         before = len(_field_names(doc))
         pages.delete_pages(doc, [0])
         assert len(_field_names(doc)) < before
+    finally:
+        doc.close()
+
+
+# -- B2: a static XFA form stays static whatever pages are deleted -------------------
+def test_static_xfa_stays_static_without_fields(static_xfa_pdf, tmp_path) -> None:
+    """Fuzzer B2: insert two blank pages, delete the page holding every field, move."""
+    doc = PdfDocument.open(static_xfa_pdf)
+    try:
+        assert doc.xfa_kind is XfaKind.STATIC
+        stack = QUndoStack()
+        for make in (
+            lambda: InsertBlankPageCommand(doc, 1, QSizeF(300, 300)),
+            lambda: InsertBlankPageCommand(doc, 2, QSizeF(300, 300)),
+            lambda: DeletePagesCommand(doc, [0]),
+            lambda: MovePagesCommand(doc, [0], 2),
+        ):
+            cmd = make()
+            cmd.apply_now()
+            stack.push(cmd)
+            assert doc.xfa_kind is XfaKind.STATIC
+        assert not doc.is_form
+        out = tmp_path / "x.pdf"
+        doc.save_as(out)  # a page-edited static XFA form loses its /XFA (Deviation 73)
+    finally:
+        doc.close()
+
+
+def test_saved_restructured_static_xfa_has_no_xfa(qapp, static_xfa_pdf, tmp_path) -> None:
+    from pdfeditor.ui.document_view import DocumentView
+
+    view = DocumentView()
+    try:
+        view._replace(PdfDocument.open(static_xfa_pdf))
+        doc = view.document
+        cmd = InsertBlankPageCommand(doc, 1, QSizeF(300, 300))
+        cmd.apply_now()
+        view.push(cmd)
+        cmd = DeletePagesCommand(doc, [0])
+        cmd.apply_now()
+        view.push(cmd)
+        out = tmp_path / "saved.pdf"
+        view.save_as(str(out))
+        assert doc.xfa_kind is XfaKind.NONE
+        with pymupdf.open(out) as saved:
+            assert detect_xfa(saved) is XfaKind.NONE
+    finally:
+        view.close_document()
+        view.deleteLater()
+
+
+def test_export_and_extract_drop_xfa_after_page_ops(static_xfa_pdf, tmp_path) -> None:
+    doc = PdfDocument.open(static_xfa_pdf)
+    try:
+        cmd = InsertBlankPageCommand(doc, 1, QSizeF(300, 300))
+        cmd.apply_now()
+        doc.export_copy(tmp_path / "copy.pdf")
+        doc.extract_pages([0], tmp_path / "one.pdf")
+        for name in ("copy.pdf", "one.pdf"):
+            with pymupdf.open(tmp_path / name) as out:
+                assert detect_xfa(out) is XfaKind.NONE, name
     finally:
         doc.close()

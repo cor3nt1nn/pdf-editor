@@ -251,19 +251,24 @@ def _xfa_streams(doc: pymupdf.Document, value: tuple[str, str]) -> list[bytes]:
     return out
 
 
-def detect_xfa(fitz_doc: pymupdf.Document) -> XfaKind:
+def detect_xfa(fitz_doc: pymupdf.Document, *, was_static: bool = False) -> XfaKind:
     """Classify the document's XFA forms.
 
     ``NONE``: no /AcroForm /XFA. ``DYNAMIC``: the config says
     ``<dynamicRender>required</dynamicRender>``, or there are no AcroForm fields (nothing
     to fill without an XFA engine). ``STATIC``: XFA over a usable AcroForm.
+
+    ``was_static``: the document was ``STATIC`` before (re-classification after a page
+    operation or a reload): it stays ``STATIC`` even without fields, since deleting the
+    pages that held them does not make the form dynamic (docs/ARCHITECTURE.md
+    Deviation 93); only the config can.
     """
     value = _key(fitz_doc, fitz_doc.pdf_catalog(), "AcroForm/XFA")
     if value[0] == "null":
         return XfaKind.NONE
     if any(_DYNAMIC_RENDER.search(s) for s in _xfa_streams(fitz_doc, value)):
         return XfaKind.DYNAMIC
-    if not fitz_doc.is_form_pdf:  # False (no AcroForm) or 0 fields
+    if not was_static and not fitz_doc.is_form_pdf:  # False (no AcroForm) or 0 fields
         return XfaKind.DYNAMIC
     return XfaKind.STATIC
 

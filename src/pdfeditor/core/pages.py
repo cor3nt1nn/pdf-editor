@@ -428,9 +428,11 @@ def extract_bytes(
     encryption: OutputEncryption = NO_ENCRYPTION,
 ) -> bytes:
     """A complete new file holding ``pages`` of ``copy`` (a throwaway document: it is
-    mutated), fully rewritten (``garbage=4``) with ``encryption``."""
+    mutated), fully rewritten (``garbage=4``) with ``encryption``. A static XFA form's
+    /XFA is not kept: its template describes every page of the original."""
     out = subdocument(copy, pages)
     try:
+        strip_xfa(out)
         return out.tobytes(garbage=4, deflate=True, **encryption.kwargs())
     finally:
         out.close()
