@@ -384,6 +384,10 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
             self._word_timer.stop()
             self.commit_selection()
 
+    def flush_pending(self) -> None:
+        """A pending double-clicked word is marked before a save, close, export or push."""
+        self.flush_word()
+
     # -- mouse ---------------------------------------------------------------------------
     def mouse_press(self, event: ToolEvent) -> bool:
         if _button(event) != Qt.MouseButton.LeftButton:
@@ -391,17 +395,16 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
         doc = self._doc()
         if doc is None or self.view is None:
             return False
-        self.document_view.commit_pending_edits()
         triple = (
             event.page_index is not None
             and self._word_timer.isActive()
             and self._is_triple(event.page_index, _viewport_pos(event))
         )
         if triple:
-            self._word_timer.stop()
-        else:
-            # A click soon after a double-click: the word is marked first.
-            self.flush_word()
+            self._word_timer.stop()  # before commit_pending_edits would mark the word
+        # A click soon after a double-click: the word is marked first (flush_pending).
+        self.document_view.commit_pending_edits()
+        if not triple:
             self._last_double = None
         shift = bool(event.modifiers & Qt.KeyboardModifier.ShiftModifier)
         if not triple and not shift:

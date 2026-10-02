@@ -65,6 +65,15 @@ class Tool(QObject):
     def paint_overlay(self, painter: QPainter) -> None:
         """Paint in scene coordinates above the pages (called from drawForeground)."""
 
+    def flush_pending(self) -> None:
+        """Finish an action the tool deferred (e.g. a double-clicked word marked after the
+        double-click interval), so that it is on the undo stack now.
+
+        Called by ``DocumentView.commit_pending_edits`` (before saves, closes, exports,
+        undo/redo and every push) on the active tool; must not re-enter when the action
+        pushes a command. The default does nothing.
+        """
+
 
 class ToolManager(QObject):
     tool_changed = Signal(str)

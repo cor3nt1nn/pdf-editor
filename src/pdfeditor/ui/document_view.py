@@ -88,8 +88,9 @@ class DocumentView(QWidget):
         self._replace(None)
 
     def commit_pending_edits(self) -> None:
-        """Commit an open field, text box or page text editor, so that ``is_dirty`` and saves
-        include its value.
+        """Commit an open field, text box or page text editor, and the active tool's
+        deferred action (``Tool.flush_pending``, e.g. a double-clicked word to mark), so
+        that ``is_dirty`` and saves include them.
 
         Called before saving, closing or replacing the document (and by ``MainWindow``
         before it consults ``is_dirty``).
@@ -97,6 +98,10 @@ class DocumentView(QWidget):
         self.field_editor.commit()
         self.annot_editor.commit()
         self.textedit_editor.commit()
+        manager = self.page_view.tool_manager
+        tool = manager.active_tool if manager is not None else None
+        if tool is not None:
+            tool.flush_pending()
 
     def push(self, command: QUndoCommand) -> None:
         """Push ``command`` on the undo stack; **every** command push goes through here.
