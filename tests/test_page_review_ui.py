@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 
 import fixtures
@@ -285,3 +286,139 @@ def test_form_tool_focus_follows_page_operations(window, tmp_path) -> None:
     assert tool.focused_button is None and tool._last is None
     window.undo()
     assert tool.focused_button is None
+
+
+# -- m7: UI polish -------------------------------------------------------------------------
+def test_own_path_warning_is_titled_by_action(window, tmp_path, monkeypatch) -> None:
+    import shutil as _shutil
+
+    from pdfeditor.ui import page_dialogs
+
+    path = tmp_path / "doc-01.pdf"
+    _shutil.copy(fixtures.make_simple_pdf(tmp_path / "simple.pdf"), path)
+    assert window.open_file(str(path))
+    monkeypatch.setattr(dialogs, "get_extract_path", lambda *_a: str(path))
+    assert not window.extract_pages([0])
+    assert window.warnings[-1][0] == "Extract Pages"
+    monkeypatch.setattr(
+        page_dialogs,
+        "split_document",
+        lambda *_a, **_k: ([[0], [1, 2]], [str(path), str(tmp_path / "doc-02.pdf")]),
+    )
+    assert not window.split_document()
+    assert window.warnings[-1][0] == "Split Document"
+    assert not (tmp_path / "doc-02.pdf").exists()
+
+
+def test_split_dialog_explains_disabled_ok(qtbot, tmp_path) -> None:
+    from pdfeditor.ui.page_dialogs import SplitDialog
+
+    dialog = SplitDialog(4, "out", "report", document_dir=str(tmp_path))
+    qtbot.addWidget(dialog)
+    ok = dialog.buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert ok.isEnabled()
+    _groups, paths = dialog.result_value()
+    assert paths[0] == str(tmp_path / "out" / "report-01.pdf")  # relative to the document
+    dialog.base_edit.setText("")
+    assert not ok.isEnabled() and dialog.summary_label.text() == "Enter a base name for the files."
+    dialog.base_edit.setText("a/b")
+    assert not ok.isEnabled()
+    assert dialog.summary_label.text().startswith("A file name cannot contain")
+    dialog.base_edit.setText("report")
+    dialog.folder_edit.setText("  ")
+    assert not ok.isEnabled()
+    assert dialog.summary_label.text() == "Choose the folder of the files."
+    dialog.folder_edit.setText(str(tmp_path))
+    assert ok.isEnabled()
+    assert dialog.result_value()[1][0] == str(tmp_path / "report-01.pdf")
+
+
+def test_split_partial_failure_names_written_files(window, simple_pdf, tmp_path, monkeypatch):
+    from pdfeditor.core import document as document_module
+    from pdfeditor.ui import page_dialogs
+
+    assert window.open_file(str(simple_pdf))
+    out = tmp_path / "out"
+    out.mkdir()
+    paths = [str(out / f"part-0{n}.pdf") for n in (1, 2, 3)]
+    monkeypatch.setattr(
+        page_dialogs, "split_document", lambda *_a, **_k: ([[0], [1], [2]], list(paths))
+    )
+    real_write = document_module._write_atomically
+
+    def write(path, data):
+        if path.endswith("part-03.pdf"):
+            raise OSError("disk full")
+        real_write(path, data)
+
+    monkeypatch.setattr(document_module, "_write_atomically", write)
+    assert not window.split_document()
+    title, text = window.warnings[-1]
+    assert "The pages could not be written." in text
+    assert "“part-01.pdf”, “part-02.pdf”" in text
+    assert os.path.exists(paths[1]) and not os.path.exists(paths[2])
+
+
+def test_context_menu_insert_anchors_on_the_clicked_page(window, six_pdf, monkeypatch) -> None:
+    from PySide6.QtGui import QContextMenuEvent
+
+    class NoMenu:
+        def exec(self, _pos):
+            return None
+
+        def deleteLater(self):  # noqa: N802 - Qt name
+            pass
+
+    assert window.open_file(str(six_pdf))
+    sidebar = window.thumbnails
+    sidebar.select_pages([1, 2, 3], current=1)
+    seen: list = []
+    monkeypatch.setattr(
+        window,
+        "page_context_menu",
+        lambda rows, clicked=None: seen.append((rows, clicked)) or NoMenu(),
+    )
+    rect = sidebar.visualRect(sidebar.model().index(2, 0))
+    event = QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, rect.center(), sidebar.viewport().mapToGlobal(rect.center())
+    )
+    sidebar.contextMenuEvent(event)
+    assert seen == [([1, 2, 3], 2)]
+    assert sidebar.take_context_row() is None  # taken once
+    menu = MainWindow.page_context_menu(window, [1, 2, 3], clicked=2)
+    blank = next(a for a in menu.actions() if a.objectName() == "insert_blank_page")
+    blank.trigger()
+    doc = window.document_view.document
+    with doc.lock:
+        texts = [doc.fitz[i].get_text().strip() for i in range(doc.page_count)]
+    assert texts[:5] == ["Page 1", "Page 2", "Page 3", "", "Page 4"]
+    menu.deleteLater()
+
+
+def test_banner_follows_page_operations(window, tmp_path) -> None:
+    import pymupdf
+
+    path = tmp_path / "locked_form.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.new_page()
+    widget = pymupdf.Widget()
+    widget.field_name = "name"
+    widget.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    widget.rect = pymupdf.Rect(50, 50, 200, 80)
+    src[0].add_widget(widget)
+    src.save(
+        path,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        owner_pw="o",
+        user_pw="",
+        permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ASSEMBLE,
+    )
+    src.close()
+    assert window.open_file(str(path))
+    view = window.document_view
+    assert view.banner.message is not None and "not permitted" in view.banner.message[0]
+    assert window.delete_pages([0])  # the form's only page
+    assert view.banner.message is None
+    window.undo()
+    assert view.banner.message is not None

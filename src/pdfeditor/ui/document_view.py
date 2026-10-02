@@ -139,6 +139,7 @@ class DocumentView(QWidget):
         if old is not None:
             old.path_changed.disconnect(self.path_changed)
             old.reloaded.disconnect(self._refresh_banner)
+            old.structure_changed.disconnect(self._refresh_banner)
         # Pending edits were committed by the callers; anything left belongs to the old
         # document and is dropped (its undo stack is being cleared).
         self.field_editor.close()
@@ -151,8 +152,10 @@ class DocumentView(QWidget):
         if document is not None:
             document.path_changed.connect(self.path_changed)
             # After the document's own slot (connected at construction): xfa_kind is
-            # already recomputed when the banner is refreshed.
+            # already recomputed when the banner is refreshed. Page operations change it
+            # too (inserting form pages, a form losing its last fields).
             document.reloaded.connect(self._refresh_banner)
+            document.structure_changed.connect(self._refresh_banner)
         self.page_view.set_document(document)
         self.field_layer.set_document(document)  # after the view: its items need PageItems
         self.field_editor.set_document(document)

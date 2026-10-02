@@ -251,6 +251,8 @@ class ThumbnailSidebar(QListView):
         self._deferred_current: int | None = None
         model.remap_pending.connect(self._remember_selection)
         model.modelReset.connect(self._restore_selection)
+        # Row right-clicked for the pending context menu (take_context_row).
+        self._context_row: int | None = None
         # Insertion row of the drag in progress (None: no drag over us).
         self._drop_target: int | None = None
         self._drag_pos = QPoint()
@@ -456,7 +458,14 @@ class ThumbnailSidebar(QListView):
         if idx.row() not in rows:
             rows = [idx.row()]
         event.accept()
+        self._context_row = idx.row()
         self.context_menu_requested.emit(rows, event.globalPos())
+
+    def take_context_row(self) -> int | None:
+        """The row right-clicked for the context menu being requested (once; None when
+        the request did not come from a click)."""
+        row, self._context_row = self._context_row, None
+        return row
 
     def _remember_selection(self, _mapping: object = None) -> None:
         self._saved_rows = self.selected_pages()

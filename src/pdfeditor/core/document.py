@@ -85,6 +85,15 @@ class SaveError(DocumentError):
     """The document could not be saved."""
 
 
+class PartialWriteError(SaveError):
+    """Writing several files stopped at one of them; ``written`` lists the paths written
+    before (they are kept)."""
+
+    def __init__(self, message: str, written: list[str]) -> None:
+        super().__init__(message)
+        self.written = list(written)
+
+
 class FieldError(DocumentError):
     """A form field could not be found (anymore) or cannot hold the given value."""
 
@@ -761,8 +770,8 @@ class PdfDocument(QObject):
 
     def split_document(self, groups: list[list[int]], paths: list[str | os.PathLike[str]]) -> None:
         """Write each page group to the matching path (see :meth:`extract_pages`).
-        Raises :class:`PageError`, ``ValueError`` or :class:`SaveError` (files written
-        before a failure are kept)."""
+        Raises :class:`PageError`, ``ValueError`` or :class:`PartialWriteError` (a
+        :class:`SaveError`; the files written before the failure are kept and listed)."""
         targets = [str(p) for p in paths]
         if len(targets) != len(groups) or not groups:
             raise ValueError("one path per group is needed")
@@ -773,17 +782,14 @@ class PdfDocument(QObject):
             for i in group:
                 self._check_index(i)
         data = self.snapshot()
+        written: list[str] = []
         for group, path in zip(groups, targets, strict=True):
             try:
                 out = self._copy_bytes(data, list(group))
-            except SaveError:
-                raise
-            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
-                raise SaveError(str(exc)) from exc
-            try:
                 _write_atomically(path, out)
-            except OSError as exc:
-                raise SaveError(str(exc)) from exc
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError), OSError
+                raise PartialWriteError(f"{path}: {exc}", written) from exc
+            written.append(path)
         log.info("split %s into %d files", self._path, len(groups))
 
     # -- form widgets ------------------------------------------------------

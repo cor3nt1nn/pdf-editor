@@ -608,7 +608,9 @@ def test_context_menu_inserts_next_to_clicked_row(
 def test_context_menu_signal_wired(window: MainWindow, simple_pdf, monkeypatch) -> None:
     _open(window, simple_pdf)
     shown: list[list[int]] = []
-    monkeypatch.setattr(window, "page_context_menu", lambda rows: shown.append(rows) or _NoMenu())
+    monkeypatch.setattr(
+        window, "page_context_menu", lambda rows, clicked=None: shown.append(rows) or _NoMenu()
+    )
     window.thumbnails.context_menu_requested.emit([2], window.mapToGlobal(window.rect().center()))
     assert shown == [[2]]
 

@@ -282,9 +282,14 @@ def split_file_names(base: str, count: int) -> list[str]:
     return [f"{base}-{n:0{width}d}.pdf" for n in range(1, count + 1)]
 
 
+#: Characters a Windows file name cannot contain.
+INVALID_NAME_CHARS = '\\/:*?"<>|'
+
+
 class SplitDialog(QDialog):
     """Split the document every N pages or along explicit ranges into files
-    ``<base>-01.pdf``… of a folder."""
+    ``<base>-01.pdf``… of a folder. A relative folder is relative to ``document_dir``
+    (the document's folder). When OK is disabled the summary line says why."""
 
     def __init__(
         self,
@@ -292,11 +297,14 @@ class SplitDialog(QDialog):
         suggested_dir: str,
         stem: str,
         parent: QWidget | None = None,
+        *,
+        document_dir: str = "",
     ) -> None:
         super().__init__(parent)
         self.setObjectName("split_dialog")
         self.setWindowTitle(self.tr("Split Document"))
         self._page_count = page_count
+        self._document_dir = document_dir
 
         # "Every {n} pages": the spin box takes the place of {n}.
         before, _sep, after = self.tr("Every {n} pages").partition("{n}")
@@ -373,8 +381,16 @@ class SplitDialog(QDialog):
             raise pages.PageRangeError(self.ranges_edit.text().strip())
         return result
 
+    def folder(self) -> str:
+        """The chosen folder, absolute (a relative one is relative to the document's
+        folder, else to the current directory)."""
+        folder = os.path.expanduser(self.folder_edit.text().strip())
+        if folder and not os.path.isabs(folder):
+            folder = os.path.join(self._document_dir or os.getcwd(), folder)
+        return os.path.normpath(folder) if folder else ""
+
     def paths(self, count: int) -> list[str]:
-        folder = self.folder_edit.text().strip()
+        folder = self.folder()
         base = self.base_edit.text().strip()
         return [os.path.join(folder, name) for name in split_file_names(base, count)]
 
@@ -396,10 +412,17 @@ class SplitDialog(QDialog):
                 count=len(names), first=names[0], last=names[-1]
             )
         base = self.base_edit.text().strip()
-        if not base or any(c in base for c in '\\/:*?"<>|'):
+        if ok and not base:
             ok = False
-        if not self.folder_edit.text().strip():
+            text = self.tr("Enter a base name for the files.")
+        elif ok and any(c in base for c in INVALID_NAME_CHARS):
             ok = False
+            text = self.tr("A file name cannot contain any of these characters: {chars}").format(
+                chars=" ".join(INVALID_NAME_CHARS)
+            )
+        if ok and not self.folder_edit.text().strip():
+            ok = False
+            text = self.tr("Choose the folder of the files.")
         self.summary_label.setText(text)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
         return ok
@@ -410,10 +433,14 @@ class SplitDialog(QDialog):
 
 
 def split_document(
-    parent: QWidget | None, page_count: int, suggested_dir: str, stem: str
+    parent: QWidget | None,
+    page_count: int,
+    suggested_dir: str,
+    stem: str,
+    document_dir: str = "",
 ) -> tuple[list[list[int]], list[str]] | None:
     """Run :class:`SplitDialog`: (page groups, file paths) or None when cancelled."""
-    dialog = SplitDialog(page_count, suggested_dir, stem, parent)
+    dialog = SplitDialog(page_count, suggested_dir, stem, parent, document_dir=document_dir)
     try:
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None

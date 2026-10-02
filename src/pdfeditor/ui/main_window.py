@@ -1168,19 +1168,21 @@ class MainWindow(QMainWindow):
             return False
         return self._can_extract()
 
-    def _replaces_open_document(self, paths: list[str]) -> bool:
+    def _replaces_open_document(self, paths: list[str], title: str) -> bool:
+        """True (and a warning titled ``title``) if one of ``paths`` is the open file."""
         doc = self.document_view.document
         if doc is None or doc.path is None or not any(same_path(p, doc.path) for p in paths):
             return False
         dialogs.warn(
             self,
-            self.tr("Extract Pages"),
+            title,
             self.tr("Choose another name: the copy cannot replace the open document."),
         )
         return True
 
     def _write_pages(self, write) -> bool:
-        """Run ``write()`` (extract or split) with a wait cursor; report failures."""
+        """Run ``write()`` (extract or split) with a wait cursor; report failures (a
+        split that stopped part-way names the files it wrote)."""
         error: Exception | None = None
         refused = False
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1200,12 +1202,14 @@ class MainWindow(QMainWindow):
             )
             return False
         if error is not None:
-            dialogs.warn(
-                self,
-                self.tr("Pages"),
-                self.tr("The pages could not be written."),
-                details=str(error),
-            )
+            text = self.tr("The pages could not be written.")
+            written = getattr(error, "written", None)
+            if written:
+                names = ", ".join(f"“{os.path.basename(p)}”" for p in written)
+                text += " " + self.tr("These files were written before the error: {names}.").format(
+                    names=names
+                )
+            dialogs.warn(self, self.tr("Pages"), text, details=str(error))
             return False
         return True
 
@@ -1221,7 +1225,7 @@ class MainWindow(QMainWindow):
         self.document_view.commit_pending_edits()  # the copy includes the value typed
         name = self.tr("{stem} - pages.pdf").format(stem=self._stem())
         path = dialogs.get_extract_path(self, os.path.join(self._output_dir(), name))
-        if not path or self._replaces_open_document([path]):
+        if not path or self._replaces_open_document([path], self.tr("Extract Pages")):
             return False
         if not self._write_pages(lambda: doc.extract_pages(rows, path)):
             return False
@@ -1239,11 +1243,14 @@ class MainWindow(QMainWindow):
         if not self._check_extract():
             return False
         self.document_view.commit_pending_edits()
-        result = page_dialogs.split_document(self, doc.page_count, self._output_dir(), self._stem())
+        document_dir = os.path.dirname(doc.path) if doc.path else ""
+        result = page_dialogs.split_document(
+            self, doc.page_count, self._output_dir(), self._stem(), document_dir
+        )
         if result is None:
             return False
         groups, paths = result
-        if self._replaces_open_document(paths):
+        if self._replaces_open_document(paths, self.tr("Split Document")):
             return False
         existing = [p for p in paths if os.path.exists(p)]
         if existing and not dialogs.confirm_overwrite_files(self, existing):
@@ -1259,8 +1266,9 @@ class MainWindow(QMainWindow):
         )
         return True
 
-    def page_context_menu(self, rows: list[int]) -> QMenu:
-        """The thumbnail context menu: the Pages menu actions applied to ``rows``."""
+    def page_context_menu(self, rows: list[int], clicked: int | None = None) -> QMenu:
+        """The thumbnail context menu: the Pages menu actions applied to ``rows``;
+        inserts go next to the ``clicked`` page (default: the last of ``rows``)."""
         menu = QMenu(self)
         menu.setObjectName("page_context_menu")
         targets = list(rows)
@@ -1271,8 +1279,12 @@ class MainWindow(QMainWindow):
             act.setEnabled(source.isEnabled())
             act.triggered.connect(lambda _checked=False: slot())
 
-        # Inserts go next to the clicked page (the last page of a multi-selection).
-        anchor = max(targets) if targets else None
+        # Inserts go next to the clicked page (Deviation 75; a multi-selection's last
+        # page when the click is unknown).
+        if clicked is not None and clicked in targets:
+            anchor: int | None = clicked
+        else:
+            anchor = max(targets) if targets else None
         add(self.act_insert_blank, lambda: self.insert_blank_page(anchor))
         add(self.act_insert_pages, lambda: self.insert_pages(anchor))
         add(self.act_delete_pages, lambda: self.delete_pages(targets))
@@ -1285,7 +1297,7 @@ class MainWindow(QMainWindow):
         return menu
 
     def _show_page_context_menu(self, rows: list[int], pos: QPoint) -> None:
-        menu = self.page_context_menu(rows)
+        menu = self.page_context_menu(rows, self.thumbnails.take_context_row())
         try:
             menu.exec(pos)
         finally:
