@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication, QRectF, QSizeF
 from PySide6.QtGui import QUndoCommand
 
 from pdfeditor.core.annotations import (
+    MARKUP_KINDS,
     AnnotInfo,
     AnnotKind,
     AnnotSpec,
@@ -456,7 +457,7 @@ class _AnnotCommand(_ImmediateCommand):
 
 
 class AddAnnotCommand(_AnnotCommand):
-    """Create a text box, stamp or signature from ``spec`` (one undo step).
+    """Create a text box, stamp, signature or text markup from ``spec`` (one undo step).
 
     The /NM is fixed here (``spec.name``, or a new uuid4), so undo/redo cycles and saves
     keep the same identity. The first redo creates the annotation (a text box's height
@@ -464,17 +465,25 @@ class AddAnnotCommand(_AnnotCommand):
     """
 
     def __init__(self, doc: PdfDocument, spec: AnnotSpec) -> None:
-        if spec.kind is AnnotKind.SIGNATURE:
-            text = QCoreApplication.translate("Commands", "Add signature")
-        elif spec.kind is AnnotKind.STAMP:
-            text = QCoreApplication.translate("Commands", "Add stamp")
-        else:
-            text = QCoreApplication.translate("Commands", "Add text")
-        super().__init__(doc, text)
+        super().__init__(doc, self._label(spec.kind))
         self.page_id = doc.page_id(spec.page)
         self.spec = replace(spec, name=spec.name or new_name())
         # Snapshot of the created annotation (None before the first redo).
         self.info: AnnotInfo | None = None
+
+    @staticmethod
+    def _label(kind: AnnotKind) -> str:
+        if kind is AnnotKind.SIGNATURE:
+            return QCoreApplication.translate("Commands", "Add signature")
+        if kind is AnnotKind.STAMP:
+            return QCoreApplication.translate("Commands", "Add stamp")
+        if kind is AnnotKind.HIGHLIGHT:
+            return QCoreApplication.translate("Commands", "Add highlight")
+        if kind in (AnnotKind.UNDERLINE, AnnotKind.SQUIGGLY):
+            return QCoreApplication.translate("Commands", "Add underline")
+        if kind is AnnotKind.STRIKEOUT:
+            return QCoreApplication.translate("Commands", "Add strike-through")
+        return QCoreApplication.translate("Commands", "Add text")
 
     @property
     def name(self) -> str:
@@ -504,6 +513,11 @@ class EditAnnotCommand(_AnnotCommand):
     a stamp resize rescales the glyph). The annotation is resolved by ``(page id, name)``
     on every redo/undo, so the command survives saves and page moves; :class:`AnnotError`
     if it is gone.
+
+    A text markup (:data:`~pdfeditor.core.annotations.MARKUP_KINDS`) only changes its
+    ``color`` and ``opacity`` ("Change markup color"); ``text``, ``font_size``, ``rect``
+    or ``fit_height=True`` on a markup, and ``opacity`` on anything else, raise
+    ``ValueError`` here, before anything reaches the document.
     """
 
     def __init__(
@@ -516,9 +530,16 @@ class EditAnnotCommand(_AnnotCommand):
         color: Color | None = None,
         rect: QRectF | None = None,
         fit_height: bool | None = None,
+        opacity: float | None = None,
     ) -> None:
-        if text is None and font_size is None and color is None and rect is None:
+        changes = (text, font_size, color, rect, opacity)
+        if all(change is None for change in changes):
             raise ValueError("EditAnnotCommand needs at least one change")
+        if info.kind in MARKUP_KINDS:
+            if text is not None or font_size is not None or rect is not None or fit_height:
+                raise ValueError("a text markup only changes its colour and opacity")
+        elif opacity is not None:
+            raise ValueError("only a text markup has an opacity to change")
         super().__init__(doc, self._label(info, text, font_size, color, rect))
         self.page_id = doc.page_id(info.page)
         self.info = info
@@ -526,6 +547,7 @@ class EditAnnotCommand(_AnnotCommand):
         self.new_font_size = font_size
         self.new_color = color
         self.new_rect = QRectF(rect) if rect is not None else None
+        self.new_opacity = opacity
         self.fit_height = (text is not None) if fit_height is None else fit_height
 
     @staticmethod
@@ -536,6 +558,8 @@ class EditAnnotCommand(_AnnotCommand):
         color: Color | None,
         rect: QRectF | None,
     ) -> str:
+        if info.kind in MARKUP_KINDS:
+            return QCoreApplication.translate("Commands", "Change markup color")
         if text is not None:
             return QCoreApplication.translate("Commands", "Edit text")
         if font_size is None and color is None and rect is not None:
@@ -554,6 +578,11 @@ class EditAnnotCommand(_AnnotCommand):
 
     def _redo(self) -> None:
         self.info = _claimed(self.doc, replace(self.info, page=self.page))
+        if self.info.kind in MARKUP_KINDS:
+            self.doc.update_annot(
+                self.info.page, self.info.name, color=self.new_color, opacity=self.new_opacity
+            )
+            return
         self.doc.update_annot(
             self.info.page,
             self.info.name,
@@ -566,6 +595,14 @@ class EditAnnotCommand(_AnnotCommand):
 
     def _undo(self) -> None:
         old = self.info
+        if old.kind in MARKUP_KINDS:
+            self.doc.update_annot(
+                self.page,
+                old.name,
+                color=old.color if self.new_color is not None else None,
+                opacity=old.opacity if self.new_opacity is not None else None,
+            )
+            return
         self.doc.update_annot(
             self.page,
             old.name,

@@ -1,4 +1,5 @@
-"""FreeText annotations (text boxes and stamps, M3) and signatures (M4).
+"""FreeText annotations (text boxes and stamps, M3), signatures (M4) and text markups
+(Highlight, Underline, StrikeOut, Squiggly: M6b).
 
 Pure functions on ``pymupdf.Document``. Callers hold ``PdfDocument.lock``. Never keep
 ``pymupdf.Page`` / ``Annot`` objects across calls (every save replaces the document and
@@ -16,6 +17,14 @@ Geometry: callers work in *page space* (rotation applied, cropbox-relative, poin
 The unrotated rect stored in the file is ``page_to_unrotated(rect)`` and the text is
 drawn with ``/Rotate`` = the page rotation at creation, so it reads upright on screen.
 
+Text markups (:data:`MARKUP_KINDS`) carry their /QuadPoints as page-space
+:class:`~pdfeditor.core.pagetext.Quad` objects (``annot.vertices`` turned by the page's
+``rotation_matrix``); their rect is the union of the quads (empty without quads: not
+editable), their colour is /C (the stroke colour) and their opacity /CA (1.0 when
+absent). They are never moved or resized (:attr:`AnnotInfo.movable`): only their colour
+and opacity change. They are created with ``add_*_annot(quads)`` (quads mapped by the
+page's ``derotation_matrix``, docs/M6_PLAN.md T3), a uuid4 /NM, /C and, below 1.0, /CA.
+
 FreeText annotations and signatures are handled. Text uses Helvetica (``/Helv``), no
 border, no fill; stamps are FreeText annotations showing one ZapfDingbats glyph
 (:data:`STAMP_GLYPHS`); signatures are Stamp annotations with ``/IT /StampImage`` and an
@@ -31,6 +40,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -40,6 +50,7 @@ from PySide6.QtCore import QPointF, QRectF
 from pdfeditor.core import signature
 from pdfeditor.core.forms import ANNOT_HIDDEN, ANNOT_NO_VIEW, _page_rect
 from pdfeditor.core.geometry import fitz_from_qrect, page_to_unrotated
+from pdfeditor.core.pagetext import Quad
 from pdfeditor.core.signature import ImageData
 
 log = logging.getLogger(__name__)
@@ -51,6 +62,31 @@ class AnnotKind(StrEnum):
     TEXT = "text"
     STAMP = "stamp"
     SIGNATURE = "signature"
+    HIGHLIGHT = "highlight"
+    UNDERLINE = "underline"
+    STRIKEOUT = "strikeout"
+    SQUIGGLY = "squiggly"
+
+
+#: Text markup kinds (quads, colour and opacity; never moved or resized).
+MARKUP_KINDS = frozenset(
+    {AnnotKind.HIGHLIGHT, AnnotKind.UNDERLINE, AnnotKind.STRIKEOUT, AnnotKind.SQUIGGLY}
+)
+#: PDF annotation subtype of each markup kind (docs/M6_PLAN.md T5).
+MARKUP_SUBTYPES = {
+    AnnotKind.HIGHLIGHT: pymupdf.PDF_ANNOT_HIGHLIGHT,
+    AnnotKind.UNDERLINE: pymupdf.PDF_ANNOT_UNDERLINE,
+    AnnotKind.STRIKEOUT: pymupdf.PDF_ANNOT_STRIKE_OUT,
+    AnnotKind.SQUIGGLY: pymupdf.PDF_ANNOT_SQUIGGLY,
+}
+_MARKUP_BY_SUBTYPE = {subtype: kind for kind, subtype in MARKUP_SUBTYPES.items()}
+#: Colour of a markup without /C (what MuPDF writes when creating one, T3).
+MARKUP_DEFAULT_COLORS: dict[AnnotKind, tuple[float, float, float]] = {
+    AnnotKind.HIGHLIGHT: (1.0, 1.0, 0.0),
+    AnnotKind.UNDERLINE: (0.0, 1.0, 0.0),
+    AnnotKind.STRIKEOUT: (1.0, 0.0, 0.0),
+    AnnotKind.SQUIGGLY: (1.0, 0.0, 1.0),
+}
 
 
 #: Stamp name -> ZapfDingbats character code (✓, ✗, ●).
@@ -84,7 +120,8 @@ _STAMP_FONT = "zadb"
 
 @dataclass(frozen=True)
 class AnnotInfo:
-    """Snapshot of one FreeText annotation or signature (no live pymupdf object)."""
+    """Snapshot of one FreeText annotation, signature or text markup (no live pymupdf
+    object)."""
 
     page: int
     #: Xref of the annotation (stale after a full save; identity is ``name``).
@@ -93,16 +130,17 @@ class AnnotInfo:
     #: FreeText without a unique /NM.
     name: str
     kind: AnnotKind
-    #: /Contents (line breaks normalised to "\n").
+    #: /Contents (line breaks normalised to "\n"; a markup's comment, read-only here).
     text: str
-    #: Font size from /DA.
+    #: Font size from /DA (markups: ``DEFAULT_FONT_SIZE``, unused).
     font_size: float
-    #: Text colour (RGB, 0..1) from /DA.
+    #: Text colour (RGB, 0..1) from /DA; a markup's /C.
     color: Color
     #: The annotation's /Rotate (0 when absent).
     rotate: int
     hidden: bool
-    #: Rect in page space (rotation applied); empty for a missing/degenerate /Rect.
+    #: Rect in page space (rotation applied); empty for a missing/degenerate /Rect. A
+    #: markup's rect is the union of its quads (its /Rect is larger).
     rect: QRectF
     #: Raw /Rect (x0, y0, x1, y1) in unrotated page coordinates (``annot.rect``).
     unrotated_rect: tuple[float, float, float, float]
@@ -114,16 +152,35 @@ class AnnotInfo:
     #: as embedded (pre-rotated for the page).
     image_xref: int = 0
     image_size: tuple[int, int] = (0, 0)
+    #: Markup only: /QuadPoints in page space, one :class:`Quad` per group of 8 numbers.
+    quads: tuple[Quad, ...] = ()
+    #: /CA (1.0 when absent).
+    opacity: float = 1.0
 
     @property
     def editable(self) -> bool:
-        """The user can select, move and edit this annotation."""
+        """The user can select and edit this annotation (move it too if :attr:`movable`)."""
         return not self.hidden and not self.locked and not self.rect.isEmpty()
+
+    @property
+    def is_markup(self) -> bool:
+        """A text markup (Highlight, Underline, StrikeOut, Squiggly)."""
+        return self.kind in MARKUP_KINDS
+
+    @property
+    def movable(self) -> bool:
+        """The annotation can be moved and resized (not a text markup)."""
+        return self.kind not in MARKUP_KINDS
 
     @property
     def text_editable(self) -> bool:
         """The user can change the text of this (editable) annotation."""
-        return self.editable and not self.locked_contents and self.kind is not AnnotKind.SIGNATURE
+        return (
+            self.editable
+            and not self.locked_contents
+            and self.kind is not AnnotKind.SIGNATURE
+            and self.kind not in MARKUP_KINDS
+        )
 
 
 @dataclass(frozen=True)
@@ -145,6 +202,44 @@ class AnnotSpec:
     rotate: int | None = None
     #: Signature only: the image samples, already turned for the page (required).
     image: ImageData | None = None
+    #: Markup only (required): the quads to mark, page space (``PageText.range_quads``).
+    quads: tuple[Quad, ...] = ()
+    #: Markup only: /CA (written only below 1.0).
+    opacity: float = 1.0
+
+
+def quads_rect(quads: Iterable[Quad]) -> QRectF:
+    """Union of the bounding rects of ``quads`` (page space); empty without quads."""
+    out: QRectF | None = None
+    for quad in quads:
+        box = quad.bounding_rect()
+        out = box if out is None else out.united(box)
+    return QRectF() if out is None else out
+
+
+def markup_spec(
+    page: int,
+    kind: AnnotKind,
+    quads: Sequence[Quad],
+    color: Color,
+    *,
+    opacity: float = 1.0,
+    name: str = "",
+) -> AnnotSpec:
+    """The spec of a text markup of ``kind`` covering ``quads`` (page space)."""
+    if kind not in MARKUP_KINDS:
+        raise ValueError(f"{kind} is not a text markup")
+    return AnnotSpec(
+        page=page,
+        kind=kind,
+        text="",
+        font_size=DEFAULT_FONT_SIZE,
+        color=(float(color[0]), float(color[1]), float(color[2])),
+        rect=quads_rect(quads),
+        name=name,
+        quads=tuple(quads),
+        opacity=float(opacity),
+    )
 
 
 # -- /DA -------------------------------------------------------------------
@@ -229,6 +324,8 @@ def _info(
 ) -> AnnotInfo:
     if annot.type[0] == pymupdf.PDF_ANNOT_STAMP:
         return _signature_info(doc, page, index, annot, details, image_xref)
+    if annot.type[0] in _MARKUP_BY_SUBTYPE:
+        return _markup_info(doc, page, index, annot, details)
     xref = int(annot.xref)
     font, size, color = parse_da(_string_key(doc, xref, "DA"))
     if details is None:
@@ -294,15 +391,75 @@ def _signature_info(
     )
 
 
+def _stroke_color(annot: pymupdf.Annot, kind: AnnotKind) -> Color:
+    """/C of a markup as RGB (gray and CMYK converted; the kind's default if absent)."""
+    values = [_clamp(float(v)) for v in ((annot.colors or {}).get("stroke") or ())]
+    if len(values) == 3:
+        return (values[0], values[1], values[2])
+    if len(values) == 1:
+        return (values[0], values[0], values[0])
+    if len(values) == 4:
+        c, m, y, k = values
+        return ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k))
+    return MARKUP_DEFAULT_COLORS[kind]
+
+
+def _page_quads(annot: pymupdf.Annot, page: pymupdf.Page) -> tuple[Quad, ...]:
+    """/QuadPoints of ``annot`` in page space (``vertices`` are unrotated)."""
+    matrix = page.rotation_matrix
+    points = [pymupdf.Point(v) * matrix for v in (annot.vertices or ())]
+    out = []
+    for i in range(0, len(points) - 3, 4):
+        ul, ur, ll, lr = (QPointF(p.x, p.y) for p in points[i : i + 4])
+        out.append(Quad(ul, ur, ll, lr))
+    return tuple(out)
+
+
+def _markup_info(
+    doc: pymupdf.Document,
+    page: pymupdf.Page,
+    index: int,
+    annot: pymupdf.Annot,
+    details: dict[str, str] | None,
+) -> AnnotInfo:
+    """Snapshot of text markup ``annot`` (rect = union of its quads)."""
+    xref = int(annot.xref)
+    kind = _MARKUP_BY_SUBTYPE[annot.type[0]]
+    if details is None:
+        details = annot.info
+    text = str(details.get("content") or "").replace("\r\n", "\n").replace("\r", "\n")
+    raw = pymupdf.Rect(annot.rect)
+    flags = int(annot.flags or 0)
+    quads = _page_quads(annot, page)
+    opacity = float(annot.opacity)
+    return AnnotInfo(
+        page=index,
+        xref=xref,
+        name=str(details.get("id") or ""),
+        kind=kind,
+        text=text,
+        font_size=DEFAULT_FONT_SIZE,
+        color=_stroke_color(annot, kind),
+        rotate=_int_key(doc, xref, "Rotate") % 360 // 90 * 90,
+        hidden=bool(flags & (ANNOT_HIDDEN | ANNOT_NO_VIEW)),
+        rect=quads_rect(quads),
+        unrotated_rect=(raw.x0, raw.y0, raw.x1, raw.y1),
+        locked=bool(flags & (ANNOT_READ_ONLY | ANNOT_LOCKED)),
+        quads=quads,
+        opacity=round(opacity, 4) if 0.0 <= opacity < 1.0 else 1.0,
+    )
+
+
 def read_one(fitz_doc: pymupdf.Document, page_index: int, xref: int) -> AnnotInfo:
-    """Snapshot of annotation ``xref`` of a page (FreeText or signature; real /NM)."""
+    """Snapshot of annotation ``xref`` of a page (FreeText, signature or markup; real
+    /NM)."""
     page = fitz_doc[page_index]
     return _info(fitz_doc, page, page_index, page.load_annot(xref))
 
 
 def _candidate(fitz_doc: pymupdf.Document, xref: int, subtype: int) -> bool:
     """Annotation ``xref`` of ``subtype`` may be one we list (cheap check)."""
-    if subtype == pymupdf.PDF_ANNOT_FREE_TEXT:
+    if subtype == pymupdf.PDF_ANNOT_FREE_TEXT or subtype in _MARKUP_BY_SUBTYPE:
         return True
     return subtype == pymupdf.PDF_ANNOT_STAMP and signature.is_signature_intent(fitz_doc, xref)
 
@@ -313,7 +470,7 @@ def new_name() -> str:
 
 
 def synthetic_name(xref: int, scope: str = "") -> str:
-    """The in-memory name of a FreeText without a unique /NM (valid for ``scope``)."""
+    """The in-memory name of an annotation without a unique /NM (valid for ``scope``)."""
     return f"{SYNTHETIC_PREFIX}{scope}:{xref}"
 
 
@@ -341,8 +498,8 @@ def read_annots(
     include_hidden: bool = False,
     scope: str = "",
 ) -> list[AnnotInfo]:
-    """FreeText annotations and signatures of a page, in /Annots order; hidden ones
-    skipped by default.
+    """FreeText annotations, signatures and text markups of a page, in /Annots order;
+    hidden ones skipped by default.
 
     Never modifies the document. An annotation without /NM, whose /NM repeats an earlier
     one of the page or looks synthetic, is listed under ``synthetic_name(xref, scope)``.
@@ -381,7 +538,7 @@ def read_annots(
 def resolve_annot(
     fitz_doc: pymupdf.Document, page_index: int, name: str
 ) -> tuple[pymupdf.Page, pymupdf.Annot] | None:
-    """The live FreeText annotation or signature named ``name`` on a page, as
+    """The live FreeText annotation, signature or markup named ``name`` on a page, as
     ``(page, annot)`` — keep the page referenced while using the annot — or None.
 
     A synthetic name is resolved by its xref (the caller checks its scope).
@@ -431,12 +588,17 @@ def _fontname(kind: AnnotKind) -> str:
 def create_annot(
     fitz_doc: pymupdf.Document, page_index: int, spec: AnnotSpec, *, fit_height: bool = False
 ) -> AnnotInfo:
-    """Create a FreeText annotation or signature from ``spec`` and return its snapshot.
+    """Create a FreeText annotation, signature or text markup from ``spec`` and return
+    its snapshot.
 
     ``fit_height`` (text only): the height then hugs the wrapped text (see
     :func:`update_annot`); otherwise ``spec.rect`` is used as is. A signature gets an
-    image object of its own (``PdfDocument.add_annot`` shares them instead).
+    image object of its own (``PdfDocument.add_annot`` shares them instead). A markup
+    uses ``spec.quads`` (``ValueError`` without), ``color``, ``opacity`` and, when not
+    empty, ``text`` as /Contents; ``rect``, ``font_size`` and ``rotate`` are ignored.
     """
+    if spec.kind in MARKUP_KINDS:
+        return _create_markup(fitz_doc, page_index, spec)
     if spec.kind is AnnotKind.SIGNATURE:
         if spec.image is None:
             raise ValueError("a signature spec needs an image")
@@ -463,6 +625,55 @@ def create_annot(
     if fit_height and info.kind is AnnotKind.TEXT:
         return update_annot(fitz_doc, page_index, info.name, fit_height=True)
     return info
+
+
+def _fitz_quad(quad: Quad) -> pymupdf.Quad:
+    return pymupdf.Quad(*(pymupdf.Point(p.x(), p.y()) for p in quad))
+
+
+def _rgb(color: Color) -> tuple[float, float, float]:
+    return (_clamp(float(color[0])), _clamp(float(color[1])), _clamp(float(color[2])))
+
+
+def _create_markup(fitz_doc: pymupdf.Document, page_index: int, spec: AnnotSpec) -> AnnotInfo:
+    if not spec.quads:
+        raise ValueError("a text markup needs at least one quad")
+    page = fitz_doc[page_index]
+    unrotated = [_fitz_quad(q) * page.derotation_matrix for q in spec.quads]
+    adders = {
+        AnnotKind.HIGHLIGHT: page.add_highlight_annot,
+        AnnotKind.UNDERLINE: page.add_underline_annot,
+        AnnotKind.STRIKEOUT: page.add_strikeout_annot,
+        AnnotKind.SQUIGGLY: page.add_squiggly_annot,
+    }
+    annot = adders[spec.kind](quads=unrotated)
+    xref = annot.xref
+    _set_name(fitz_doc, xref, spec.name or new_name())
+    annot.set_colors(stroke=_rgb(spec.color))
+    if spec.opacity < 1.0:
+        annot.set_opacity(max(0.0, float(spec.opacity)))
+    if spec.text:
+        annot.set_info(content=spec.text)
+    annot.update()
+    return _info(fitz_doc, page, page_index, page.load_annot(xref))
+
+
+def _update_markup(
+    fitz_doc: pymupdf.Document,
+    page: pymupdf.Page,
+    page_index: int,
+    annot: pymupdf.Annot,
+    name: str,
+    color: Color | None,
+    opacity: float | None,
+) -> AnnotInfo:
+    if color is not None:
+        annot.set_colors(stroke=_rgb(color))
+    if opacity is not None:
+        annot.set_opacity(_clamp(float(opacity)))  # 1.0 removes /CA
+    annot.update()  # keeps /QuadPoints and /Rotate (T4); a foreign markup gets an /AP
+    xref = annot.xref
+    return _info(fitz_doc, page, page_index, page.load_annot(xref), {**annot.info, "id": name})
 
 
 def _with_frame_height(rect: pymupdf.Rect, rotate: int, height: float) -> pymupdf.Rect:
@@ -518,6 +729,7 @@ def update_annot(
     color: Color | None = None,
     rect: QRectF | None = None,
     fit_height: bool = False,
+    opacity: float | None = None,
 ) -> AnnotInfo:
     """Change an annotation and regenerate its appearance; returns the new snapshot.
 
@@ -528,8 +740,10 @@ def update_annot(
     annotations are normalised to Helvetica (stamps to ZapfDingbats) and lose their rich
     text (/RC, /DS); /CL is always removed. The returned snapshot keeps ``name`` (even
     synthetic). A signature honours ``rect`` only (the rest is ignored; without a rect
-    nothing is written). Raises ``LookupError`` if the annotation is gone,
-    ``PermissionError`` if it is :attr:`AnnotInfo.locked`.
+    nothing is written). A text markup honours ``color`` and ``opacity`` only
+    (``font_size`` is ignored; ``text``, ``rect`` or ``fit_height`` raise ``ValueError``);
+    ``opacity`` is ignored for other kinds. Raises ``LookupError`` if the annotation is
+    gone, ``PermissionError`` if it is :attr:`AnnotInfo.locked`.
     """
     found = resolve_annot(fitz_doc, page_index, name)
     if found is None:
@@ -539,6 +753,10 @@ def update_annot(
     current = _info(fitz_doc, page, page_index, annot)
     if current.locked:
         raise PermissionError(f"annotation {name!r} is locked")
+    if current.kind in MARKUP_KINDS:
+        if text is not None or rect is not None or fit_height:
+            raise ValueError("a text markup only changes its colour and opacity")
+        return _update_markup(fitz_doc, page, page_index, annot, name, color, opacity)
     if current.kind is AnnotKind.SIGNATURE:
         if rect is not None:
             unrotated = page_to_unrotated(fitz_from_qrect(rect), page.derotation_matrix)
@@ -607,8 +825,9 @@ def delete_annot(fitz_doc: pymupdf.Document, page_index: int, name: str) -> bool
 
 # -- geometry helpers --------------------------------------------------------
 def spec_from(info: AnnotInfo, image: ImageData | None = None) -> AnnotSpec:
-    """The spec re-creating ``info`` (same /NM, rect, rotation, style; a signature also
-    needs its ``image``, e.g. from ``PdfDocument.annot_image``)."""
+    """The spec re-creating ``info`` (same /NM, rect, rotation, style; a markup its
+    quads, colour, opacity and /Contents; a signature also needs its ``image``, e.g.
+    from ``PdfDocument.annot_image``)."""
     return AnnotSpec(
         page=info.page,
         kind=info.kind,
@@ -619,6 +838,8 @@ def spec_from(info: AnnotInfo, image: ImageData | None = None) -> AnnotSpec:
         name=info.name,
         rotate=info.rotate,
         image=image,
+        quads=info.quads,
+        opacity=info.opacity,
     )
 
 

@@ -19,6 +19,7 @@ from fixtures import (
     FOREIGN_SIZE,
     FOREIGN_TEXT,
     HIDDEN_ANNOT_NAME,
+    HIGHLIGHT_RECT,
     ROTATED_ANNOT_NAME,
     ROTATED_ANNOT_RECT,
     ROTATED_ANNOT_TEXT,
@@ -341,10 +342,13 @@ def test_resize_stamp_scales_glyph(blank: PdfDocument) -> None:
 # -- fixture 3: reading ----------------------------------------------------------
 def test_annotated_fixture_listing(ann: PdfDocument) -> None:
     listed = ann.annots(0)
-    # Our text, our stamp, the foreign FreeText; not the hidden one, the highlight or
-    # the widget.
-    assert len(listed) == 3
-    text, stamp, foreign = listed
+    # Our text, our stamp, the highlight (M6b), the foreign FreeText; not the hidden one
+    # or the widget.
+    assert len(listed) == 4
+    text, stamp, highlight, foreign = listed
+    assert highlight.kind is AnnotKind.HIGHLIGHT and not highlight.movable
+    assert _rects_close(highlight.rect, _qrect(HIGHLIGHT_RECT))
+    assert foreign.kind is AnnotKind.TEXT and annotations.is_synthetic(foreign.name)
     assert (text.name, text.kind, text.text) == (ANNOT_TEXT_NAME, AnnotKind.TEXT, ANNOT_TEXT)
     assert _rects_close(text.rect, _qrect(ANNOT_TEXT_RECT))
     assert (stamp.name, stamp.kind, stamp.text) == (ANNOT_STAMP_NAME, AnnotKind.STAMP, "4")
@@ -364,7 +368,7 @@ def test_annotated_fixture_listing(ann: PdfDocument) -> None:
 
 
 def test_foreign_freetext_is_named_and_editable(ann: PdfDocument, tmp_path) -> None:
-    foreign = ann.annots(0)[2]
+    foreign = ann.annots(0)[3]
     assert annotations.is_synthetic(foreign.name)  # nothing written when read
     assert _key(ann, foreign, "NM")[0] == "null"
     real = ann.claim_annot_name(0, foreign.name)
@@ -377,7 +381,7 @@ def test_foreign_freetext_is_named_and_editable(ann: PdfDocument, tmp_path) -> N
     assert foreign.color == FOREIGN_COLOR and foreign.font_size == FOREIGN_SIZE
     assert _rects_close(foreign.rect, _qrect(FOREIGN_RECT))
     assert foreign.editable
-    assert ann.annots(0)[2].name == foreign.name  # stable (cached)
+    assert ann.annots(0)[3].name == foreign.name  # stable (cached)
     assert _key(ann, foreign, "RC")[0] == "string"
 
     edited = ann.update_annot(0, foreign.name, text="Edited é")
@@ -456,7 +460,7 @@ def test_delete_and_recreate_from_spec_is_identical(ann: PdfDocument) -> None:
 
 
 def test_foreign_freetext_recreated(ann: PdfDocument) -> None:
-    foreign = ann.annots(0)[2]
+    foreign = ann.annots(0)[3]
     ann.delete_annot(0, foreign.name)
     again = ann.add_annot(spec_from(foreign))
     assert (again.name, again.text, again.color, again.font_size) == (
@@ -544,7 +548,7 @@ def test_no_mupdf_warnings(ann: PdfDocument) -> None:
     pymupdf.TOOLS.mupdf_warnings()  # reset
     for i in range(2):
         ann.annots(i)
-    foreign = ann.annots(0)[2]
+    foreign = ann.annots(0)[3]
     ann.update_annot(0, foreign.name, text="Edited", fit_height=True)
     ann.update_annot(1, ROTATED_ANNOT_NAME, font_size=14, color=(1, 0, 0), fit_height=True)
     info = ann.add_annot(_text_spec("new ā 中", rect=QRectF(100, 400, 200, 20)), fit_height=True)

@@ -1504,3 +1504,108 @@ def make_scanned_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M6b text markups -----------------------------------------------------------------
+#: A quad as 8 numbers: ul, ur, ll, lr (x, y) in page space.
+QuadPts = tuple[float, float, float, float, float, float, float, float]
+
+
+def rect_quad(rect: Rect4) -> QuadPts:
+    """The quad of a page-space rect (x0, y0, x1, y1): ul, ur, ll, lr."""
+    x0, y0, x1, y1 = rect
+    return (x0, y0, x1, y0, x0, y1, x1, y1)
+
+
+MARKED_HIGHLIGHT_NAME = "4c0d2b7e-8f1a-4e3b-9c5d-6a7b8c9d0e1f"
+MARKED_UNDERLINE_NAME = "5d1e3c8f-9a2b-4f4c-8d6e-7b8c9d0e1f2a"
+MARKED_STRIKEOUT_NAME = "6e2f4d9a-0b3c-4a5d-9e7f-8c9d0e1f2a3b"
+MARKED_SQUIGGLY_NAME = "7f3a5e0b-1c4d-4b6e-8f8a-9d0e1f2a3b4c"
+#: Hidden (/F 6) highlight on page 1: never listed.
+MARKED_HIDDEN_NAME = "hidden-highlight"
+#: Highlight on page 2 (/Rotate 90 + ``TEXT_CROPBOX``).
+MARKED_ROTATED_NAME = "8a4b6f1c-2d5e-4c7f-9a9b-0e1f2a3b4c5d"
+#: Key of the foreign highlight (no /NM, no /AP) in ``MARKED_QUADS``/``MARKED_COLORS``.
+MARKED_FOREIGN = "foreign"
+MARKED_FOREIGN_AUTHOR = "Alice"
+MARKED_FOREIGN_CONTENTS = "a note"
+MARKED_FOREIGN_OPACITY = 0.8
+MARKED_STRIKEOUT_OPACITY = 0.5
+#: Page-space quads of every markup (name or ``MARKED_FOREIGN``).
+MARKED_QUADS: dict[str, tuple[QuadPts, ...]] = {
+    MARKED_HIGHLIGHT_NAME: (rect_quad((94, 89, 160, 103)), rect_quad((72, 107, 140, 121))),
+    MARKED_UNDERLINE_NAME: (rect_quad((200, 89, 240, 103)),),
+    MARKED_STRIKEOUT_NAME: (rect_quad((72, 149, 150, 163)),),
+    MARKED_SQUIGGLY_NAME: (rect_quad((160, 149, 220, 163)),),
+    MARKED_FOREIGN: (rect_quad((250, 89, 300, 103)),),
+    MARKED_HIDDEN_NAME: (rect_quad((72, 200, 150, 214)),),
+    MARKED_ROTATED_NAME: (rect_quad((100, 120, 140, 200)),),
+}
+MARKED_COLORS: dict[str, tuple[float, float, float]] = {
+    MARKED_HIGHLIGHT_NAME: (1.0, 1.0, 0.0),
+    MARKED_UNDERLINE_NAME: (0.0, 0.0, 1.0),
+    MARKED_STRIKEOUT_NAME: (1.0, 0.0, 0.0),
+    MARKED_SQUIGGLY_NAME: (0.5, 0.0, 0.5),
+    MARKED_FOREIGN: (1.0, 0.5, 0.0),
+    MARKED_HIDDEN_NAME: (1.0, 1.0, 0.0),
+    MARKED_ROTATED_NAME: (0.0, 1.0, 0.0),
+}
+
+
+def make_marked_pdf(path: Path) -> Path:
+    """Two Letter pages of ``TEXT_LINES`` with text markups. Page 1, in /Annots order: a
+    two-quad highlight, an underline, a strike-out (``MARKED_STRIKEOUT_OPACITY``), a
+    squiggly (all with uuid /NM), a foreign Adobe-like highlight (no /NM, no /AP; /T, /Contents,
+    /CA ``MARKED_FOREIGN_OPACITY``) and a hidden highlight (/F 6). Page 2 (/Rotate 90,
+    ``TEXT_CROPBOX``): one highlight. Quads ``MARKED_QUADS``, colours ``MARKED_COLORS``."""
+    doc = pymupdf.open()
+    for _ in range(2):
+        page = doc.new_page(width=TEXT_PAGE_SIZE[0], height=TEXT_PAGE_SIZE[1])
+        for text, origin in TEXT_LINES:
+            page.insert_text(origin, text, fontsize=TEXT_FONT_SIZE, fontname="helv")
+    del page
+
+    def markup(page: pymupdf.Page, adder: str, name: str, opacity: float = 1.0) -> int:
+        quads = [
+            pymupdf.Quad(*(pymupdf.Point(q[i], q[i + 1]) for i in range(0, 8, 2)))
+            * page.derotation_matrix
+            for q in MARKED_QUADS[name]
+        ]
+        a = getattr(page, adder)(quads=quads)
+        doc.xref_set_key(a.xref, "NM", pymupdf.get_pdf_str(name))
+        a.set_colors(stroke=MARKED_COLORS[name])
+        if opacity < 1.0:
+            a.set_opacity(opacity)
+        a.update()
+        return a.xref
+
+    page = doc[0]
+    markup(page, "add_highlight_annot", MARKED_HIGHLIGHT_NAME)
+    markup(page, "add_underline_annot", MARKED_UNDERLINE_NAME)
+    markup(page, "add_strikeout_annot", MARKED_STRIKEOUT_NAME, MARKED_STRIKEOUT_OPACITY)
+    markup(page, "add_squiggly_annot", MARKED_SQUIGGLY_NAME)
+    page_ref = doc.page_xref(0)
+    height = TEXT_PAGE_SIZE[1]
+    (q,) = MARKED_QUADS[MARKED_FOREIGN]
+    pdf_points = " ".join(f"{q[i]:g} {height - q[i + 1]:g}" for i in range(0, 8, 2))
+    r, g, b = MARKED_COLORS[MARKED_FOREIGN]
+    foreign = doc.get_new_xref()
+    doc.update_object(
+        foreign,
+        f"<</Type/Annot/Subtype/Highlight/Rect[{q[0]:g} {height - q[5]:g} {q[2]:g} "
+        f"{height - q[1]:g}]/QuadPoints[{pdf_points}]/C[{r:g} {g:g} {b:g}]"
+        f"/CA {MARKED_FOREIGN_OPACITY:g}/F 4/T{pymupdf.get_pdf_str(MARKED_FOREIGN_AUTHOR)}"
+        f"/Contents{pymupdf.get_pdf_str(MARKED_FOREIGN_CONTENTS)}/P {page_ref} 0 R>>",
+    )
+    annots = doc.xref_get_key(page_ref, "Annots")[1].strip()
+    doc.xref_set_key(page_ref, "Annots", annots[:-1] + f" {foreign} 0 R]")
+    page = doc[0]
+    hidden = markup(page, "add_highlight_annot", MARKED_HIDDEN_NAME)
+    doc.xref_set_key(hidden, "F", "6")
+    page2 = doc[1]
+    page2.set_cropbox(pymupdf.Rect(TEXT_CROPBOX))
+    page2.set_rotation(90)
+    markup(page2, "add_highlight_annot", MARKED_ROTATED_NAME)
+    doc.save(path)
+    doc.close()
+    return path

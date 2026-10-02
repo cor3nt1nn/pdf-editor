@@ -314,7 +314,7 @@ class AnnotToolBase(Tool):
         px = _viewport_pos(event)
         handle = self._handle_at(page, pos)
         current = self.selection.current
-        if handle is not None and current is not None:
+        if handle is not None and current is not None and current.movable:
             self._drag = _Drag(_Mode.RESIZE, current, pos, px, handle=handle)
             return True
         info = self.annot_at(page, pos)
@@ -357,6 +357,8 @@ class AnnotToolBase(Tool):
             moved = _viewport_pos(event) - drag.start_px
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
+            if not drag.info.movable:
+                return True  # a text markup stays on its text (never moved)
             drag.mode = _Mode.MOVE
         delta = pos - drag.start
         rect = drag.info.rect

@@ -869,10 +869,10 @@ class PdfDocument(QObject):
     def _clear_widget_cache(self, *_args: object) -> None:
         self._widget_cache.clear()
 
-    # -- annotations (FreeText text boxes and stamps, signatures) -----------
+    # -- annotations (FreeText text boxes and stamps, signatures, markups) --
     def annots(self, i: int) -> list[AnnotInfo]:
-        """Visible FreeText annotations and signatures of page ``i`` (in /Annots order),
-        cached like :meth:`widgets` (same drop rules).
+        """Visible FreeText annotations, signatures and text markups of page ``i`` (in
+        /Annots order), cached like :meth:`widgets` (same drop rules).
 
         Identity is ``(page, name)``. Reading never modifies the document: an annotation
         without a unique /NM has a synthetic name (``annotations.is_synthetic``) valid
@@ -939,8 +939,8 @@ class PdfDocument(QObject):
             raise AnnotError("annotations are not permitted by this document")
 
     def add_annot(self, spec: AnnotSpec, *, fit_height: bool = False) -> AnnotInfo:
-        """Create a FreeText annotation or signature (``spec.name`` "" = new uuid4).
-        Emits page_changed.
+        """Create a FreeText annotation, signature or text markup (``spec.name`` "" =
+        new uuid4; a markup needs ``spec.quads``, page space). Emits page_changed.
 
         ``fit_height``: a text box's height then hugs its wrapped text; otherwise
         ``spec.rect`` is used as is. A signature (``spec.image`` required, already turned
@@ -1033,11 +1033,14 @@ class PdfDocument(QObject):
         color: tuple[float, float, float] | None = None,
         rect: QRectF | None = None,
         fit_height: bool = False,
+        opacity: float | None = None,
     ) -> AnnotInfo:
         """Change annotation ``name`` on ``page`` (see :func:`annotations.update_annot`;
-        ``rect`` in page space) and return its new snapshot. Emits page_changed.
+        ``rect`` in page space; a text markup only takes ``color`` and ``opacity``) and
+        return its new snapshot. Emits page_changed.
 
-        Raises :class:`AnnotError` if it is gone or cannot be changed (locked).
+        Raises :class:`AnnotError` if it is gone or cannot be changed (locked, or a
+        markup given text, rect or fit_height).
         """
         self._check_index(page)
         self._check_annotate()
@@ -1053,6 +1056,7 @@ class PdfDocument(QObject):
                     color=color,
                     rect=rect,
                     fit_height=fit_height,
+                    opacity=opacity,
                 )
             except LookupError as exc:
                 raise AnnotError(f"annotation {name!r} not found on page {page}") from exc
