@@ -18,6 +18,11 @@ Characters are addressed by :class:`CharRef` (flat index in content order + flat
 index). Selection ranges are inclusive and order-agnostic: ``range_quads(a, b)`` and
 ``chars_between(a, b)`` accept ``a`` after ``b``. Invisible text is selectable like any
 other; :meth:`PageText.is_invisible` tells it apart (M7 refuses editing it).
+
+Coincident duplicate text (fake bold) stays in the model, every copy as its own chars
+(M7 rewrites each copy, :meth:`PageText.twins_of`); :attr:`PageText.duplicates` names the
+second and later copies, which ``dedupe=True`` queries (selection, Copy Text, markups)
+leave out.
 """
 
 from __future__ import annotations
@@ -39,6 +44,9 @@ log = logging.getLogger(__name__)
 #: Default reach of :meth:`PageText.hit` (points): a point this far from a line (above,
 #: below or past its ends) still hits it.
 HIT_TOLERANCE = 6.0
+#: Two chars this close (points) with the same text are coincident duplicates (fake bold:
+#: the same text drawn twice at the same place), see :meth:`PageText.twins_of`.
+TWIN_TOLERANCE_PT = 0.1
 
 #: rawdict block type of text blocks (1 = image).
 _TEXT_BLOCK = 0
@@ -398,16 +406,20 @@ class PageText:
                 out.append(CharRef(i, char_line[i]))
         return out
 
-    def range_quads(self, a: CharRef | int, b: CharRef | int) -> list[Quad]:
+    def range_quads(
+        self, a: CharRef | int, b: CharRef | int, *, dedupe: bool = False
+    ) -> list[Quad]:
         """One quad per line covering chars ``a``..``b`` inclusive (either order): the
         union of the selected chars' quads in the line's frame (extents along its writing
         direction and its normal), so it is non-rectangular in page space for slanted text
         and covers right-to-left runs, whose chars come in logical order with boxes
-        running right to left, and mixed-direction lines."""
+        running right to left, and mixed-direction lines. With ``dedupe`` the
+        :attr:`duplicates` are left out (a line of duplicates only has no quad)."""
         i, j = sorted((_index(a), _index(b)))
         if not self.chars:
             return []
         _, _, char_line, starts = self._flat
+        dups = self.duplicates if dedupe else frozenset()
         out: list[Quad] = []
         for k in range(char_line[i], char_line[j] + 1):
             first = max(i, starts[k])
@@ -415,23 +427,75 @@ class PageText:
             if first > last:
                 continue
             g = self._geoms[k]
-            s0, s1 = first - starts[k], last - starts[k] + 1
-            out.append(
-                _frame_quad(
-                    g.d,
-                    g.n,
-                    (min(g.lo[s0:s1]), max(g.hi[s0:s1])),
-                    (min(g.top[s0:s1]), max(g.bottom[s0:s1])),
-                )
-            )
+            if dups and any(c in dups for c in range(first, last + 1)):
+                keep = [c - starts[k] for c in range(first, last + 1) if c not in dups]
+                if not keep:
+                    continue
+                along = (min(g.lo[c] for c in keep), max(g.hi[c] for c in keep))
+                across = (min(g.top[c] for c in keep), max(g.bottom[c] for c in keep))
+            else:
+                s0, s1 = first - starts[k], last - starts[k] + 1
+                along = (min(g.lo[s0:s1]), max(g.hi[s0:s1]))
+                across = (min(g.top[s0:s1]), max(g.bottom[s0:s1]))
+            out.append(_frame_quad(g.d, g.n, along, across))
         return out
 
-    def text_of(self, chars: Iterable[CharRef | int]) -> str:
-        """Text of ``chars`` in content order (duplicates once), ``\\n`` between lines."""
+    # -- coincident duplicates (fake bold) -----------------------------------------------
+    @cached_property
+    def _origin_index(self) -> dict[tuple[str, float, float], list[int]]:
+        out: dict[tuple[str, float, float], list[int]] = {}
+        for i, ch in enumerate(self.chars):
+            out.setdefault(_origin_key(ch), []).append(i)
+        return out
+
+    def twins_of(self, ref: CharRef | int) -> list[int]:
+        """Flat indexes of the other chars drawn at the same place as ``ref`` (same text,
+        origin within :data:`TWIN_TOLERANCE_PT`), in content order: the copies of fake
+        bold text. Font and size are not compared (callers decide)."""
+        i = _index(ref)
+        ch = self.chars[i]
+        c, x, y = _origin_key(ch)
+        index = self._origin_index
+        ox, oy = ch.origin.x(), ch.origin.y()
+        out: list[int] = []
+        # A coincident char may round to a neighbouring 0.1 pt cell.
+        for dx in (-0.1, 0.0, 0.1):
+            for dy in (-0.1, 0.0, 0.1):
+                for j in index.get((c, round(x + dx, 1), round(y + dy, 1)), ()):
+                    o = self.chars[j].origin
+                    if j != i and math.hypot(o.x() - ox, o.y() - oy) <= TWIN_TOLERANCE_PT:
+                        out.append(j)
+        return sorted(out)
+
+    @cached_property
+    def duplicates(self) -> frozenset[int]:
+        """Flat indexes of the chars that repeat an earlier char of the same font and size
+        at the same place (:meth:`twins_of`): the second and later copies of fake bold.
+        Selection, Copy Text and new markups leave them out (``dedupe=True``); the model
+        keeps them."""
+        spans = self._flat[1]
+        out: set[int] = set()
+        for i in range(len(self.chars)):
+            s = spans[i]
+            for j in self.twins_of(i):
+                if j >= i:
+                    break
+                t = spans[j]
+                if t.font == s.font and abs(t.size - s.size) <= 0.01:
+                    out.add(i)
+                    break
+        return frozenset(out)
+
+    def text_of(self, chars: Iterable[CharRef | int], *, dedupe: bool = False) -> str:
+        """Text of ``chars`` in content order (each once), ``\\n`` between lines; with
+        ``dedupe`` the :attr:`duplicates` (fake bold copies) are left out."""
         all_chars, _, char_line, _ = self._flat
         parts: list[str] = []
         prev_line: int | None = None
-        for i in sorted({_index(c) for c in chars}):
+        indexes = {_index(c) for c in chars}
+        if dedupe:
+            indexes -= self.duplicates
+        for i in sorted(indexes):
             if prev_line is not None and char_line[i] != prev_line:
                 parts.append("\n")
             parts.append(all_chars[i].c)
@@ -618,6 +682,11 @@ def _own_content_chars(page: pymupdf.Page) -> set[tuple[str, float, float]]:
 # -- helpers ------------------------------------------------------------------------------
 def _index(ref: CharRef | int) -> int:
     return ref.index if isinstance(ref, CharRef) else int(ref)
+
+
+def _origin_key(ch: Char) -> tuple[str, float, float]:
+    """A char's text and origin rounded to 0.1 pt (the coincident-duplicate key)."""
+    return ch.c, round(ch.origin.x(), 1), round(ch.origin.y(), 1)
 
 
 def _qrect(r: Sequence[float]) -> QRectF:

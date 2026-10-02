@@ -60,13 +60,13 @@ TEXT_HIT_TOLERANCE_PX = 8.0
 #: page text model keeps one char per glyph: M7 needs it).
 _LIGATURES = str.maketrans(
     {
-        "ﬀ": "ff",
-        "ﬁ": "fi",
-        "ﬂ": "fl",
-        "ﬃ": "ffi",
-        "ﬄ": "ffl",
-        "ﬅ": "st",  # long s + t
-        "ﬆ": "st",
+        "\ufb00": "ff",
+        "\ufb01": "fi",
+        "\ufb02": "fl",
+        "\ufb03": "ffi",
+        "\ufb04": "ffl",
+        "\ufb05": "st",  # long s + t
+        "\ufb06": "st",
     }
 )
 
@@ -77,7 +77,7 @@ def no_text_message() -> str:
 
 def markup_text(document: PdfDocument, info: AnnotInfo) -> str:
     """The page text under the markup ``info``: the characters whose box centre lies in
-    one of its quads, in content order (newline between lines)."""
+    one of its quads, in content order (newline between lines), fake bold copies once."""
     try:
         pt = document.page_text(info.page)
     except (DocumentError, IndexError):
@@ -85,7 +85,7 @@ def markup_text(document: PdfDocument, info: AnnotInfo) -> str:
     refs: set[CharRef] = set()
     for quad in info.quads:
         refs.update(pt.chars_in_rect(quad))
-    return pt.text_of(refs)
+    return pt.text_of(refs, dedupe=True) or pt.text_of(refs)
 
 
 def expand_ligatures(text: str) -> str:

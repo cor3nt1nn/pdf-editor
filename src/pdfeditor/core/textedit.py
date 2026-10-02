@@ -85,7 +85,7 @@ MAX_CONTENT_BYTES = MAX_CONTENT_MB * 1024 * 1024
 #: Rounds of the collateral loop (each one grows the run by the chars it caught).
 MAX_COLLATERAL_ROUNDS = 3
 #: Two chars this close (points) with the same text are coincident duplicates.
-TWIN_TOLERANCE_PT = 0.1
+TWIN_TOLERANCE_PT = pagetext.TWIN_TOLERANCE_PT
 
 _REDACT_KW = {
     "images": pymupdf.PDF_REDACT_IMAGE_NONE,
@@ -326,35 +326,18 @@ def _char_key(ch: Char) -> tuple[str, float, float]:
     return ch.c, round(ch.origin.x(), 1), round(ch.origin.y(), 1)
 
 
-def _near(by_key: dict[tuple[str, float, float], list[int]], ch: Char) -> list[int]:
-    """Indexes keyed like ``ch`` or in one of the eight neighbouring 0.1 pt cells (a
-    coincident char may round to the other side of a cell boundary)."""
-    c, x, y = _char_key(ch)
-    out: list[int] = []
-    for dx in (-0.1, 0.0, 0.1):
-        for dy in (-0.1, 0.0, 0.1):
-            out.extend(by_key.get((c, round(x + dx, 1), round(y + dy, 1)), ()))
-    return out
-
-
 def _twins(text: PageText, indexes: Sequence[int]) -> tuple[int, list[int]]:
     """``(copies, twin indexes)``: coincident duplicates of the run's chars (same text,
-    origin within :data:`TWIN_TOLERANCE_PT`, same font and size) in other spans. Every
-    duplicating span must double the whole run, else ``EditReason.DUPLICATE``."""
+    origin within :data:`TWIN_TOLERANCE_PT`, same font and size) in other spans, found
+    by :meth:`PageText.twins_of` (also behind the selection's :attr:`PageText.duplicates`).
+    Every duplicating span must double the whole run, else ``EditReason.DUPLICATE``."""
     run_set = set(indexes)
     span = text.span_of(indexes[0])
-    by_key: dict[tuple[str, float, float], list[int]] = {}
-    for i, ch in enumerate(text.chars):
-        if i not in run_set:
-            by_key.setdefault(_char_key(ch), []).append(i)
     groups: dict[int, set[int]] = {}  # id(twin span) -> run indexes it doubles
     twins: list[int] = []
     for i in indexes:
-        ch = text.chars[i]
-        for j in _near(by_key, ch):
-            other = text.chars[j]
-            d = math.hypot(other.origin.x() - ch.origin.x(), other.origin.y() - ch.origin.y())
-            if d > TWIN_TOLERANCE_PT:
+        for j in text.twins_of(i):
+            if j in run_set:
                 continue
             twin_span = text.span_of(j)
             if twin_span.font != span.font or abs(twin_span.size - span.size) > 0.01:

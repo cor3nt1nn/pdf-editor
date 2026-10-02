@@ -124,16 +124,19 @@ class TextSelection(QObject):
         cache = self._quads_cache
         if cache is not None and cache[0] is pt and cache[1] == a and cache[2] == f:
             return cache[3]
-        quads = pt.range_quads(a, f)
+        # Fake bold copies are left out, unless the range holds nothing else.
+        quads = pt.range_quads(a, f, dedupe=True) or pt.range_quads(a, f)
         self._quads_cache = (pt, a, f, quads)
         return quads
 
     def text(self) -> str:
-        """The selected text (``\\n`` between lines; invisible OCR text included)."""
+        """The selected text (``\\n`` between lines; invisible OCR text included;
+        fake bold copies once, :attr:`PageText.duplicates`)."""
         pt = self.page_text()
         if pt is None or self._anchor is None or self._focus is None:
             return ""
-        return pt.text_of(pt.chars_between(self._anchor, self._focus))
+        refs = pt.chars_between(self._anchor, self._focus)
+        return pt.text_of(refs, dedupe=True) or pt.text_of(refs)
 
     # -- changes -----------------------------------------------------------------------
     def set(self, page: int, anchor: CharRef | int, focus: CharRef | int) -> None:

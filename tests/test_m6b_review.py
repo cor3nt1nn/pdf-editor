@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+import textedit_fixtures
 from PySide6.QtCore import QRectF
 
 from pdfeditor.core import pagetext
@@ -148,3 +149,62 @@ def test_foreign_quad_point_order_is_normalised(tmp_path, order, rotation):
         assert markup_text(doc, info) == "The"
     finally:
         doc.close()
+
+
+# -- 8: fake bold (coincident duplicate text) once in selection, copy and markups ----------
+@textedit_fixtures.needs_text_fonts
+def test_fake_bold_is_deduplicated_for_selection_only(tmp_path):
+    from pdfeditor.core.annotations import AnnotKind, markup_spec
+    from pdfeditor.core.document import PdfDocument
+    from pdfeditor.ui.tools.markup_tools import markup_text
+
+    path = textedit_fixtures.make_fake_bold_pdf(tmp_path / "bold.pdf")
+    doc = PdfDocument.open(str(path))
+    try:
+        pt = doc.page_text(0)
+        line = textedit_fixtures.FAKE_BOLD_LINE
+        n = len(line)
+        # The model keeps both copies (M7 rewrites each one).
+        assert [ln.text.replace(chr(0xA0), " ") for ln in pt.lines][:2] == [line, line]
+        assert pt.twins_of(0) == [n]
+        assert pt.twins_of(n) == [0]
+        dups = pt.duplicates
+        assert set(range(n, 2 * n)) <= dups
+        assert not dups & set(range(n))
+        word = textedit_fixtures.PART_BOLD_WORD
+        assert len(dups) == 2 * n + len(word) - n  # the doubled word's second copy too
+        last = len(pt.chars) - 1
+        both = (line + "\n" + textedit_fixtures.PART_BOLD_LINE).replace(" ", chr(0xA0))
+        assert pt.text_of(pt.chars_between(0, last), dedupe=True) == both
+        assert len(pt.text_of(pt.chars_between(0, last))) > len(both)
+        assert len(pt.range_quads(0, last, dedupe=True)) == 2
+        assert len(pt.range_quads(0, last)) == 4
+        # Only duplicates selected: nothing left with dedupe (callers fall back).
+        assert pt.range_quads(n, 2 * n - 1, dedupe=True) == []
+        # A markup over the whole page text reads each line once.
+        info = doc.add_annot(
+            markup_spec(0, AnnotKind.HIGHLIGHT, pt.range_quads(0, last, dedupe=True), (1, 1, 0))
+        )
+        assert markup_text(doc, info) == both
+    finally:
+        doc.close()
+
+
+@textedit_fixtures.needs_text_fonts
+def test_selection_of_fake_bold(qtbot, tmp_path):
+    from pdfeditor.ui.document_view import DocumentView
+
+    view = DocumentView()
+    qtbot.addWidget(view)
+    try:
+        view.open(str(textedit_fixtures.make_fake_bold_pdf(tmp_path / "b.pdf")))
+        sel = view.text_selection
+        n = len(textedit_fixtures.FAKE_BOLD_LINE)
+        sel.set(0, 0, 2 * n - 1)  # the line and its copy
+        assert sel.text().replace(chr(0xA0), " ") == textedit_fixtures.FAKE_BOLD_LINE
+        assert len(sel.quads()) == 1
+        sel.set(0, n, 2 * n - 1)  # the copy alone (not reachable by the mouse)
+        assert sel.text().replace(chr(0xA0), " ") == textedit_fixtures.FAKE_BOLD_LINE
+        assert len(sel.quads()) == 1
+    finally:
+        view.shutdown()
