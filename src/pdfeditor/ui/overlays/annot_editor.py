@@ -198,6 +198,12 @@ class AnnotTextEditor(FloatingEditorOverlay):
     def _on_document_switch(self) -> None:
         self.close()
 
+    def _remap_anchor(self, anchor: EditorAnchor, page: int) -> EditorAnchor:
+        info = anchor.info
+        if info is not None:
+            info = replace(info, page=page)
+        return replace(anchor, page=page, info=info)
+
     def _key_press(self, event: QKeyEvent) -> bool:
         if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
             self.commit()

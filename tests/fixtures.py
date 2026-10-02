@@ -1381,3 +1381,57 @@ def make_outlined_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M6a-T6: page tree and large documents --------------------------------------------
+NESTED_LETTERS = "ABCDEF"
+
+
+def make_nested_pages_pdf(path: Path) -> Path:
+    """Six 300x400 pages lettered ``NESTED_LETTERS`` whose page tree has intermediate
+    ``/Pages`` nodes: root → [N1 → [A, B], C, N2 → [D, N3 → [E, F]]] (depth 3)."""
+    doc = pymupdf.open()
+    for letter in NESTED_LETTERS:
+        doc.new_page(width=300, height=400).insert_text((50, 50), letter, fontsize=30)
+    root = int(doc.xref_get_key(doc.pdf_catalog(), "Pages")[1].split()[0])
+    pages = [doc.page_xref(i) for i in range(len(NESTED_LETTERS))]
+    n1, n2, n3 = doc.get_new_xref(), doc.get_new_xref(), doc.get_new_xref()
+    doc.update_object(
+        n1, f"<</Type/Pages/Parent {root} 0 R/Kids[{pages[0]} 0 R {pages[1]} 0 R]/Count 2>>"
+    )
+    doc.update_object(
+        n3, f"<</Type/Pages/Parent {n2} 0 R/Kids[{pages[4]} 0 R {pages[5]} 0 R]/Count 2>>"
+    )
+    doc.update_object(
+        n2, f"<</Type/Pages/Parent {root} 0 R/Kids[{pages[3]} 0 R {n3} 0 R]/Count 3>>"
+    )
+    doc.xref_set_key(root, "Kids", f"[{n1} 0 R {pages[2]} 0 R {n2} 0 R]")
+    for xref, parent in zip(pages, (n1, n1, root, n2, n3, n3), strict=True):
+        doc.xref_set_key(xref, "Parent", f"{parent} 0 R")
+    doc.save(path, garbage=0)
+    doc.close()
+    return path
+
+
+MANY_IMAGES_PAGES = 300
+MANY_IMAGES_SIDE = 200
+
+
+def make_many_images_pdf(
+    path: Path, count: int = MANY_IMAGES_PAGES, side: int = MANY_IMAGES_SIDE
+) -> Path:
+    """``count`` pages, each with a distinct incompressible RGB image of ``side`` pixels
+    a side: about ``count × side² × 3`` bytes (34 MB with the defaults, more than the
+    snapshot store keeps in memory). Deterministic (seeded)."""
+    import random
+
+    rnd = random.Random(1)
+    doc = pymupdf.open()
+    for n in range(count):
+        page = doc.new_page(width=300, height=400)
+        page.insert_text((20, 310), f"Image {n + 1}", fontsize=12)
+        pix = pymupdf.Pixmap(pymupdf.csRGB, side, side, rnd.randbytes(side * side * 3), 0)
+        page.insert_image(pymupdf.Rect(20, 20, 280, 280), pixmap=pix)
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path

@@ -10,6 +10,7 @@ never touches the document: the owner of the result pushes the undo command.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import shiboken6
@@ -60,7 +61,10 @@ class FloatingEditorOverlay(QObject):
     (``is_open`` is False, so a handler may open another editor). The overlay commits on
     the document's ``structure_changed``/``path_changed``/``reloaded`` and on
     ``page_changed`` of its page when that page's size or rotation changed (else it
-    repositions).
+    repositions). ``pages_remapped`` (right before ``structure_changed``) first moves the
+    anchor to its page's new index (:meth:`_remap_anchor`), so the committed anchor
+    names the right page after pages were inserted, deleted or moved; an editor whose
+    page is gone closes silently (there is nothing left to write the value to).
     """
 
     committed = Signal(object, object)  # (anchor, value)
@@ -129,6 +133,7 @@ class FloatingEditorOverlay(QObject):
         if old is not None:
             try:
                 old.page_changed.disconnect(self._on_page_changed)
+                old.pages_remapped.disconnect(self._on_pages_remapped)
                 old.structure_changed.disconnect(self._commit_on_change)
                 old.path_changed.disconnect(self._commit_on_change)
                 old.reloaded.disconnect(self._commit_on_change)
@@ -137,6 +142,7 @@ class FloatingEditorOverlay(QObject):
         self._document = document
         if document is not None:
             document.page_changed.connect(self._on_page_changed)
+            document.pages_remapped.connect(self._on_pages_remapped)
             document.structure_changed.connect(self._commit_on_change)
             document.path_changed.connect(self._commit_on_change)
             document.reloaded.connect(self._commit_on_change)
@@ -232,6 +238,11 @@ class FloatingEditorOverlay(QObject):
     def _before_teardown(self, editor: QWidget) -> None:
         """Release widget-specific connections (the editor is still valid)."""
 
+    def _remap_anchor(self, anchor: Any, page: int) -> Any:
+        """``anchor`` with its page index replaced by ``page`` (a frozen dataclass with a
+        ``page`` field by default)."""
+        return replace(anchor, page=page)
+
     def _key_press(self, event: QKeyEvent) -> bool:
         """Default keys: Enter commits (Ctrl+Enter in a QPlainTextEdit), Escape cancels."""
         if self._popup_open():
@@ -301,6 +312,21 @@ class FloatingEditorOverlay(QObject):
     # -- slots --------------------------------------------------------------------------
     def _commit_on_change(self, *_args: object) -> None:
         self.commit()
+
+    def _on_pages_remapped(self, mapping: object) -> None:
+        """Move the anchor to its page's new index (``structure_changed`` then commits
+        it); close silently when the page is gone."""
+        anchor = self._anchor
+        if anchor is None:
+            return
+        old_to_new = list(mapping)  # type: ignore[call-overload]
+        page = anchor.page
+        new = old_to_new[page] if 0 <= page < len(old_to_new) else None
+        if new is None:
+            log.info("closing the editor of page %d: the page is gone", page + 1)
+            self.close()
+        elif new != page:
+            self._anchor = self._remap_anchor(anchor, new)
 
     def _on_page_changed(self, i: int) -> None:
         anchor = self._anchor

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -182,6 +183,11 @@ class DeletePagesCommand(_ImmediateCommand):
     come back exactly. Later redos delete again (the document is then in the same state
     as at the first redo). Raises :class:`PageError`: "last_page" when every page would
     go, "snapshot" when the undo copy cannot be stored or read back (nothing deleted).
+
+    The undo copy lives exactly as long as the command: ``QUndoStack`` deletes commands
+    without undoing them (the redo branch dropped by a push after undo, ``clear()``),
+    and shiboken then releases the Python object, whose ``weakref.finalize`` discards
+    the copy from the store (the store's own ``clear()`` covers a closed document).
     """
 
     def __init__(self, doc: PdfDocument, indexes: Sequence[int]) -> None:
@@ -210,7 +216,7 @@ class DeletePagesCommand(_ImmediateCommand):
             ids = doc.page_ids()
             data = doc.snapshot()
             try:
-                self.snapshot_id = doc.snapshots.put(data)
+                self.snapshot_id = self._store(data)
             except OSError as exc:
                 raise PageError(f"no room for the undo copy: {exc}", "snapshot") from exc
             self.saved_ids = ids
@@ -221,6 +227,15 @@ class DeletePagesCommand(_ImmediateCommand):
                 doc.snapshots.discard(self.snapshot_id)
                 self.snapshot_id = self.saved_ids = None
             raise
+
+    def _store(self, data: bytes) -> int:
+        """Put ``data`` in the document's snapshot store; the copy is discarded when this
+        command is garbage-collected (deleted by the undo stack). Raises OSError."""
+        store = self.doc.snapshots
+        sid = store.put(data)
+        finalizer = weakref.finalize(self, store.discard, sid)
+        finalizer.atexit = False
+        return sid
 
     def _undo(self) -> None:
         if self.snapshot_id is None or self.saved_ids is None:

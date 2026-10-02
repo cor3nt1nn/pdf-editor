@@ -447,6 +447,86 @@ Run it on copies of your own documents, with the zip built by `scripts\build_exe
    `PDFEditor.exe`: Help ▸ About shows "Portable build" and the log file path; F1 shows the
    keyboard shortcuts; Help ▸ Third-Party Licenses… shows the notice and the licence texts.
 
+## Page tools (Milestone 6a)
+
+Reorder, delete, insert, extract and split pages, with full undo. The **Pages** menu (between
+Edit and View) works on the pages selected in the thumbnail sidebar when two or more are
+selected, otherwise on the current page; a right-click on a thumbnail offers the same actions
+for the clicked pages. In the sidebar, **Ctrl+click** / **Shift+click** build a multi-selection,
+**dragging** thumbnails moves them before the drop position, and **Delete** removes the selected
+pages. Nothing asks for confirmation: every operation is one Undo step (Ctrl+Z / Ctrl+Y),
+including deletions (the document is restored exactly: annotations, links, outline and form
+fields included).
+
+| Key | Pages ▸ action |
+|---|---|
+| **Ctrl+Shift+N** | Insert Blank Page (after the current page, same size) |
+| **Ctrl+Shift+I** | Insert Pages from File… (all pages or a range such as `1-3, 7, 10-`, before/after the current page or at the end) |
+| **Ctrl+Shift+Delete** | Delete Pages |
+| **Ctrl+R** / **Ctrl+Shift+R** | Rotate Clockwise / Counterclockwise (the selected pages) |
+| **Ctrl+Shift+E** | Extract Pages… (the selected pages to a new file; the open document is unchanged) |
+| Pages ▸ Split Document… | Every *N* pages, or explicit ranges, to `name-01.pdf`, `name-02.pdf`… in a chosen folder |
+
+- **Inserting from another PDF** copies its pages with their annotations, links between the
+  copied pages and form fields; fields whose names the document already has are renamed (the
+  status bar says so). An encrypted source asks for its password. A document cannot be
+  inserted into itself.
+- **Extracted and split files** are rewritten from scratch (no earlier revisions) and keep the
+  protection of the original: a file opened with a password gives files with the same password;
+  a file restricted by its author without a password gives files with the same restrictions.
+- **Saving after a page operation** rewrites the whole file once (deleted pages leave no trace);
+  later saves are incremental again. A static XFA form loses its XFA at that save (the
+  AcroForm fields remain). Dynamic XFA forms and documents whose security settings forbid
+  assembling pages open with the Pages menu disabled; copying pages (Extract, Split) follows the
+  copy permission.
+- A document always keeps at least one page.
+
+Known limitations:
+
+- Undoing a deletion relies on a complete copy of the document taken when the pages were
+  deleted: copies stay in memory up to 32 MB in all, then in temporary files
+  (`%TEMP%\pdfeditor-undo-…`, removed when the document is closed). A copy that cannot be
+  stored (disk full) cancels the deletion with a message.
+- **Page labels** (`/PageLabels`: "i, ii, iii, 1, 2…") are not adjusted: labels are positional,
+  so after deleting, inserting or moving pages they name other pages than before; inserting at
+  the start of a document without labels adds none.
+- Outline (bookmark) entries pointing to deleted pages are kept, greyed out, instead of removed;
+  the outline of an inserted file is not merged.
+- Inserting only part of a form field spread over several pages creates an independent field;
+  inserting from an XFA form brings its AcroForm fields only.
+- A text box or stamp made by another program (no identifier) that was selected is deselected
+  when a page deletion is undone; our own annotations stay selected.
+- Reordering is by mouse only (no keyboard reorder); the thumbnails of a 300-page scan take
+  a few seconds to appear after opening.
+
+### Manual page tools checklist (Milestone 6a)
+
+Run it on copies of real documents (a scanned Cerfa, a form with fields); keep the originals.
+
+1. **Reorder**: open a scanned Cerfa of several pages, Ctrl+click two thumbnails and drag them
+   to the top: the pages move in the view and the sidebar, the title shows `*`, Ctrl+Z puts
+   them back and Ctrl+Y moves them again. Drag a single thumbnail to the end.
+2. **Delete**: select two pages and press Delete in the sidebar (and Ctrl+Shift+Delete on the
+   current page): the pages disappear, the view stays on the same page content, Ctrl+Z brings
+   them back with their stamps, text boxes and field values; deleting every page is refused.
+3. **Insert from a form**: Pages ▸ Insert Pages from File… with a PDF that has form fields,
+   range `1-2`, "After the current page": the two pages arrive with their fields fillable with
+   the Form Tool (F); if names collide, the status bar mentions renamed fields. Insert a blank
+   page (Ctrl+Shift+N) and type a text box on it.
+4. **Extract**: select three pages, Ctrl+Shift+E, save `… - pages.pdf`: the new file has
+   exactly those pages, in that order, with their field values; the open document is unchanged.
+5. **Split**: Pages ▸ Split Document…, every 2 pages into a new folder: `name-01.pdf`,
+   `name-02.pdf`… have the right page counts; running it again asks before replacing them.
+6. **Other viewers**: open the saved document, the extracted file and the split files in Adobe
+   Acrobat Reader, Edge and Chrome: pages are in the right order, fields fillable, no repair
+   prompt when closing Adobe Reader.
+7. **Undo after save**: delete a page, Ctrl+S (the save takes a moment: full rewrite), then
+   Ctrl+Z: the page is back; Ctrl+S again, reopen the file: the page is there. Rotate a page and
+   Ctrl+S: this save is immediate (incremental again).
+8. **Protected files**: a file with a user password: extracted files ask for the same password;
+   an owner-locked file without the assembling permission: the Pages menu is disabled and the
+   status bar explains why; a dynamic XFA form: idem.
+
 ## License
 
 GNU Affero General Public License v3.0 only — see [LICENSE](LICENSE).

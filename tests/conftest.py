@@ -192,3 +192,13 @@ def odd_stamps_pdf(tmp_path):
 @pytest.fixture
 def outlined_pdf(tmp_path):
     return fixtures.make_outlined_pdf(tmp_path / "outlined.pdf")
+
+
+@pytest.fixture
+def nested_pages_pdf(tmp_path):
+    return fixtures.make_nested_pages_pdf(tmp_path / "nested.pdf")
+
+
+@pytest.fixture
+def many_images_pdf(tmp_path):
+    return fixtures.make_many_images_pdf(tmp_path / "many_images.pdf")

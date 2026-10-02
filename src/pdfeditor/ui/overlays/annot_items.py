@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 from pdfeditor.core.annotations import AnnotInfo
 
 if TYPE_CHECKING:
-    from pdfeditor.core.document import PdfDocument
+    from pdfeditor.core.document import PageId, PdfDocument
     from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
@@ -173,10 +173,15 @@ class AnnotSelection(QObject):
     Owned by DocumentView (docs/M3_PLAN.md). ``select(info)`` shows an
     :class:`AnnotHandleItem` on ``info.page``; the selection is re-resolved by
     ``(page, name)`` on the page's ``page_changed`` (rect or content changed → updated;
-    gone or no longer editable → cleared) and on ``structure_changed``/``reloaded``
-    (PageItems replaced, caches dropped). ``changed()`` is emitted whenever ``current``
-    changes. ``set_document`` must be called after ``PageView.set_document`` (its slots
-    must run after the view's, which rebuilds the PageItems).
+    gone or no longer editable → cleared) and by ``(page id, name)`` on
+    ``structure_changed``/``reloaded`` (PageItems replaced, caches dropped): the page is
+    found again by the id captured at selection time (docs/M6_PLAN.md D4), so the
+    selection follows its page when pages before it are inserted, deleted or moved, and
+    is cleared when the page is gone. Undoing a page deletion reopens the document from a
+    snapshot, which makes a synthetic name (foreign annotation without /NM) stale: such a
+    selection is cleared then. ``changed()`` is emitted whenever ``current`` changes.
+    ``set_document`` must be called after ``PageView.set_document`` (its slots must run
+    after the view's, which rebuilds the PageItems).
     """
 
     changed = Signal()
@@ -186,6 +191,8 @@ class AnnotSelection(QObject):
         self._view = view
         self._document: PdfDocument | None = None
         self._current: AnnotInfo | None = None
+        # Id of the selected annotation's page (None when unknown: no document).
+        self._page_id: PageId | None = None
         self._item: AnnotHandleItem | None = None
         self._ghost: QRectF | None = None
 
@@ -212,6 +219,7 @@ class AnnotSelection(QObject):
         if self._current is None or self._current.page != info.page:
             self._ghost = None
         self._current = info
+        self._page_id = self._id_of(info.page)
         self._sync_item()
         if not same:
             self.changed.emit()
@@ -221,6 +229,7 @@ class AnnotSelection(QObject):
         if self._current is None:
             return
         self._current = None
+        self._page_id = None
         self._ghost = None
         self._remove_item()
         self.changed.emit()
@@ -282,13 +291,27 @@ class AnnotSelection(QObject):
         else:
             item.setParentItem(None)
 
+    def _id_of(self, page: int) -> PageId | None:
+        doc = self._document
+        if doc is None or not 0 <= page < doc.page_count:
+            return None
+        return doc.page_id(page)
+
     def _resolve(self) -> AnnotInfo | None:
+        """The selected annotation as the document has it now (its page found by id), or
+        None when it, its page, or its editability is gone."""
         info, doc = self._current, self._document
         if info is None or doc is None:
             return None
-        if not 0 <= info.page < min(doc.page_count, self._view.page_count):
+        page = info.page
+        if self._page_id is not None:
+            index = doc.page_index(self._page_id)
+            if index is None:
+                return None  # the page was deleted
+            page = index
+        if not 0 <= page < min(doc.page_count, self._view.page_count):
             return None
-        fresh = doc.annot(info.page, info.name)
+        fresh = doc.annot(page, info.name)
         return fresh if fresh is not None and fresh.editable else None
 
     def _refresh(self, *_args: object) -> None:

@@ -11,6 +11,8 @@ them (PyMuPDF 1.28.2, docs/M6_PLAN.md §0):
 * ``insert_pdf`` mutates its source (P5): only ever graft from a throwaway copy opened
   from an in-memory write, never from the open document.
 * ``Document.select()`` drops /AcroForm /Fields (P6): never used.
+* Intermediate page tree nodes survive every operation, but one left without kids stays
+  behind as ``/Kids [] /Count 0``: :func:`prune_empty_page_nodes` after deletions and moves.
 """
 
 from __future__ import annotations
@@ -142,6 +144,49 @@ def strip_foreign_xfa(doc: pymupdf.Document) -> bool:
     return strip_xfa(doc) is not None
 
 
+def _pages_root(doc: pymupdf.Document) -> int | None:
+    refs = _refs(_key(doc, doc.pdf_catalog(), "Pages")[1])
+    return refs[0] if refs else None
+
+
+def prune_empty_page_nodes(doc: pymupdf.Document) -> int:
+    """Remove the intermediate ``/Pages`` nodes left without kids; returns how many.
+
+    MuPDF keeps an empty node (``/Kids [] /Count 0``) when every page under an
+    intermediate node of the page tree is deleted or moved away. Such a node is valid for
+    MuPDF and pypdf, but some readers choke on it, so it is dropped from its parent's
+    /Kids (the counts need no change). The root node is always kept.
+    """
+    root = _pages_root(doc)
+    if root is None:
+        return 0
+    removed = 0
+    seen = {root}
+
+    def keep(xref: int) -> bool:
+        nonlocal removed
+        kind, kids = _key(doc, xref, "Kids")
+        if kind != "array":
+            return True  # a page (or a node we do not understand): keep it
+        old = _refs(kids)
+        kept: list[int] = []
+        for kid in old:
+            if kid in seen:
+                continue  # repeated or cyclic reference
+            seen.add(kid)
+            if keep(kid):
+                kept.append(kid)
+        if kept != old:
+            removed += len(old) - len(kept)
+            doc.xref_set_key(xref, "Kids", _array(kept))
+        return bool(kept) or xref == root
+
+    keep(root)
+    if removed:
+        log.debug("removed %d empty page tree nodes", removed)
+    return removed
+
+
 def field_names(doc: pymupdf.Document, pages: Iterable[int] | None = None) -> set[str]:
     """Fully qualified names of the fields shown on ``pages`` (default: every page)."""
     indexes = range(doc.page_count) if pages is None else pages
@@ -178,6 +223,7 @@ def delete_pages(doc: pymupdf.Document, indexes: Iterable[int]) -> int:
         raise ValueError("a document must keep at least one page")
     doc.delete_pages(targets)
     prune_fields(doc)
+    prune_empty_page_nodes(doc)
     return len(targets)
 
 
@@ -196,6 +242,7 @@ def reorder(doc: pymupdf.Document, new_order: Sequence[int]) -> None:
             doc.move_page(pos, target)
             current.insert(target, current.pop(pos))
     assert current == order
+    prune_empty_page_nodes(doc)
 
 
 def insert_blank(doc: pymupdf.Document, index: int, width: float, height: float) -> None:
