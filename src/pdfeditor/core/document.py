@@ -223,6 +223,8 @@ class PdfDocument(QObject):
         self._can_fill_forms = False
         self._can_annotate = False
         self._xfa_kind = XfaKind.NONE
+        # Classified STATIC at some point of this session (Deviation 104).
+        self._xfa_was_static = False
         self._form_edited = False
         self._can_assemble = False
         self._can_extract = False
@@ -401,8 +403,11 @@ class PdfDocument(QObject):
                 return
             self._is_form = bool(doc.is_form_pdf)
             try:
-                was_static = self._xfa_kind is XfaKind.STATIC
+                # A static form stays static, also when an undo copy taken before a save
+                # stripped its /XFA brings it back without fields (Deviations 93, 104).
+                was_static = self._xfa_kind is XfaKind.STATIC or self._xfa_was_static
                 self._xfa_kind = detect_xfa(doc, was_static=was_static)
+                self._xfa_was_static |= self._xfa_kind is XfaKind.STATIC
             except Exception:  # malformed AcroForm: treat as plain PDF
                 log.warning("could not inspect XFA", exc_info=True)
                 self._xfa_kind = XfaKind.NONE

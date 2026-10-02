@@ -601,3 +601,33 @@ def test_insert_into_fieldless_static_xfa_keeps_its_xfa(static_xfa_pdf, lo_form_
         assert doc.xfa_kind is XfaKind.STATIC
     finally:
         doc.close()
+
+
+def test_static_xfa_stays_static_after_a_save_stripped_it(static_xfa_pdf, tmp_path) -> None:
+    """Fuzzer (after B2): a save strips the /XFA of a restructured static form; undoing a
+    deletion then restores a copy with /XFA but without fields: still STATIC, so the
+    remaining undo steps (page operations) work."""
+    doc = PdfDocument.open(static_xfa_pdf)
+    try:
+        stack = QUndoStack()
+        for make in (
+            lambda: InsertBlankPageCommand(doc, 1, QSizeF(300, 300)),
+            lambda: DeletePagesCommand(doc, [0]),  # the field page
+            lambda: InsertBlankPageCommand(doc, 0, QSizeF(300, 300)),
+            lambda: DeletePagesCommand(doc, [0]),
+        ):
+            cmd = make()
+            cmd.apply_now()
+            stack.push(cmd)
+        assert doc.strip_xfa()  # what DocumentView._prepare_save does at the save
+        doc.save_as(tmp_path / "saved.pdf")
+        assert doc.xfa_kind is XfaKind.NONE
+        while stack.canUndo():
+            index = stack.index()
+            stack.undo()
+            command = stack.command(index - 1)
+            assert command.error is None, command.error
+            assert doc.xfa_kind is not XfaKind.DYNAMIC
+        assert doc.page_count == 1 and doc.xfa_kind is XfaKind.STATIC
+    finally:
+        doc.close()
