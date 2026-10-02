@@ -373,11 +373,20 @@ class InsertPagesCommand(_InsertCommand):
         self.had_calc_order = doc.has_calc_order
         self.count = int(count)
         self.password = password
+        # New names of the inserted fields that collided (set by the first redo, reused
+        # by later ones so that commands pushed after this one find their fields).
+        self.field_names: list[str] | None = None
 
     def _redo(self) -> None:
         self.page_ids = self.doc.insert_pages(
-            self.data, self._position(), password=self.password, page_ids=self.page_ids
+            self.data,
+            self._position(),
+            password=self.password,
+            page_ids=self.page_ids,
+            field_names=self.field_names,
         )
+        if self.field_names is None:
+            self.field_names = [new for _old, new in self.doc.last_insert_field_renames]
 
     def _undo(self) -> None:
         if self.page_ids:

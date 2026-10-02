@@ -55,13 +55,47 @@ def _array(xrefs: Iterable[int]) -> str:
     return "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]"
 
 
+def annotation_xrefs(doc: pymupdf.Document) -> set[int]:
+    """Xrefs of every annotation of every page, read from the pages' /Annots arrays
+    (loading each ``Page`` for ``annot_xrefs()`` costs ~1 ms per page)."""
+    out: set[int] = set()
+    for i in range(doc.page_count):
+        kind, value = _key(doc, doc.page_xref(i), "Annots")
+        if kind == "xref":  # an indirect array
+            refs = _refs(value)
+            value = doc.xref_object(refs[0], compressed=True) if refs else ""
+        elif kind != "array":
+            continue
+        out.update(_refs(value))
+    return out
+
+
 def _is_widget(doc: pymupdf.Document, xref: int) -> bool:
     """``xref`` is a widget annotation (possibly merged with its field): /Subtype
     /Widget, or a /Rect (a widget without /Subtype is still drawn by most readers)."""
-    return _key(doc, xref, "Subtype") == ("name", "/Widget") or _key(doc, xref, "Rect")[0] != "null"
+    # /Rect first: one lookup for almost every widget.
+    return _key(doc, xref, "Rect")[0] != "null" or _key(doc, xref, "Subtype") == ("name", "/Widget")
 
 
-def prune_fields(doc: pymupdf.Document) -> int:
+def field_roots(doc: pymupdf.Document, pages: Iterable[int]) -> set[int]:
+    """Top-level ancestors (/Parent chains) of the annotations of ``pages``: the only
+    /Fields entries a deletion of those pages can affect (see :func:`prune_fields`)."""
+    roots: set[int] = set()
+    for i in pages:
+        kind, value = _key(doc, doc.page_xref(i), "Annots")
+        if kind == "xref":
+            refs = _refs(value)
+            value = doc.xref_object(refs[0], compressed=True) if refs else ""
+        for xref in _refs(value):
+            seen = {xref}
+            while (parent := _refs(_key(doc, xref, "Parent")[1])) and parent[0] not in seen:
+                xref = parent[0]
+                seen.add(xref)
+            roots.add(xref)
+    return roots
+
+
+def prune_fields(doc: pymupdf.Document, roots: Iterable[int] | None = None) -> int:
     """Remove from ``/AcroForm /Fields`` the widgets no page shows any more; returns the
     number of entries (fields and kids) dropped.
 
@@ -73,21 +107,32 @@ def prune_fields(doc: pymupdf.Document) -> int:
     ``/Kids [33 0 R 33 0 R]``) are kept once, cycles dropped. The array is written on
     the AcroForm object itself when it is indirect (the path form through the catalog
     writes ``fitz: replace me!``, PyMuPDF 1.28).
+
+    ``roots``: only these top-level /Fields entries are examined (the others are kept
+    as they are): :func:`field_roots` of the pages about to be deleted, or the entries
+    an insertion added. Large forms then cost nothing to prune (docs/ARCHITECTURE.md
+    Deviation 95).
     """
+    only = None if roots is None else set(roots)
     catalog = doc.pdf_catalog()
     kind, value = _key(doc, catalog, "AcroForm/Fields")
     if kind != "array":
         return 0
-    live = {xref for page in doc for xref, _subtype, _nm in page.annot_xrefs()}
+    old = _refs(value)
+    if only is not None and not only.intersection(old) and len(set(old)) == len(old):
+        return 0
+    live = annotation_xrefs(doc)
     dropped = 0
     decided: dict[int, bool] = {}
 
-    def survivors(refs: list[int]) -> list[int]:
+    def survivors(refs: list[int], top: bool = False) -> list[int]:
         nonlocal dropped
         kept: list[int] = []
+        seen: set[int] = set()
         for x in refs:
-            if x not in kept and keep(x):
+            if x not in seen and ((top and only is not None and x not in only) or keep(x)):
                 kept.append(x)
+            seen.add(x)
         dropped += len(refs) - len(kept)
         return kept
 
@@ -109,8 +154,7 @@ def prune_fields(doc: pymupdf.Document) -> int:
         decided[xref] = result
         return result
 
-    old = _refs(value)
-    kept = survivors(old)
+    kept = survivors(old, top=True)
     if kept != old:
         _set_acroform_key(doc, "Fields", _array(kept))
     # The calculation order loses the fields just dropped.
@@ -235,15 +279,95 @@ def prune_empty_page_nodes(doc: pymupdf.Document) -> int:
     return removed
 
 
+def _text(doc: pymupdf.Document, xref: int, key: str) -> str | None:
+    kind, value = _key(doc, xref, key)
+    return value if kind == "string" else None
+
+
 def field_names(doc: pymupdf.Document, pages: Iterable[int] | None = None) -> set[str]:
-    """Fully qualified names of the fields shown on ``pages`` (default: every page)."""
+    """Fully qualified names of the fields shown on ``pages`` (default: every page).
+
+    Read from each page's widget xrefs and their /T + /Parent chains (no ``Widget``
+    objects: ``page.widgets()`` is far too slow on forms with thousands of fields).
+    """
     indexes = range(doc.page_count) if pages is None else pages
+    full: dict[int, str] = {}
+
+    def name(xref: int, depth: int = 0) -> str:
+        if xref in full:
+            return full[xref]
+        full[xref] = ""  # a /Parent cycle ends here
+        own = _text(doc, xref, "T")
+        parent = _refs(_key(doc, xref, "Parent")[1])
+        prefix = name(parent[0], depth + 1) if parent and depth < 64 else ""
+        result = ".".join(part for part in (prefix, own or "") if part)
+        full[xref] = result
+        return result
+
     names: set[str] = set()
     for i in indexes:
-        for widget in doc[i].widgets():
-            if widget.field_name:
-                names.add(str(widget.field_name))
+        for xref, subtype, _nm in doc[i].annot_xrefs():
+            if subtype == pymupdf.PDF_ANNOT_WIDGET and (n := name(xref)):
+                names.add(n)
     return names
+
+
+def _top_fields(doc: pymupdf.Document) -> list[int]:
+    kind, value = _key(doc, doc.pdf_catalog(), "AcroForm/Fields")
+    return _refs(value) if kind == "array" else []
+
+
+def _top_field_names(doc: pymupdf.Document) -> list[tuple[int, str | None]]:
+    """(xref, /T or None) of the top-level fields, read through the low-level API
+    (``xref_get_key`` costs ~18 us per call: too slow for 10,000 fields)."""
+    mupdf = pymupdf.mupdf
+    pdf = pymupdf._as_pdf_document(doc)
+    fields = mupdf.pdf_dict_getp(mupdf.pdf_trailer(pdf), "Root/AcroForm/Fields")
+    if not mupdf.pdf_is_array(fields):
+        return []
+    out: list[tuple[int, str | None]] = []
+    for i in range(mupdf.pdf_array_len(fields)):
+        field = mupdf.pdf_array_get(fields, i)
+        has_name = mupdf.pdf_is_string(mupdf.pdf_dict_get(field, mupdf.PDF_ENUM_NAME_T))
+        name = mupdf.pdf_dict_get_text_string(field, mupdf.PDF_ENUM_NAME_T) if has_name else None
+        out.append((mupdf.pdf_to_num(field), name))
+    return out
+
+
+def rename_colliding_fields(
+    doc: pymupdf.Document, src: pymupdf.Document, chosen: Sequence[str] | None = None
+) -> list[tuple[str, str]]:
+    """Before grafting ``src`` into ``doc``: rename each top-level field of ``src`` whose
+    name ``doc`` already uses to "name (2)", "name (3)"... (the first one free in both
+    documents); returns the (old, new) pairs in /Fields order. ``src`` is mutated.
+
+    ``chosen``: the new names of an earlier call (a redo), reused in order when still
+    free, so the inserted fields keep the names that later commands refer to. Without
+    this MuPDF renames colliding fields "name [xref]", a name that changes with every
+    graft (docs/ARCHITECTURE.md Deviation 95).
+    """
+    taken = {n for _x, n in _top_field_names(doc) if n is not None}
+    if not taken:
+        return []
+    fields = _top_field_names(src)
+    used = taken | {n for _x, n in fields if n is not None}
+    reuse = list(chosen or [])
+    out: list[tuple[str, str]] = []
+    for xref, name in fields:
+        if name is None or name not in taken:
+            continue
+        new = reuse.pop(0) if reuse else None
+        if new is None or new in used:
+            k = 2
+            while f"{name} ({k})" in used:
+                k += 1
+            new = f"{name} ({k})"
+        src.xref_set_key(xref, "T", pymupdf.get_pdf_str(new))
+        used.add(new)
+        out.append((name, new))
+    if out:
+        log.debug("renamed %d inserted fields: %s", len(out), out)
+    return out
 
 
 # -- structure ---------------------------------------------------------------
@@ -269,8 +393,9 @@ def delete_pages(doc: pymupdf.Document, indexes: Iterable[int]) -> int:
         raise IndexError(f"page index out of range: {targets}")
     if doc.page_count - len(targets) < MIN_PAGES:
         raise ValueError("a document must keep at least one page")
+    roots = field_roots(doc, targets)
     doc.delete_pages(targets)
-    prune_fields(doc)
+    prune_fields(doc, roots)
     prune_empty_page_nodes(doc)
     return len(targets)
 
@@ -328,9 +453,10 @@ def insert_pages(
     becomes page ``index``; returns the number of pages inserted.
 
     ``src`` is mutated (P5): pass a throwaway document. Links between copied pages are
-    remapped, annotations and form fields copied (names already in ``doc`` are renamed
-    "name [xref]" by MuPDF); the fields are then pruned and an /XFA brought by ``src`` is
-    removed unless the target ``had_xfa``.
+    remapped, annotations and form fields copied (call :func:`rename_colliding_fields`
+    first: names already in ``doc`` are otherwise renamed "name [xref]" by MuPDF); the
+    fields are then pruned and an /XFA brought by ``src`` is removed unless the target
+    ``had_xfa``.
     """
     if not 0 <= index <= doc.page_count:
         raise IndexError(f"insert position out of range: {index}")
@@ -338,6 +464,7 @@ def insert_pages(
     if any(not 0 <= p < src.page_count for p in selected):
         raise IndexError(f"source page out of range: {selected}")
     had_co = has_calc_order(doc)
+    before = set(_top_fields(doc))
     if len(_runs(selected)) == 1:
         first, last = selected[0], selected[-1]
         _graft(doc, src, first, last, index)
@@ -348,7 +475,7 @@ def insert_pages(
             _graft(doc, sub, 0, sub.page_count - 1, index)
         finally:
             sub.close()
-    prune_fields(doc)
+    prune_fields(doc, set(_top_fields(doc)) - before)
     if not had_co:
         drop_empty_calc_order(doc)
     if not had_xfa and has_xfa(doc):

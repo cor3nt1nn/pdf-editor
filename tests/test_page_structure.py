@@ -174,7 +174,8 @@ def test_insert_pages_reports_renamed_fields(lo_form_pdf, tmp_path) -> None:
     src = pymupdf.open(fixtures.make_lo_form_pdf(tmp_path / "src.pdf"))
     d.insert_pages(pages.subdocument_bytes(src, [0]), 2)
     assert d.last_insert_renamed_fields
-    assert any(w.name.startswith("Nom [") for w in d.all_widgets())
+    assert any(w.name == "Nom (2)" for w in d.all_widgets())
+    assert ("Nom", "Nom (2)") in d.last_insert_field_renames
     d.close()
 
 

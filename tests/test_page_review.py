@@ -21,9 +21,10 @@ from pdfeditor.core.commands import (
     InsertPagesCommand,
     MovePagesCommand,
     RotatePagesCommand,
+    SetFieldValueCommand,
 )
 from pdfeditor.core.document import PageError, PdfDocument
-from pdfeditor.core.forms import XfaKind, detect_xfa
+from pdfeditor.core.forms import FieldKind, XfaKind, detect_xfa
 from pdfeditor.core.snapshots import SnapshotStore
 
 
@@ -333,5 +334,100 @@ def test_prune_drops_calc_order_entries_of_removed_fields() -> None:
         doc.xref_set_key(cat, "AcroForm/CO", f"[{visible} 0 R {hidden} 0 R]")
         pages.delete_pages(doc, [0])
         assert pages._refs(doc.xref_get_key(cat, "AcroForm/CO")[1]) == [hidden]
+    finally:
+        doc.close()
+
+
+# -- B1: inserted fields keep stable names across undo/redo ---------------------------
+def test_redo_insert_keeps_renamed_field_names(lo_form_pdf, tmp_path) -> None:
+    """Fuzzer B1: a value set on a renamed inserted field survives undo/redo of both."""
+    with pymupdf.open(fixtures.make_lo_form_pdf(tmp_path / "src.pdf")) as src:
+        data = pages.subdocument_bytes(src, [0])
+    doc = PdfDocument.open(lo_form_pdf)
+    try:
+        stack = QUndoStack()
+        insert = InsertPagesCommand(doc, data, 2, 1)
+        insert.apply_now()
+        stack.push(insert)
+        renamed = [
+            w for w in doc.widgets(2) if w.kind is FieldKind.TEXT and w.name.endswith(" (2)")
+        ]
+        assert renamed, [w.name for w in doc.widgets(2)]
+        info = renamed[0]
+        names = sorted(w.name for w in doc.widgets(2))
+        edit = SetFieldValueCommand(doc, info, "Rossi")
+        edit.apply_now()
+        stack.push(edit)
+        for _ in range(3):
+            stack.undo()
+            stack.undo()
+            assert insert.error is None and edit.error is None
+            assert doc.page_count == 2
+            stack.redo()
+            stack.redo()
+            assert insert.error is None and edit.error is None
+            assert sorted(w.name for w in doc.widgets(2)) == names
+            assert next(w for w in doc.widgets(2) if w.name == info.name).value == "Rossi"
+    finally:
+        doc.close()
+
+
+def test_renamed_fields_are_unique_and_numbered(lo_form_pdf, tmp_path) -> None:
+    with pymupdf.open(fixtures.make_lo_form_pdf(tmp_path / "src.pdf")) as src:
+        data = pages.subdocument_bytes(src, [0])
+    doc = PdfDocument.open(lo_form_pdf)
+    try:
+        doc.insert_pages(data, 2)
+        first = dict(doc.last_insert_field_renames)
+        doc.insert_pages(data, 3)
+        second = dict(doc.last_insert_field_renames)
+        assert first and second
+        assert all(new.endswith(" (2)") for new in first.values())
+        assert all(new.endswith(" (3)") for new in second.values())
+        with doc.lock:
+            names = pages.field_names(doc.fitz)
+            widgets = [w for i in range(doc.page_count) for w in doc.fitz[i].widgets()]
+        assert len({w.field_name for w in widgets}) == len(names)
+        assert not any("[" in n for n in names)  # MuPDF never had to rename
+    finally:
+        doc.close()
+
+
+def test_field_names_reads_the_parent_chain(lo_form_pdf) -> None:
+    with pymupdf.open(lo_form_pdf) as doc:
+        expected = {w.field_name for page in doc for w in page.widgets()}
+        assert pages.field_names(doc) == expected
+
+
+# -- m3: page operations on large forms -------------------------------------------------
+#: Insert (and undo) of a form page into a 2,000-field form (was ~0.5 s, field names
+#: read through ``page.widgets()`` and a quadratic prune).
+LARGE_FORM_BUDGET_S = 0.25
+
+
+def test_insert_into_large_form_is_fast(tmp_path, lo_form_pdf) -> None:
+    import time
+
+    big = fixtures.make_many_fields_pdf(tmp_path / "big.pdf", 2000)
+    with pymupdf.open(lo_form_pdf) as src:
+        data = pages.subdocument_bytes(src, [0])
+    doc = PdfDocument.open(big)
+    try:
+        best_insert = best_undo = float("inf")
+        for _ in range(3):
+            cmd = InsertPagesCommand(doc, data, 0, 1)
+            t0 = time.perf_counter()
+            cmd.apply_now()
+            t1 = time.perf_counter()
+            cmd.undo()
+            t2 = time.perf_counter()
+            assert cmd.error is None
+            best_insert = min(best_insert, t1 - t0)
+            best_undo = min(best_undo, t2 - t1)
+        print(f"insert {best_insert * 1000:.0f} ms, undo {best_undo * 1000:.0f} ms")
+        assert best_insert < LARGE_FORM_BUDGET_S
+        assert best_undo < LARGE_FORM_BUDGET_S
+        with doc.lock:
+            assert len(pages.field_names(doc.fitz)) == 2000
     finally:
         doc.close()

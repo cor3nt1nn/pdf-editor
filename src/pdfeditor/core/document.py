@@ -223,8 +223,9 @@ class PdfDocument(QObject):
         self._reindex()
         #: Whole-document undo copies of page deletions (see core/snapshots.py).
         self.snapshots = SnapshotStore()
-        # Fields inserted by the last insert_pages() collided with existing names.
-        self._last_insert_renamed = False
+        # Fields inserted by the last insert_pages() renamed (old, new) because the
+        # document already had their names.
+        self._last_insert_renames: list[tuple[str, str]] = []
         self._read_form_state()
         # Connected first so that other slots see the refreshed caches.
         self.page_changed.connect(self._on_page_changed)
@@ -484,8 +485,15 @@ class PdfDocument(QObject):
     @property
     def last_insert_renamed_fields(self) -> bool:
         """The last :meth:`insert_pages` brought fields whose names the document already
-        had (MuPDF renamed the inserted ones "name [xref]")."""
-        return self._last_insert_renamed
+        had (the inserted ones were renamed "name (2)"..., see
+        :attr:`last_insert_field_renames`)."""
+        return bool(self._last_insert_renames)
+
+    @property
+    def last_insert_field_renames(self) -> list[tuple[str, str]]:
+        """(old, new) names of the top-level fields the last :meth:`insert_pages`
+        renamed; pass the new names back as ``field_names`` to repeat it (redo)."""
+        return list(self._last_insert_renames)
 
     def _check_assemble(self) -> None:
         if self._doc is None:
@@ -635,11 +643,15 @@ class PdfDocument(QObject):
         *,
         password: str | None = None,
         page_ids: list[PageId] | None = None,
+        field_names: list[str] | None = None,
     ) -> list[PageId]:
         """Insert every page of the PDF ``data`` (a sub-document, see
         :func:`pages.subdocument_bytes`; decrypted with ``password`` if needed) at
         ``index``; returns their ids (``page_ids`` when given: redo reinstalls the same
-        ids). Sets :attr:`last_insert_renamed_fields`. Raises :class:`PageError`."""
+        ids). Inserted top-level fields whose names the document already has are renamed
+        "name (2)"... (``field_names``: the new names of an earlier insertion, reused so
+        a redo gives the same names); sets :attr:`last_insert_field_renames`. Raises
+        :class:`PageError`."""
         self._check_assemble()
         if not 0 <= index <= self._page_count:
             raise IndexError(f"insert position out of range: {index}")
@@ -658,15 +670,13 @@ class PdfDocument(QObject):
             with self.lock:
                 try:
                     doc = self.fitz
-                    collide = bool(
-                        doc.is_form_pdf and page_ops.field_names(src) & page_ops.field_names(doc)
-                    )
+                    renames = page_ops.rename_colliding_fields(doc, src, field_names)
                     page_ops.insert_pages(doc, src, index, had_xfa=page_ops.has_xfa(doc))
                 except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                     raise PageError(str(exc)) from exc
         finally:
             src.close()
-        self._last_insert_renamed = collide
+        self._last_insert_renames = renames
         new_ids = self._page_ids[:index] + ids + self._page_ids[index:]
         log.info("inserted %d pages at %d", count, index + 1)
         self._structure_done(new_ids, _shifted(len(self._page_ids), index, count))

@@ -468,8 +468,8 @@ fields included).
 | Pages ▸ Split Document… | Every *N* pages, or explicit ranges, to `name-01.pdf`, `name-02.pdf`… in a chosen folder |
 
 - **Inserting from another PDF** copies its pages with their annotations, links between the
-  copied pages and form fields; fields whose names the document already has are renamed (the
-  status bar says so). An encrypted source asks for its password. A document cannot be
+  copied pages and form fields; fields whose names the document already has are renamed
+  "Name (2)", "Name (3)"… (the status bar says so). An encrypted source asks for its password. A document cannot be
   inserted into itself.
 - **Extracted and split files** are rewritten from scratch (no earlier revisions) and keep the
   protection of the original: a file opened with a password gives files with the same password;
