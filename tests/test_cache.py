@@ -63,3 +63,30 @@ def test_invalidate_best_and_clear(qapp) -> None:
     cache.clear()
     assert len(cache) == 0
     assert cache.bytes_used == 0
+
+
+def test_remap_moves_and_drops_pages(qapp) -> None:
+    cache = PixmapCache()
+    pixmaps = {page: _pm(10, 10 + page) for page in range(4)}
+    for page, pm in pixmaps.items():
+        cache.put(page, 1.0, "page", pm)
+    cache.put(2, 0.5, "thumb", _pm(5, 5))
+    before = cache.bytes_used
+    # delete page 1, move page 3 first: old 0->1, 1 gone, 2->2, 3->0
+    cache.remap([1, None, 2, 0])
+    assert cache.get(1, 1.0) is pixmaps[0]
+    assert cache.get(2, 1.0) is pixmaps[2]
+    assert cache.get(0, 1.0) is pixmaps[3]
+    assert cache.get(2, 0.5, "thumb") is not None
+    assert cache.get(3, 1.0) is None
+    assert len(cache) == 4
+    assert cache.bytes_used == before - 10 * 11 * 4
+
+
+def test_remap_short_mapping_drops_unknown_pages(qapp) -> None:
+    cache = PixmapCache()
+    cache.put(0, 1.0, "page", _pm(10, 10))
+    cache.put(5, 1.0, "page", _pm(10, 10))
+    cache.remap([0])
+    assert len(cache) == 1
+    assert cache.bytes_used == 400

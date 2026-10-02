@@ -69,6 +69,19 @@ class PixmapCache:
         for key in [k for k in self._items if k[0] == page]:
             self._bytes -= _cost(self._items.pop(key))
 
+    def remap(self, mapping: list[int | None]) -> None:
+        """Pages were added, removed or reordered: ``mapping[old] -> new`` index (None:
+        the page is gone, its pixmaps are dropped). Pages missing from ``mapping`` (index
+        out of range) are dropped too. LRU order is preserved."""
+        items: OrderedDict[CacheKey, QPixmap] = OrderedDict()
+        for (page, scale, kind), pixmap in self._items.items():
+            new = mapping[page] if 0 <= page < len(mapping) else None
+            if new is None:
+                self._bytes -= _cost(pixmap)
+            else:
+                items[(new, scale, kind)] = pixmap
+        self._items = items
+
     def clear(self) -> None:
         self._items.clear()
         self._bytes = 0

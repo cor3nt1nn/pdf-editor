@@ -42,6 +42,19 @@ class RenderService(QObject):
         self._stale.clear()
         self.worker.new_generation()
 
+    def remap_pages(self, mapping: list[int | None]) -> None:
+        """Pages were added, removed or reordered (``PdfDocument.pages_remapped``): move the
+        cached and stale pixmaps of surviving pages to their new index, drop those of
+        deleted pages and discard queued renders (they carry the old indexes)."""
+        self.cache.remap(mapping)
+        stale: dict[tuple[int, str], QPixmap] = {}
+        for (page, kind), pixmap in self._stale.items():
+            new = mapping[page] if 0 <= page < len(mapping) else None
+            if new is not None:
+                stale[(new, kind)] = pixmap
+        self._stale = stale
+        self.worker.new_generation()
+
     def invalidate_page(self, page: int, keep_stale: bool = False) -> None:
         """Forget ``page``'s pixmaps; in-flight renders (possibly stale) are discarded.
 

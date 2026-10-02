@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bisect
 import logging
+from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -41,6 +42,36 @@ RENDER_DEBOUNCE_MS = 30
 
 def clamp_zoom(percent: float) -> float:
     return max(ZOOM_MIN, min(ZOOM_MAX, float(percent)))
+
+
+@dataclass(frozen=True)
+class RemapTarget:
+    """Page to show after a structural change. ``same_spot``: it is the former current
+    page (keep the scroll offset inside it); ``inserted``: it is a newly added page."""
+
+    page: int
+    same_spot: bool = False
+    inserted: bool = False
+
+
+def remapped_current_page(mapping: list[int | None], current: int, count: int) -> RemapTarget:
+    """Where the view goes after ``pages_remapped(mapping)`` when ``current`` was shown:
+    the first page that did not exist before (insertion, undo of a deletion), else the
+    former current page at its new index, else the nearest surviving page (the next one
+    first, which took its place, then the previous one)."""
+    survivors = {new for new in mapping if new is not None}
+    added = [i for i in range(count) if i not in survivors]
+    if added:
+        return RemapTarget(added[0], inserted=True)
+    if 0 <= current < len(mapping) and mapping[current] is not None:
+        return RemapTarget(mapping[current], same_spot=True)
+    for old in range(current + 1, len(mapping)):
+        if mapping[old] is not None:
+            return RemapTarget(mapping[old])
+    for old in range(min(current, len(mapping)) - 1, -1, -1):
+        if mapping[old] is not None:
+            return RemapTarget(mapping[old])
+    return RemapTarget(0)
 
 
 class DocumentScene(QGraphicsScene):
@@ -146,6 +177,8 @@ class PageView(QGraphicsView):
         self._mode = ZoomMode.FIT_WIDTH
         self._current = -1
         self._suppress_current = False
+        # old_to_new of the latest ``pages_remapped``, consumed by _on_structure_changed
+        self._pending_remap: list[int | None] | None = None
         self.tool_manager: ToolManager | None = None  # set by ToolManager(view)
 
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
@@ -182,12 +215,15 @@ class PageView(QGraphicsView):
             try:
                 self._document.page_changed.disconnect(self._on_page_changed)
                 self._document.structure_changed.disconnect(self._on_structure_changed)
+                self._document.pages_remapped.disconnect(self._on_pages_remapped)
             except (RuntimeError, TypeError):
                 pass
         self._document = document
+        self._pending_remap = None
         self.service.set_document(document)
         if document is not None:
             document.page_changed.connect(self._on_page_changed)
+            document.pages_remapped.connect(self._on_pages_remapped)
             document.structure_changed.connect(self._on_structure_changed)
         self._scene.set_document(document)
         self._current = -1
@@ -252,13 +288,37 @@ class PageView(QGraphicsView):
             self._suppress_current = False
         self._schedule_render()
 
+    def _on_pages_remapped(self, mapping: list[int | None]) -> None:
+        """Move the cached pixmaps right away (before any other ``structure_changed``
+        listener, e.g. the thumbnail model, asks for them) and remember the mapping."""
+        self.service.remap_pages(mapping)
+        self._pending_remap = list(mapping)
+
     def _on_structure_changed(self) -> None:
-        current = self._current
-        self.service.reset()
+        mapping, self._pending_remap = self._pending_remap, None
+        anchor = self._capture_anchor()
+        if mapping is None:
+            self.service.reset()
         self._scene.set_document(self._document)
+        # Always re-announce the current page: the thumbnail model was reset and the
+        # page shown at the same index may be another one.
+        self._current = -1
         self.relayout()
-        if self.page_count:
+        if not self.page_count:
+            return
+        if mapping is None or anchor is None:
+            current = 0 if anchor is None else anchor[0]
             self.scroll_to_page(max(0, min(current, self.page_count - 1)))
+            return
+        page, fraction = anchor
+        target = remapped_current_page(mapping, page, self.page_count)
+        if target.inserted:
+            self.scroll_to_page(target.page)
+            return
+        if not target.same_spot:
+            fraction = 0.0
+        self._restore_anchor(target.page, fraction)
+        self._set_current(target.page)
 
     def _on_pixmap_ready(self, page: int, kind: str) -> None:
         if kind == RenderKind.PAGE and 0 <= page < self.page_count:
