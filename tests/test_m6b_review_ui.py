@@ -197,3 +197,36 @@ def test_text_hit_tolerance_follows_the_zoom(qtbot, text_window, zoom, hits) -> 
     _dclick(qtbot, w, QPointF(box.center().x(), box.top() - 4.0))  # 4 pt above the line
     assert (w.document_view.text_selection.text() == "quick") is hits
     assert w.document_view.text_selection.is_empty is not hits
+
+
+# -- 10: painting the selection never extracts page text ----------------------------------
+def test_selection_paint_does_not_extract_text(qtbot, text_window, monkeypatch) -> None:
+    from pdfeditor.core import pagetext
+
+    w = text_window
+    w.act_select_text.trigger()
+    sel = w.document_view.text_selection
+    sel.set(0, QUICK, QUICK + 4)
+    doc = w.document_view.document
+    calls = []
+    real = pagetext.extract_page_text
+
+    def extract(page):
+        calls.append(painting[0])
+        return real(page)
+
+    painting = [False]
+    monkeypatch.setattr(pagetext, "extract_page_text", extract)
+    doc._text_cache.clear()  # e.g. dropped by another change
+    painting[0] = True
+    w.page_view.viewport().repaint()  # synchronous paint: skipped, nothing extracted
+    painting[0] = False
+    assert calls == []
+    qtbot.waitUntil(lambda: calls == [False])  # fetched right after, outside the paint
+    assert doc.cached_page_text(0) is not None
+    assert sel.text() == "quick"
+    painting[0] = True
+    w.page_view.viewport().repaint()
+    painting[0] = False
+    assert calls == [False]
+    assert sel.quads() == sel.quads() and len(sel.quads()) == 1

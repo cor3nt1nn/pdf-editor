@@ -1220,6 +1220,11 @@ class PdfDocument(QObject):
                 self._text_cache[i] = cached
         return cached
 
+    def cached_page_text(self, i: int) -> PageText | None:
+        """The cached :meth:`page_text` of page ``i``, or None when it is not cached; never
+        extracts nor takes the lock (safe from a paint event)."""
+        return self._text_cache.get(i)
+
     # -- page text editing (M7) ----------------------------------------------
     def replace_text_run(
         self, page: int, run: Run, text: str, *, fonts: SystemFonts | None = None

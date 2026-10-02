@@ -10,6 +10,11 @@ page's text may have changed (``page_changed`` of its page, ``reloaded``): a ran
 longer fits the page's characters, or whose text changed, is cleared. Annotation edits
 never change the page text (``page_text`` ignores annotations), so a selection survives
 them, as it survives any change to another page.
+
+Painting never extracts page text (which takes the document lock): the quads are cached
+with the ``PageText`` they were computed on, and when the page's text is not cached
+(``PdfDocument.cached_page_text``) the paint is skipped and the text fetched right after
+it, followed by a repaint.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter
 
 from pdfeditor.core.pagetext import CharRef, PageText, Quad
@@ -53,6 +58,9 @@ class TextSelection(QObject):
         # (page_changed, reloaded, structure_changed) the range must still cover the
         # same characters (M7 edits, a reload of another revision), else it is cleared.
         self._made_on: PageText | None = None
+        # (page text, anchor, focus, quads) of the last quads() computation.
+        self._quads_cache: tuple[PageText, int, int, list[Quad]] | None = None
+        self._refresh_pending = False
         self.changed.connect(self._repaint)
 
     # -- state -------------------------------------------------------------------------
@@ -104,9 +112,21 @@ class TextSelection(QObject):
     def quads(self) -> list[Quad]:
         """One page-space quad per selected line part."""
         pt = self.page_text()
-        if pt is None or self._anchor is None or self._focus is None:
+        if pt is None:
             return []
-        return pt.range_quads(self._anchor, self._focus)
+        return list(self._quads_of(pt))
+
+    def _quads_of(self, pt: PageText) -> list[Quad]:
+        """The selection's quads on ``pt``, cached until the range or the text changes."""
+        a, f = self._anchor, self._focus
+        if a is None or f is None:
+            return []
+        cache = self._quads_cache
+        if cache is not None and cache[0] is pt and cache[1] == a and cache[2] == f:
+            return cache[3]
+        quads = pt.range_quads(a, f)
+        self._quads_cache = (pt, a, f, quads)
+        return quads
 
     def text(self) -> str:
         """The selected text (``\\n`` between lines; invisible OCR text included)."""
@@ -140,6 +160,7 @@ class TextSelection(QObject):
             return
         self._page = self._page_id = self._anchor = self._focus = None
         self._made_on = None
+        self._quads_cache = None
         self.changed.emit()
 
     # -- document binding --------------------------------------------------------------
@@ -219,10 +240,17 @@ class TextSelection(QObject):
     def paint(self, painter: QPainter) -> None:
         """Fill the selected quads (scene coordinates; called from a tool's
         ``paint_overlay``)."""
-        view, page = self._view, self._page
-        if page is None or not 0 <= page < view.page_count:
+        view, page, doc = self._view, self._page, self._document
+        if page is None or doc is None or not doc.is_open or not 0 <= page < view.page_count:
             return
-        quads = self.quads()
+        pt = doc.cached_page_text(page)
+        if pt is None or pt is not self._made_on:
+            # Not cached (or extracted anew): fetch and check it outside the paint event.
+            if not self._refresh_pending:
+                self._refresh_pending = True
+                QTimer.singleShot(0, self._refresh)
+            return
+        quads = self._quads_of(pt)
         if not quads:
             return
         item = view.page_item(page)
@@ -235,6 +263,16 @@ class TextSelection(QObject):
 
     def _repaint(self) -> None:
         self._view.viewport().update()
+
+    def _refresh(self) -> None:
+        """After a paint found the page text uncached: fetch it (under the lock), check
+        the range against it and repaint."""
+        self._refresh_pending = False
+        if self._page is None:
+            return
+        self._check()
+        if self._page is not None:
+            self._repaint()
 
     def _ref(self, index: int | None) -> CharRef | None:
         pt = self.page_text()
