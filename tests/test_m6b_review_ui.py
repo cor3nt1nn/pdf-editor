@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.main_window import MainWindow
-from pdfeditor.ui.tools.markup_tools import expand_ligatures, markup_text
+from pdfeditor.ui.tools.markup_tools import TEXT_HIT_TOLERANCE_PX, expand_ligatures, markup_text
 
 NO_MOD = Qt.KeyboardModifier.NoModifier
 LEFT = Qt.MouseButton.LeftButton
@@ -183,3 +183,17 @@ def test_double_and_triple_click_on_marked_text(qtbot, text_window) -> None:
     # A single click still selects the markup under the pointer.
     qtbot.mouseClick(w.page_view.viewport(), LEFT, NO_MOD, _vp(w, _char(w, QUICK + 1)))
     assert w.document_view.annot_selection.current is not None
+
+
+# -- 9: the text hit tolerance is in viewport pixels --------------------------------------
+@pytest.mark.parametrize(("zoom", "hits"), [(100, True), (400, False)])
+def test_text_hit_tolerance_follows_the_zoom(qtbot, text_window, zoom, hits) -> None:
+    w = text_window
+    w.act_select_text.trigger()
+    w.page_view.set_zoom_percent(zoom)
+    tool = w.tool_manager.active_tool
+    assert tool._hit_tolerance() == pytest.approx(TEXT_HIT_TOLERANCE_PX / w.page_view.view_scale)
+    box = w.document_view.document.page_text(0).chars[QUICK + 1].bbox
+    _dclick(qtbot, w, QPointF(box.center().x(), box.top() - 4.0))  # 4 pt above the line
+    assert (w.document_view.text_selection.text() == "quick") is hits
+    assert w.document_view.text_selection.is_empty is not hits

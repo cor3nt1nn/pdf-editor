@@ -373,9 +373,11 @@ class PageText:
             return None
         return self.span_of(ref)
 
-    def word_at(self, point: QPointF) -> tuple[CharRef, CharRef] | None:
-        """First and last chars of the word at ``point`` (within ``HIT_TOLERANCE``)."""
-        ref = self.hit(point)
+    def word_at(
+        self, point: QPointF, tolerance: float = HIT_TOLERANCE
+    ) -> tuple[CharRef, CharRef] | None:
+        """First and last chars of the word at ``point`` (within ``tolerance`` points)."""
+        ref = self.hit(point, tolerance)
         return None if ref is None else self.word_range(ref)
 
     def chars_in_rect(self, area: QRectF | Quad) -> list[CharRef]:

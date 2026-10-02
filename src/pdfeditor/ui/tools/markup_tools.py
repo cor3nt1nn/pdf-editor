@@ -37,7 +37,7 @@ from PySide6.QtWidgets import QApplication
 
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, Color, markup_spec
 from pdfeditor.core.document import DocumentError, PdfDocument
-from pdfeditor.core.pagetext import HIT_TOLERANCE, CharRef, PageText
+from pdfeditor.core.pagetext import CharRef, PageText
 from pdfeditor.ui.tools.annot_tools import AnnotToolBase, DragMode
 from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
 
@@ -51,6 +51,10 @@ log = logging.getLogger(__name__)
 
 #: Markup kinds the tools create (Squiggly is only read, recoloured and deleted).
 TOOL_KINDS = (AnnotKind.HIGHLIGHT, AnnotKind.UNDERLINE, AnnotKind.STRIKEOUT)
+
+#: Reach of a click on text (viewport pixels; ≈ ``pagetext.HIT_TOLERANCE`` = 6 pt at 100 %):
+#: divided by the view scale, like ``annot_tools.HIT_TOLERANCE_PX``.
+TEXT_HIT_TOLERANCE_PX = 8.0
 
 #: Latin ligature code points (U+FB00–U+FB06) → their letters, for copied text only (the
 #: page text model keeps one char per glyph: M7 needs it).
@@ -148,6 +152,11 @@ class _TextSelecting:
         except (DocumentError, IndexError):
             return None
 
+    def _hit_tolerance(self) -> float:
+        """``TEXT_HIT_TOLERANCE_PX`` in page points at the current zoom."""
+        scale = self.view.view_scale if self.view is not None else 1.0
+        return TEXT_HIT_TOLERANCE_PX / max(scale, 1e-6)
+
     def _drag_pos(self, page: int, event: ToolEvent) -> QPointF:
         """``event`` in the page space of ``page`` (even outside that page)."""
         assert self.view is not None
@@ -187,7 +196,7 @@ class _TextSelecting:
             self._text_drag = _TextDrag(page, pos, px, anchor, active=True)
             return True
         sel.clear()
-        self._text_drag = _TextDrag(page, pos, px, pt.hit(pos, HIT_TOLERANCE))
+        self._text_drag = _TextDrag(page, pos, px, pt.hit(pos, self._hit_tolerance()))
         return True
 
     def text_move(self, event: ToolEvent) -> bool:
@@ -208,7 +217,7 @@ class _TextSelecting:
             if drag.anchor is None:
                 # Started away from the text: select once the drag reaches some text.
                 area = QRectF(drag.start, pos).normalized()
-                if pt.hit(pos, HIT_TOLERANCE) is None and not pt.chars_in_rect(area):
+                if pt.hit(pos, self._hit_tolerance()) is None and not pt.chars_in_rect(area):
                     return True
                 drag.anchor = pt.hit(drag.start, math.inf)
                 if drag.anchor is None:
@@ -245,7 +254,7 @@ class _TextSelecting:
         if pt is None or pt.is_empty:
             return True
         self._last_double = (time.monotonic(), viewport_pos(event), page)
-        word = pt.word_at(pos)
+        word = pt.word_at(pos, self._hit_tolerance())
         if word is None:
             return True
         self.text_selection.set(page, *word)
@@ -456,7 +465,7 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
                 pt = self._page_text(page)
                 if pt is not None and not pt.is_empty:
                     self._text_drag = _TextDrag(
-                        page, drag.start, drag.start_px, pt.hit(drag.start, HIT_TOLERANCE)
+                        page, drag.start, drag.start_px, pt.hit(drag.start, self._hit_tolerance())
                     )
                     return self.text_move(event)
                 return True
@@ -528,6 +537,7 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
 
 
 __all__ = [
+    "TEXT_HIT_TOLERANCE_PX",
     "TOOL_KINDS",
     "MarkupTool",
     "TextSelectTool",

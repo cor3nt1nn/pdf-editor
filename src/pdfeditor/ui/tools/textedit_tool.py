@@ -31,7 +31,7 @@ from PySide6.QtWidgets import QApplication
 
 from pdfeditor.core.commands import ReplaceTextCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
-from pdfeditor.core.pagetext import HIT_TOLERANCE, CharRef, PageText
+from pdfeditor.core.pagetext import CharRef, PageText
 from pdfeditor.core.textedit import MAX_CONTENT_MB, EditReason, Run, TextEditError, TextEditResult
 from pdfeditor.ui.overlays.textedit_items import clamp_to_span, editable, selection_run, span_run
 from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
@@ -252,7 +252,7 @@ class TextEditTool(_TextSelecting, Tool):
         if self._is_triple(page, px):
             return True  # the third click of a triple-click keeps the span
         self._last_double = None
-        ref = None if pt.is_empty else pt.hit(pos, HIT_TOLERANCE)
+        ref = None if pt.is_empty else pt.hit(pos, self._hit_tolerance())
         shift = bool(event.modifiers & Qt.KeyboardModifier.ShiftModifier)
         if shift and sel.page == page and sel.anchor is not None:
             focus = ref if ref is not None else pt.hit(pos, math.inf)
@@ -332,7 +332,7 @@ class TextEditTool(_TextSelecting, Tool):
         pt = self._page_text(page)
         if pt is None:
             return True
-        ref = None if pt.is_empty else pt.hit(pos, HIT_TOLERANCE)
+        ref = None if pt.is_empty else pt.hit(pos, self._hit_tolerance())
         if self._check_char(pt, ref) is not None or ref is None:
             return True  # the press already said why
         self._last_double = (time.monotonic(), viewport_pos(event), page)
