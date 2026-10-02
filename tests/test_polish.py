@@ -25,6 +25,7 @@ LICENSES = {
     "LGPL-3.0.txt": "GNU LESSER GENERAL PUBLIC LICENSE",
     "PSF-2.0.txt": "PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2",
     "PyInstaller-GPL-2.0-bootloader-exception.txt": "Bootloader Exception",
+    "MIT-fontTools.txt": "Copyright (c) 2017 Just van Rossum",
 }
 
 
@@ -61,7 +62,16 @@ def test_third_party_notice_lists_components_and_files() -> None:
     text = notice.read_text(encoding="utf-8")
     for name in LICENSES:
         assert f"`{name}`" in text, name
-    for component in ("PySide6", "shiboken6", "Qt", "PyMuPDF", "MuPDF", "Python", "PyInstaller"):
+    for component in (
+        "PySide6",
+        "shiboken6",
+        "Qt",
+        "PyMuPDF",
+        "MuPDF",
+        "Python",
+        "PyInstaller",
+        "fontTools",
+    ):
         assert component in text, component
     assert "_internal\\PySide6" in text  # how to replace the Qt libraries
     assert "bootloader exception" in text

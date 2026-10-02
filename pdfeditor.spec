@@ -12,6 +12,7 @@ import os
 import re
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -105,12 +106,16 @@ excludes = [
     "pytest", "_pytest", "pytestqt", "pypdf", "cryptography", "PyInstaller",
 ]
 
+# fontTools (M7: subsetting installed fonts for edited page text) imports its table
+# modules by name (ttLib.getTableModule), invisible to the import analysis.
+hiddenimports = collect_submodules("fontTools.ttLib.tables")
+
 a = Analysis(
     [str(PKG / "__main__.py")],
     pathex=[str(SRC)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

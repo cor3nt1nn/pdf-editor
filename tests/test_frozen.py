@@ -32,7 +32,8 @@ pytestmark = [
     pytest.mark.skipif(not EXE, reason="PDFEDITOR_FROZEN_EXE is not set (needs a build)"),
 ]
 
-MAX_FOLDER_MB = 110
+#: 102 MB at v0.1.0; fontTools (M7) adds an estimated 3-5 MB.
+MAX_FOLDER_MB = 115
 QT_DLLS = {"Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Svg.dll"}
 QT_PLUGINS = {
     "platforms/qwindows.dll",

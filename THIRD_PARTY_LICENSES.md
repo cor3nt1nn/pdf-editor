@@ -12,6 +12,7 @@ next to `PDFEditor.exe` (and in `_internal\pdfeditor\resources\licenses`):
 | `GPL-3.0.txt` | GNU General Public License v3 (the LGPL-3.0 is a set of additional permissions on top of it) |
 | `PSF-2.0.txt` | Python Software Foundation License and the licences of the libraries bundled with Python |
 | `PyInstaller-GPL-2.0-bootloader-exception.txt` | PyInstaller: GPL-2.0-or-later with the bootloader exception (and Apache-2.0 run-time hooks) |
+| `MIT-fontTools.txt` | MIT License (fontTools), with the notices of the parts it includes (Adobe AGL: BSD-3-Clause; cu2qu: Apache-2.0) |
 
 ## Qt, PySide6 and shiboken6 — LGPL-3.0
 
@@ -53,6 +54,14 @@ complete corresponding source code of PDF Editor (including `pdfeditor.spec` and
 `scripts\build_exe.ps1`, which produce this build) is the project repository this release was
 published from. If you received this program without its source code, you are entitled to
 obtain it from whoever gave it to you.
+
+## fontTools — MIT License
+
+fontTools © Just van Rossum and the fontTools contributors —
+https://github.com/fonttools/fonttools — subsets installed fonts when edited page text needs
+a font the document does not contain. It is used under the MIT License (`MIT-fontTools.txt`,
+which also reproduces its `LICENSE.external`: the Adobe Glyph List under the BSD 3-Clause
+License and cu2qu under the Apache License 2.0). Source code: https://pypi.org/project/fonttools/#files.
 
 ## Python — PSF License
 
