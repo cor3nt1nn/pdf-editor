@@ -6,11 +6,13 @@ import shutil
 
 import fixtures
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialogButtonBox, QMessageBox
 
+from pdfeditor.core.document import PdfDocument
 from pdfeditor.core.snapshots import SnapshotStore
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.main_window import MainWindow
+from pdfeditor.ui.page_dialogs import InsertPagesDialog
 
 
 @pytest.fixture
@@ -82,3 +84,16 @@ def test_failed_redo_clears_history(window, six_pdf, monkeypatch) -> None:
     assert window.undo_stack.count() == 0
     assert window.document_view.is_dirty
     assert "could not be redone" in window.warnings[-1][1]
+
+
+# -- m1: Insert Pages from File refuses a source that forbids copying ---------------------
+def test_insert_dialog_refuses_copy_protected_source(qtbot, settings, simple_pdf, owner_locked_pdf):
+    doc = PdfDocument.open(str(simple_pdf))
+    try:
+        dialog = InsertPagesDialog(doc, 0, settings)
+        qtbot.addWidget(dialog)
+        assert not dialog.set_path(str(owner_locked_pdf))
+        assert "not permitted" in dialog.error_label.text()
+        assert not dialog.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+    finally:
+        doc.close()

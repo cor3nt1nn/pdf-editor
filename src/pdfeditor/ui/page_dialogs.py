@@ -171,7 +171,14 @@ class InsertPagesDialog(QDialog):
                 error = self.tr("“{name}” is protected by a password.").format(name=name)
             except OpenError as exc:
                 log.warning("cannot open %s: %s", path, exc)
-                error = self.tr("“{name}” could not be opened as a PDF document.").format(name=name)
+                if exc.reason == "no_copy":
+                    error = self.tr(
+                        "Copying pages from “{name}” is not permitted by its security settings."
+                    ).format(name=name)
+                else:
+                    error = self.tr("“{name}” could not be opened as a PDF document.").format(
+                        name=name
+                    )
         self._source_error = error
         count = self.source_page_count
         self.count_label.setText(self.tr("{count} pages").format(count=count) if count else "")

@@ -678,15 +678,21 @@ def open_source(
 
     Same rules as :meth:`PdfDocument.open` (``needs_pass`` read before authenticating,
     ``password_cb`` asked until right or ``None``). Raises ``OpenError`` /
-    ``PasswordRequired``. The caller closes the document.
+    ``PasswordRequired``; ``OpenError`` with reason "no_copy" when the source's
+    permissions forbid copying (``PDF_PERM_COPY``) and it was not opened with its owner
+    password (docs/ARCHITECTURE.md Deviation 97). The caller closes the document.
     """
     from pdfeditor.core.document import OpenError, authenticate, open_fitz
 
     fitz_doc, _stamp = open_fitz(str(path))
     used: str | None = None
+    owner = False
     if fitz_doc.needs_pass:
-        used, _owner = authenticate(fitz_doc, password_cb, password)
+        used, owner = authenticate(fitz_doc, password_cb, password)
     if fitz_doc.page_count == 0:
         fitz_doc.close()
         raise OpenError(f"document has no pages: {path}", reason="no_pages")
+    if not owner and not int(fitz_doc.permissions) & pymupdf.PDF_PERM_COPY:
+        fitz_doc.close()
+        raise OpenError(f"copying pages is not permitted: {path}", reason="no_copy")
     return fitz_doc, used

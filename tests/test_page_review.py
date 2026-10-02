@@ -475,3 +475,35 @@ def test_deleting_an_unselected_radio_button_keeps_the_value(tmp_path) -> None:
         assert _radio_value(doc) == on != ("name", "/Off")
     finally:
         doc.close()
+
+
+# -- m1: inserting from a file follows its copy permission ------------------------------
+def _restricted_pdf(path) -> None:
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(
+        path,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        user_pw="u",
+        owner_pw="o",
+        permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_ACCESSIBILITY,
+    )
+    doc.close()
+
+
+def test_open_source_refuses_sources_without_copy_permission(tmp_path, owner_locked_pdf) -> None:
+    from pdfeditor.core.document import OpenError
+
+    with pytest.raises(OpenError) as info:
+        pages.open_source(str(owner_locked_pdf))
+    assert info.value.reason == "no_copy"
+    path = tmp_path / "restricted.pdf"
+    _restricted_pdf(path)
+    with pytest.raises(OpenError) as info:
+        pages.open_source(str(path), password="u")
+    assert info.value.reason == "no_copy"
+    src, used = pages.open_source(str(path), password="o")  # owner password: allowed
+    try:
+        assert used == "o" and src.page_count == 1
+    finally:
+        src.close()

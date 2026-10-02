@@ -242,7 +242,8 @@ def test_split_every_and_ranges() -> None:
 
 # -- open_source ----------------------------------------------------------------
 def test_open_source_encrypted_wrong_then_right(encrypted_pdf) -> None:
-    answers = iter(["wrong", PASSWORD])
+    # The fixture forbids copying: only its owner password opens it as a source.
+    answers = iter(["wrong", "owner-" + PASSWORD])
     attempts: list[int] = []
 
     def ask(attempt: int) -> str | None:
@@ -250,7 +251,7 @@ def test_open_source_encrypted_wrong_then_right(encrypted_pdf) -> None:
         return next(answers)
 
     doc, password = pages.open_source(str(encrypted_pdf), ask)
-    assert password == PASSWORD
+    assert password == "owner-" + PASSWORD
     assert attempts == [0, 1]
     assert doc.page_count == 2
     doc.close()

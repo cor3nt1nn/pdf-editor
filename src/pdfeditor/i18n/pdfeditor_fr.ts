@@ -22,103 +22,104 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../core/commands.py" line="136"/>
+        <location filename="../core/commands.py" line="137"/>
         <source>Rotate page</source>
         <extracomment>The exception raised by the last ``redo()``/``undo()``, None if it succeeded.</extracomment>
         <translation>la rotation de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="138"/>
+        <location filename="../core/commands.py" line="139"/>
         <source>Rotate pages</source>
         <translation>la rotation des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="219"/>
+        <location filename="../core/commands.py" line="231"/>
         <source>Delete page</source>
         <translation>la suppression de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="221"/>
+        <location filename="../core/commands.py" line="233"/>
         <source>Delete pages</source>
         <translation>la suppression des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="285"/>
+        <location filename="../core/commands.py" line="287"/>
         <source>Move pages</source>
         <translation>le déplacement des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="344"/>
+        <location filename="../core/commands.py" line="346"/>
         <source>Insert blank page</source>
         <translation>l’insertion d’une page vierge</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="366"/>
+        <location filename="../core/commands.py" line="368"/>
         <source>Insert pages</source>
         <translation>l’insertion des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="402"/>
+        <location filename="../core/commands.py" line="419"/>
         <source>Edit form field</source>
         <translation>la modification du champ</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="483"/>
+        <location filename="../core/commands.py" line="510"/>
         <source>Add signature</source>
+        <extracomment>The snapshot under its synthetic name, before this command claimed a /NM for it.</extracomment>
         <translation>l’ajout de la signature</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="485"/>
+        <location filename="../core/commands.py" line="512"/>
         <source>Add stamp</source>
         <translation>l’ajout du tampon</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="487"/>
+        <location filename="../core/commands.py" line="514"/>
         <source>Add highlight</source>
         <translation>l’ajout du surlignage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="489"/>
+        <location filename="../core/commands.py" line="516"/>
         <source>Add underline</source>
         <translation>l’ajout du soulignement</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="491"/>
+        <location filename="../core/commands.py" line="518"/>
         <source>Add strike-through</source>
         <translation>l’ajout du texte barré</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="492"/>
+        <location filename="../core/commands.py" line="519"/>
         <source>Add text</source>
         <translation>l’ajout du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="568"/>
+        <location filename="../core/commands.py" line="595"/>
         <source>Change markup color</source>
         <translation>le changement de couleur du marquage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="570"/>
+        <location filename="../core/commands.py" line="597"/>
         <source>Edit text</source>
         <translation>la modification du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="577"/>
+        <location filename="../core/commands.py" line="604"/>
         <source>Move annotation</source>
         <translation>le déplacement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="578"/>
+        <location filename="../core/commands.py" line="605"/>
         <source>Resize annotation</source>
         <translation>le redimensionnement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="579"/>
+        <location filename="../core/commands.py" line="606"/>
         <source>Change text style</source>
         <translation>le changement de style du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="632"/>
+        <location filename="../core/commands.py" line="659"/>
         <source>Delete annotation</source>
         <translation>la suppression de l’annotation</translation>
     </message>
@@ -586,22 +587,27 @@ Redémarrer maintenant ?</translation>
         <translation>« {name} » est protégé par un mot de passe.</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="174"/>
+        <location filename="../ui/page_dialogs.py" line="176"/>
+        <source>Copying pages from “{name}” is not permitted by its security settings.</source>
+        <translation>La copie de pages depuis « {name} » n’est pas autorisée par ses paramètres de sécurité.</translation>
+    </message>
+    <message>
+        <location filename="../ui/page_dialogs.py" line="179"/>
         <source>“{name}” could not be opened as a PDF document.</source>
         <translation>« {name} » n’a pas pu être ouvert comme document PDF.</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="177"/>
+        <location filename="../ui/page_dialogs.py" line="184"/>
         <source>{count} pages</source>
         <translation>{count} pages</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="223"/>
+        <location filename="../ui/page_dialogs.py" line="230"/>
         <source>Invalid page range: “{token}”</source>
         <translation>Plage de pages invalide : « {token} »</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="237"/>
+        <location filename="../ui/page_dialogs.py" line="244"/>
         <source>The pages could not be read.</source>
         <translation>Les pages n’ont pas pu être lues.</translation>
     </message>
@@ -1312,47 +1318,47 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>SplitDialog</name>
     <message>
-        <location filename="../ui/page_dialogs.py" line="291"/>
+        <location filename="../ui/page_dialogs.py" line="298"/>
         <source>Split Document</source>
         <translation>Scinder le document</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="295"/>
+        <location filename="../ui/page_dialogs.py" line="302"/>
         <source>Every {n} pages</source>
         <translation>Toutes les {n} pages</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="301"/>
+        <location filename="../ui/page_dialogs.py" line="308"/>
         <source>Page ranges</source>
         <translation>Plages de pages</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="303"/>
+        <location filename="../ui/page_dialogs.py" line="310"/>
         <source>e.g. 1-3, 7, 10-</source>
         <translation>ex. 1-3, 7, 10-</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="318"/>
+        <location filename="../ui/page_dialogs.py" line="325"/>
         <source>Browse…</source>
         <translation>Parcourir…</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="335"/>
+        <location filename="../ui/page_dialogs.py" line="342"/>
         <source>Folder</source>
         <translation>Dossier</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="336"/>
+        <location filename="../ui/page_dialogs.py" line="343"/>
         <source>Base name</source>
         <translation>Nom de base</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="385"/>
+        <location filename="../ui/page_dialogs.py" line="392"/>
         <source>Invalid page range: “{token}”</source>
         <translation>Plage de pages invalide : « {token} »</translation>
     </message>
     <message>
-        <location filename="../ui/page_dialogs.py" line="388"/>
+        <location filename="../ui/page_dialogs.py" line="395"/>
         <source>{count} files will be written: {first} … {last}</source>
         <translation>{count} fichiers seront écrits : {first} … {last}</translation>
     </message>

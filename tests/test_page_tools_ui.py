@@ -325,11 +325,22 @@ def test_insert_dialog_refuses_open_document(qtbot, simple_pdf, settings) -> Non
         doc.close()
 
 
-def test_insert_dialog_encrypted_source(
-    qtbot, simple_pdf, encrypted_pdf, settings, monkeypatch
-) -> None:
+def test_insert_dialog_encrypted_source(qtbot, simple_pdf, tmp_path, settings, monkeypatch) -> None:
     from pdfeditor.core.document import PdfDocument
 
+    # A user password and the copy permission (a source forbidding copying is refused).
+    encrypted_pdf = tmp_path / "encrypted_copyable.pdf"
+    src = pymupdf.open()
+    src.new_page()
+    src.new_page()
+    src.save(
+        encrypted_pdf,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        user_pw=PASSWORD,
+        owner_pw="owner-" + PASSWORD,
+        permissions=pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_COPY,
+    )
+    src.close()
     answers = iter(["wrong", PASSWORD])
     asked: list[bool] = []
 
