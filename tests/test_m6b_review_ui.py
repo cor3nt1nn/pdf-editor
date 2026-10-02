@@ -230,3 +230,89 @@ def test_selection_paint_does_not_extract_text(qtbot, text_window, monkeypatch) 
     painting[0] = False
     assert calls == [False]
     assert sel.quads() == sel.quads() and len(sel.quads()) == 1
+
+
+# -- review test gaps: tool shortcuts and Ctrl+C typed into editors ------------------------
+TOOL_KEYS = (
+    (Qt.Key.Key_H, Qt.KeyboardModifier.ShiftModifier, "H"),
+    (Qt.Key.Key_T, Qt.KeyboardModifier.ShiftModifier, "T"),
+    (Qt.Key.Key_S, Qt.KeyboardModifier.ShiftModifier, "S"),
+    (Qt.Key.Key_U, Qt.KeyboardModifier.ShiftModifier, "U"),
+)
+
+
+def _type_tool_keys(qtbot, w: MainWindow, widget) -> str:
+    """Type Shift+H/T/S/U into ``widget``: the active tool must not change."""
+    tool = w.tool_manager.active_tool
+    typed = ""
+    for key, mods, text in TOOL_KEYS:
+        qtbot.keyClick(widget, key, mods)
+        assert w.tool_manager.active_tool is tool, text
+        typed += text
+    return typed
+
+
+def _copy_in(qtbot, w: MainWindow, widget, expected: str) -> None:
+    """Ctrl+A, Ctrl+C in ``widget`` copy its own text, not the page text (Copy Text)."""
+    messages = []
+    w.statusBar().messageChanged.connect(messages.append)
+    clipboard = QApplication.clipboard()
+    clipboard.setText("before")
+    qtbot.keyClick(widget, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    qtbot.keyClick(widget, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert clipboard.text() == expected
+    assert "Text copied" not in messages
+
+
+def test_shortcuts_typed_into_the_text_box_editor(qtbot, text_window) -> None:
+    w = text_window
+    w.act_text_tool.trigger()
+    qtbot.mouseClick(w.page_view.viewport(), LEFT, NO_MOD, _vp(w, QPointF(400, 650)))
+    editor = w.document_view.annot_editor
+    assert editor.is_open
+    widget = editor.editor
+    widget.setFocus()
+    typed = _type_tool_keys(qtbot, w, widget)
+    assert widget.toPlainText().upper() == typed  # QTest sends lower-case text
+    _copy_in(qtbot, w, widget, widget.toPlainText())
+    assert w.tool_manager.active_tool is w.tool_manager.tools["text"]
+
+
+def test_shortcuts_typed_into_toolbar_widgets(qtbot, text_window) -> None:
+    w = text_window
+    w.act_highlight.trigger()
+    w.document_view.text_selection.clear()
+    w.act_text_tool.trigger()  # the font size box is enabled
+    spin = w.font_size_spin.lineEdit()
+    spin.setFocus()
+    _type_tool_keys(qtbot, w, spin)
+    combo = w.zoom_widget.lineEdit()
+    assert combo is not None
+    combo.setFocus()
+    _type_tool_keys(qtbot, w, combo)
+    combo.setText("125%")
+    _copy_in(qtbot, w, combo, "125%")
+
+
+def test_shortcuts_typed_into_the_page_text_editor(qtbot, window, tmp_path) -> None:
+    import textedit_fixtures
+
+    if not textedit_fixtures.TEXT_FONTS_AVAILABLE:
+        pytest.skip("text fonts missing")
+    w = window
+    assert w.open_file(str(textedit_fixtures.make_text_edit_pdf(tmp_path / "edit.pdf")))
+    w.act_textedit_tool.trigger()
+    start = textedit_fixtures.LINE1.index("Jean")
+    qtbot.mouseClick(w.page_view.viewport(), LEFT, NO_MOD, _vp(w, _char(w, start + 1)))
+    w.page_view.setFocus()
+    qtbot.keyClick(w.page_view, Qt.Key.Key_Return)
+    editor = w.document_view.textedit_editor
+    assert editor.is_open
+    widget = editor.editor
+    widget.setFocus()
+    widget.selectAll()
+    typed = _type_tool_keys(qtbot, w, widget)
+    assert widget.text().upper() == typed  # QTest sends lower-case text
+    assert w.tool_manager.active_tool is w.textedit_tool
+    _copy_in(qtbot, w, widget, widget.text())
+    assert editor.is_open

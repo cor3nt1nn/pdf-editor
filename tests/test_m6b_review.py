@@ -208,3 +208,74 @@ def test_selection_of_fake_bold(qtbot, tmp_path):
         assert len(sel.quads()) == 1
     finally:
         view.shutdown()
+
+
+# -- review test gap: a foreign markup with a /Popup ---------------------------------------
+def _popup_highlight(path: Path) -> tuple[Path, int, int]:
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "The quick brown fox jumps", fontsize=12, fontname="helv")
+    ref = doc.page_xref(0)
+    hl, pop = doc.get_new_xref(), doc.get_new_xref()
+    doc.update_object(
+        pop,
+        f"<</Type/Annot/Subtype/Popup/Rect[400 600 580 700]/Open false/Parent {hl} 0 R"
+        f"/P {ref} 0 R>>",
+    )
+    doc.update_object(
+        hl,
+        "<</Type/Annot/Subtype/Highlight/Rect[94 687 128 706]"
+        "/QuadPoints[96 705 124 705 96 688 124 688]/C[1 0.5 0]/F 4/T(Alice)"
+        f"/Contents(a note)/Popup {pop} 0 R/P {ref} 0 R/RC(<body>rich</body>)>>",
+    )
+    doc.xref_set_key(ref, "Annots", f"[{hl} 0 R {pop} 0 R]")
+    doc.save(path)
+    doc.close()
+    return path, hl, pop
+
+
+def test_foreign_markup_with_popup_recolour_delete_undo(tmp_path):
+    from pdfeditor.core.commands import DeleteAnnotCommand, EditAnnotCommand
+    from pdfeditor.core.document import PdfDocument
+    from pdfeditor.ui.tools.markup_tools import markup_text
+
+    path, hl, pop = _popup_highlight(tmp_path / "popup.pdf")
+    doc = PdfDocument.open(str(path))
+    try:
+        (info,) = doc.annots(0)  # the popup is not listed
+        assert info.is_markup and info.text == "a note"
+        assert markup_text(doc, info) == "quick"
+        # Recolour: the foreign keys stay, undo restores the colour.
+        cmd = EditAnnotCommand(doc, info, color=(0, 0, 1))
+        cmd.apply_now()
+        assert cmd.error is None
+        with doc.lock:
+            keys = {k: doc.fitz.xref_get_key(hl, k) for k in ("T", "Popup", "RC", "C")}
+        assert keys["T"] == ("string", "Alice")
+        assert keys["Popup"] == ("xref", f"{pop} 0 R")
+        assert keys["RC"] == ("string", "<body>rich</body>")
+        assert keys["C"] == ("array", "[0 0 1]")
+        cmd.undo()
+        with doc.lock:
+            assert doc.fitz.xref_get_key(hl, "C") == ("array", "[1 .5 0]")
+        # Delete: the markup and its popup go; undo re-creates the markup.
+        (info,) = doc.annots(0)
+        delete = DeleteAnnotCommand(doc, info)
+        delete.apply_now()
+        assert delete.error is None
+        assert doc.annots(0) == []
+        with doc.lock:
+            assert list(doc.fitz[0].annots()) == []
+            assert doc.fitz.xref_get_key(doc.fitz.page_xref(0), "Annots") == ("array", "[]")
+        delete.undo()
+        (back,) = doc.annots(0)
+        assert back.kind is info.kind and back.text == "a note"
+        assert back.color == pytest.approx(info.color)
+        assert markup_text(doc, back) == "quick"
+        doc.save()
+    finally:
+        doc.close()
+    with pymupdf.open(path) as fd:
+        assert [a.type[1] for a in fd[0].annots()] == ["Highlight"]
+        annots = fd.xref_get_key(fd.page_xref(0), "Annots")[1]
+        assert annots.count(" 0 R") == 1  # no orphan popup left in /Annots
