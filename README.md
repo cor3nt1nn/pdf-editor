@@ -8,11 +8,13 @@ undo/redo and saving; Milestone 2 adds filling of standard PDF forms (AcroForm);
 adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs); Milestone 4
 adds signing with an image of a handwritten signature; Milestone 5 adds File ▸
 Export Copy… (flattened or clean copies), Open Recent, "Open with" registration and a
-portable Windows release; Milestone 6 (current) adds page tools (reorder, delete, insert,
-extract, split) and text selection, copy and highlight/underline/strike-through markups.
+portable Windows release; Milestone 6 adds page tools (reorder, delete, insert,
+extract, split) and text selection, copy and highlight/underline/strike-through markups;
+Milestone 7 (current) edits the page's own text in place.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
 [docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md),
-[docs/M5_PLAN.md](docs/M5_PLAN.md) and [docs/M6_PLAN.md](docs/M6_PLAN.md).
+[docs/M5_PLAN.md](docs/M5_PLAN.md), [docs/M6_PLAN.md](docs/M6_PLAN.md) and
+[docs/M7_PLAN.md](docs/M7_PLAN.md).
 
 ## Install & use (end users)
 
@@ -602,6 +604,95 @@ originals.
    deleted in PDF Editor and keeps its author after recolouring.
 9. **Permissions**: an owner-locked file without the annotation or copy permission: the markup
    tools and Copy Text are disabled, Select Text still works.
+
+## Edit page text (Milestone 7)
+
+Correct a word or a few characters of the page's own text — a typo in a Word export, a name,
+a date — in place, in the document's font when it has the needed letters. Edit ▸ **Edit Page
+Text** (**E**, also on the toolbar after the signature button):
+
+| Gesture | Effect |
+|---|---|
+| Hover | The line under the pointer gets a light frame and the word a stronger one (I-beam cursor) |
+| **Click** / **Double-click** | Select a word / the part of the line in one style (same font, size and colour) |
+| **Drag**, **Shift+click** | Select a range of characters; it stays on the line where it started |
+| **Enter**, **F2**, or a second click on the selection | Open the editor over the selection, prefilled with its text |
+| Type, then **Enter** (or **Tab**, or click elsewhere) | Replace the selected text; an empty editor deletes it |
+| **Esc** | Close the editor without changing anything; press again to deselect |
+
+Typing does not open the editor by itself: select, then Enter/F2 (or click the selection
+again), then type. Each change is one Undo step ("Edit page text"; Ctrl+Z / Ctrl+Y).
+
+- **Font**: the new text is written with the document's embedded font when it contains every
+  character typed (Word, LibreOffice and "Print to PDF" files usually embed only the letters
+  they use). Otherwise the installed font of the same family and style is used (Calibri for a
+  Calibri document; for "Microsoft Print to PDF" files, whose font names are generic, the
+  family is recognised from the font itself, e.g. Arial), else Arial, Times New Roman or
+  Courier New — and the status bar says "Replaced with {font}: the document's font lacks some
+  of these characters." Only the characters needed are embedded (a few KB).
+- **Width**: a slightly longer text is narrowed (down to 85 % of its normal width) to fit the
+  original's place, with a status message; beyond that it overflows to the right (status
+  message). Shorter text leaves a gap: nothing is re-flowed.
+- **Neighbouring characters**: when glyphs of the selection overlap neighbours (kerned text),
+  the neighbours are removed and written again unchanged; the status bar names them.
+- **Saving**: the next **Save after an edit rewrites the whole file** (status message, once per
+  document); later saves are incremental again. Other viewers show the new text and find it
+  when searching; the old text is not kept in the file.
+- What cannot be edited, with a status message: scanned pages and outlined text ("No editable
+  text here…"), the invisible text layer of OCR'd scans, files whose security settings forbid
+  changes (the tool is disabled), and pages whose content exceeds 20 MB. Text the program
+  cannot rewrite safely — text inside embedded page objects (Form XObjects, e.g. pages
+  imposed or stamped by other software), right-to-left (Arabic, Hebrew) or vertical text,
+  text drawn twice only in part (fake bold), or characters no installed font has — shows "The
+  text could not be changed." and the page stays as it was.
+
+Known limitations:
+
+- One run at a time, within one style on one line: no mixed bold/italic, no multi-line text,
+  no re-flow of the paragraph; justified lines keep their original word spacing.
+- Missing letters force a substitute font, visible with brand or uncommon fonts (Aptos, for
+  example, is not installed on every Windows); font discovery is Windows-only, and installed
+  fonts that forbid embedding or have PostScript (CFF `.otf`) outlines are skipped.
+- Ligatures such as "ﬁ" appear as one character in the editor and are written back as
+  separate letters.
+- Narrowed text is slightly compressed horizontally; substitute fonts are embedded without
+  hinting (may look a little softer on screen at small sizes); outlined or clipping text
+  effects (stroked text) come back as plain filled text.
+- The edited text moves to the end of the page's reading order: text selection, copy and
+  screen readers meet it after the rest of the page.
+- Text boxes, stamps, signatures and markups over the edited text stay where they were.
+- The first edit merges the page's content into one stream, and the page's resources keep
+  every name they had; Type3 (bitmap) text is replaced with a substitute font.
+- Undoing an edit fails with "The page changed since this edit; it cannot be undone." if the
+  page's content was changed differently in between.
+
+### Manual page text checklist (Milestone 7)
+
+Run it on copies of real documents; keep the originals.
+
+1. **Word export** (Calibri, "Save as PDF"): E, hover a paragraph (line and word frames), click
+   a misspelt word, Enter, fix it, Enter: the word changes in place, same font and colour, no
+   status message about fonts; Ctrl+Z restores it exactly, Ctrl+Y redoes it. Type a letter
+   absent from the page (for example a capital Z): "Replaced with Calibri…".
+2. **Microsoft Print to PDF** (fonts named `CIDFont+F1`): edit a word with new letters: the
+   status bar says "Replaced with Arial…" (or the original family) and the text looks the same.
+3. **LibreOffice export** (Writer, File ▸ Export as PDF): edit a word in body text and one in a
+   heading; double-click selects only the run in one style; a selection over a bold word is
+   reduced with "Only text in a single style can be edited at once…".
+4. **Width**: replace a short word by a slightly longer one ("narrowed to fit") and by a much
+   longer one ("overflows"); replace a word by nothing (it disappears, the gap stays).
+5. **Refusals**: a scanned page ("No editable text here…"), an OCR'd scan ("…invisible OCR
+   layer…"), a password-protected file without the change permission (tool disabled).
+6. **Rotated page**: rotate a page (Ctrl+R) and edit a word on it: the new text sits on the
+   line, in the right direction.
+7. **Save is full**: after an edit the status bar says "After editing page text, the next save
+   rewrites the whole file." (once per document); Ctrl+S rewrites the file and the title's `*`
+   goes. Add a text box and save: incremental again (fast); edit page text again: the next
+   save is full again.
+8. **Other viewers**: open the saved file in Adobe Acrobat Reader, Edge and Chrome: the new
+   text is in place, in the expected font, Ctrl+F finds it and not the old word, copying it
+   gives the new text; no repair prompt when closing Adobe Reader. Reopen it in PDF Editor:
+   the edited word can be edited again.
 
 ## License
 

@@ -14,7 +14,9 @@
 
 Every plan but ``REUSE`` carries ``warning = FontWarning.SUBSTITUTED`` (the UI says
 "Replaced with {family}…"). Installed faces whose OS/2 ``fsType`` is "restricted" are
-never chosen, nor is a restricted embedded font reused.
+never chosen, nor is a restricted embedded font reused; neither are installed faces
+without TrueType outlines (CFF ``.otf``: :mod:`fontembed` cannot subset them), so the
+next candidate (or the generic font) is used instead.
 
 Installed fonts (:func:`system_fonts`, cached for the process): the Windows registry
 (``HKLM`` and ``HKCU`` ``…\\CurrentVersion\\Fonts``; values are bare file names in
@@ -118,10 +120,17 @@ class SystemFace:
     italic: bool
     fs_type: int | None
     num_glyphs: int
+    #: TrueType outlines (``glyf``/``loca``); CFF faces cannot be embedded.
+    truetype: bool = True
 
     @property
     def restricted(self) -> bool:
         return fontinfo.is_restricted(self.fs_type)
+
+    @property
+    def embeddable(self) -> bool:
+        """Not restricted and with TrueType outlines (what :mod:`fontembed` accepts)."""
+        return self.truetype and not self.restricted
 
 
 def normalise_family(name: str) -> str:
@@ -170,8 +179,9 @@ class SystemFonts:
 
     def find(self, family: str, *, bold: bool = False, italic: bool = False) -> SystemFace | None:
         """The closest face of ``family`` (italic matters most, then weight), skipping
-        restricted faces; ``None`` when the family is not installed."""
-        faces = [f for f in self.family_faces(family) if not f.restricted]
+        faces that cannot be embedded (restricted, CFF outlines); ``None`` when the family
+        has no such face."""
+        faces = [f for f in self.family_faces(family) if f.embeddable]
         if not faces:
             return None
         target = 700 if bold else 400
@@ -247,6 +257,7 @@ def read_faces(path: Path) -> list[SystemFace]:
                         italic=style.italic,
                         fs_type=fontinfo.fs_type(data, index),
                         num_glyphs=fontinfo.glyph_count(data, index),
+                        truetype={"glyf", "loca"} <= fontinfo.tables(data, index).keys(),
                     )
                 )
             except (fontinfo.FontFileError, ValueError) as exc:

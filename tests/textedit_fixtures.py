@@ -15,6 +15,9 @@ Windows fonts Calibri, Arial and Times New Roman: guard such tests with
   :func:`make_kerned_tj_pdf`, :func:`make_inherited_resources_pdf`.
 * :func:`make_overlap_pdf` (two words whose glyph boxes overlap: the collateral loop),
   :func:`make_fake_bold_pdf` (text drawn twice at the same place), :func:`make_rtl_pdf`.
+* Odd fonts (M7-T8): :func:`make_ligature_pdf` (a U+FB01 glyph), :func:`make_base14_pdf`
+  (Helvetica not embedded, or embedded as ``/Type1C``), :func:`make_cff_font` (a CFF
+  ``.otf`` file).
 * :func:`chars_of`, :func:`pixels_equal`, :func:`pixel_diff_bbox`, :func:`font_xref`.
 """
 
@@ -400,6 +403,85 @@ def make_rtl_pdf(path: Path) -> Path:
     doc.subset_fonts()
     doc.save(path, garbage=3, deflate=True)
     doc.close()
+    return path
+
+
+# -- odd fonts (M7-T8) --------------------------------------------------------------------
+LIGATURE_LINE = "Le bénéﬁce fiscal"  # U+FB01 in "bénéﬁce", separate letters in "fiscal"
+LIGATURE_WORD = "bénéﬁce"
+BASE14_LINE = "Monsieur Jean Dupont habite Lyon"
+
+
+def make_ligature_pdf(path: Path) -> Path:
+    """Calibri (Type0 subset) line :data:`LIGATURE_LINE` whose "ﬁ" is one glyph (U+FB01)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
+    page.insert_text(
+        LINE1_ORIGIN,
+        LIGATURE_LINE,
+        fontsize=BODY_SIZE,
+        fontname="Calibri",
+        fontfile=str(CALIBRI_PATH),
+    )
+    doc.subset_fonts()
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+def make_base14_pdf(path: Path, *, embedded: bool = False) -> Path:
+    """:data:`BASE14_LINE` in Helvetica (``/Type1``, WinAnsi, no ``/Widths``). Not
+    embedded by default (no FontDescriptor/FontFile); ``embedded`` adds a FontDescriptor
+    whose ``/FontFile3 /Type1C`` is MuPDF's built-in Helvetica program (CFF, the way a
+    Base-14 font is embedded as Type1)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
+    page.insert_text(LINE1_ORIGIN, BASE14_LINE, fontsize=BODY_SIZE, fontname="helv")
+    if embedded:
+        fx = int(page.get_fonts(full=True)[0][0])
+        ff = doc.get_new_xref()
+        doc.update_object(ff, "<< /Subtype /Type1C >>")
+        doc.update_stream(ff, pymupdf.Font("helv").buffer)
+        fd = doc.get_new_xref()
+        doc.update_object(
+            fd,
+            "<< /Type /FontDescriptor /FontName /Helvetica /Flags 32"
+            " /FontBBox [-166 -225 1000 931] /ItalicAngle 0 /Ascent 718 /Descent -207"
+            f" /CapHeight 718 /StemV 88 /FontFile3 {ff} 0 R >>",
+        )
+        doc.xref_set_key(fx, "FontDescriptor", f"{fd} 0 R")
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+def make_cff_font(path: Path, family: str, chars: str) -> Path:
+    """A CFF-outline OpenType font (``.otf``, no ``glyf``) named ``family`` with a
+    triangle glyph for each of ``chars`` (fontTools' FontBuilder)."""
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+
+    def triangle():  # type: ignore[no-untyped-def]
+        pen = T2CharStringPen(500, None)
+        pen.moveTo((0, 0))
+        pen.lineTo((500, 0))
+        pen.lineTo((250, 700))
+        pen.closePath()
+        return pen.getCharString()
+
+    names = {ch: f"g{ord(ch):04X}" for ch in sorted(set(chars))}
+    order = [".notdef", *names.values()]
+    fb = FontBuilder(1000, isTTF=False)
+    fb.setupGlyphOrder(order)
+    fb.setupCharacterMap({ord(ch): name for ch, name in names.items()})
+    ps_name = family.replace(" ", "")
+    fb.setupCFF(ps_name, {"FullName": family}, {g: triangle() for g in order}, {})
+    fb.setupHorizontalMetrics({g: (500, 0) for g in order})
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupNameTable({"familyName": family, "styleName": "Regular"})
+    fb.setupOS2(fsType=0)
+    fb.setupPost()
+    fb.save(str(path))
     return path
 
 
