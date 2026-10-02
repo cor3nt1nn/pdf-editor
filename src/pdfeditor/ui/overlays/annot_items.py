@@ -1,7 +1,9 @@
-"""Selection overlay of a FreeText annotation: frame, 8 resize handles, drag ghost (M3).
+"""Selection overlay of an annotation: frame, 8 resize handles, drag ghost (M3); quad
+outlines without handles for text markups (M6b).
 
 ``AnnotHandleItem`` is a purely visual child of a ``PageItem`` (page space, points);
-the annotation tools hit-test its handles with :meth:`AnnotHandleItem.handle_at`.
+the annotation tools hit-test its handles with :meth:`AnnotHandleItem.handle_at` and the
+annotations themselves with :func:`annot_hit`.
 ``AnnotSelection`` keeps the selected annotation (by ``(page, name)``) and its item in
 sync with the document.
 """
@@ -9,6 +11,7 @@ sync with the document.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
@@ -18,6 +21,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from pdfeditor.core.annotations import AnnotInfo
+from pdfeditor.core.pagetext import Quad
 
 if TYPE_CHECKING:
     from pdfeditor.core.document import PageId, PdfDocument
@@ -65,18 +69,46 @@ def handle_points(rect: QRectF) -> dict[Handle, QPointF]:
     }
 
 
+def annot_hit(info: AnnotInfo, page_pos: QPointF, tol_pt: float) -> bool:
+    """``page_pos`` lies on ``info`` with a margin of ``tol_pt`` (page points).
+
+    A text markup is hit inside the bounding rect of any of its quads (+ ``tol_pt``, D10),
+    not in the gaps of the union of its quads (e.g. right of the shorter line of a
+    two-line highlight); any other annotation inside its rect (+ ``tol_pt``).
+    """
+    if info.quads:
+        return any(
+            q.bounding_rect().adjusted(-tol_pt, -tol_pt, tol_pt, tol_pt).contains(page_pos)
+            for q in info.quads
+        )
+    return info.rect.adjusted(-tol_pt, -tol_pt, tol_pt, tol_pt).contains(page_pos)
+
+
 class AnnotHandleItem(QGraphicsItem):
     """Selection frame + 8 handles around ``rect`` and an optional dashed ghost.
 
     Child of a ``PageItem``, in page space. Accepts no mouse buttons nor hover (the
     active tool handles the mouse); z = 2, above the field highlights. The frame and
     ghost use cosmetic pens; handles are ``HANDLE_PX`` device pixels at any zoom.
+
+    With ``quads`` (a text markup) the outline of every quad is drawn instead of the
+    frame; with ``handles=False`` no handle is drawn and :meth:`handle_at` always returns
+    None (markups are never resized, docs/M6_PLAN.md D10).
     """
 
-    def __init__(self, rect: QRectF, parent: QGraphicsItem | None = None) -> None:
+    def __init__(
+        self,
+        rect: QRectF,
+        parent: QGraphicsItem | None = None,
+        *,
+        handles: bool = True,
+        quads: Iterable[Quad] = (),
+    ) -> None:
         super().__init__(parent)
         self._rect = QRectF(rect)
         self._ghost: QRectF | None = None
+        self._handles = bool(handles)
+        self._quads: tuple[Quad, ...] = tuple(quads)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.setAcceptHoverEvents(False)
         self.setZValue(ANNOT_HANDLE_Z)
@@ -88,6 +120,28 @@ class AnnotHandleItem(QGraphicsItem):
     @property
     def ghost(self) -> QRectF | None:
         return None if self._ghost is None else QRectF(self._ghost)
+
+    @property
+    def handles(self) -> bool:
+        """Resize handles are drawn and hit-tested."""
+        return self._handles
+
+    @property
+    def quads(self) -> tuple[Quad, ...]:
+        """The outlined quads (empty: the rect frame is drawn)."""
+        return self._quads
+
+    def set_handles(self, handles: bool) -> None:
+        if bool(handles) != self._handles:
+            self._handles = bool(handles)
+            self.update()
+
+    def set_quads(self, quads: Iterable[Quad]) -> None:
+        quads = tuple(quads)
+        if quads != self._quads:
+            # The rect is the union of the quads (set_rect): no geometry change of its own.
+            self._quads = quads
+            self.update()
 
     def set_rect(self, rect: QRectF) -> None:
         if rect != self._rect:
@@ -110,7 +164,10 @@ class AnnotHandleItem(QGraphicsItem):
         Inside the rect the tolerance is capped at a quarter of the rect's width
         (horizontally) and height (vertically): the body of a box that is small on
         screen (zoomed out) stays movable, while its corners and edges still resize.
+        Always None without handles (a text markup).
         """
+        if not self._handles:
+            return None
         tol_x = tol_y = tol_pt
         if self._rect.contains(page_pos):
             tol_x = min(tol_pt, self._rect.width() / 4)
@@ -144,13 +201,19 @@ class AnnotHandleItem(QGraphicsItem):
             frame = QPen(SELECTION_COLOR, 0)
             frame.setCosmetic(True)
             painter.setPen(frame)
-            painter.drawRect(self._rect)
+            if self._quads:
+                for quad in self._quads:
+                    painter.drawPolygon(quad.polygon())
+            else:
+                painter.drawRect(self._rect)
             if self._ghost is not None:
                 ghost = QPen(GHOST_COLOR, 0, Qt.PenStyle.DashLine)
                 ghost.setCosmetic(True)
                 painter.setPen(ghost)
                 painter.setBrush(QBrush(GHOST_FILL))
                 painter.drawRect(self._ghost)
+            if not self._handles:
+                return
             # Handles: fixed device size, centred on the mapped handle points.
             transform = painter.worldTransform()
             centres = [transform.map(p) for p in handle_points(self._rect).values()]
@@ -273,12 +336,16 @@ class AnnotSelection(QObject):
             return
         page_item = self._view.page_item(info.page)
         if not self._item_valid():
-            self._item = AnnotHandleItem(info.rect, page_item)
+            self._item = AnnotHandleItem(
+                info.rect, page_item, handles=info.movable, quads=info.quads
+            )
         else:
             assert self._item is not None
             if self._item.parentItem() is not page_item:
                 self._item.setParentItem(page_item)
             self._item.set_rect(info.rect)
+            self._item.set_quads(info.quads)
+            self._item.set_handles(info.movable)
         self._item.set_ghost(self._ghost)
 
     def _remove_item(self) -> None:
@@ -339,5 +406,6 @@ __all__ = [
     "AnnotHandleItem",
     "AnnotSelection",
     "Handle",
+    "annot_hit",
     "handle_points",
 ]

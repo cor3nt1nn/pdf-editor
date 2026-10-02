@@ -11,6 +11,10 @@ pointer (``core.snapping``; Alt disables snapping). Inside a fillable form field
 is created unless Alt is held (the Form tool fills fields). Signatures keep their aspect
 when resized (by any of these tools). The tools never mutate the document: every change
 is a command pushed through ``DocumentView.push``.
+
+Text markups (highlight, underline, strike-out, squiggly; M6b) are selected, recoloured
+and deleted by the same tools but never moved nor resized: their selection outlines the
+quads without handles and they are hit by their quads, not by the union rect.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ from pdfeditor.core.commands import AddAnnotCommand, DeleteAnnotCommand, EditAnn
 from pdfeditor.core.document import DocumentError, PdfDocument
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import Snap, SnapKind
-from pdfeditor.ui.overlays.annot_items import Handle
+from pdfeditor.ui.overlays.annot_items import Handle, annot_hit
 from pdfeditor.ui.overlays.floating_editor import normalize_newlines
 from pdfeditor.ui.tools.base import Tool, ToolEvent
 
@@ -245,7 +249,8 @@ class AnnotToolBase(Tool):
 
     # -- hit testing ------------------------------------------------------------
     def annot_at(self, page: int | None, pos: QPointF | None) -> AnnotInfo | None:
-        """The topmost editable FreeText annotation under ``pos`` on ``page``."""
+        """The topmost editable annotation under ``pos`` on ``page`` (a text markup only
+        inside one of its quads, see :func:`annot_hit`)."""
         doc = self._doc()
         if doc is None or page is None or pos is None:
             return None
@@ -255,7 +260,7 @@ class AnnotToolBase(Tool):
             return None
         tol = HIT_TOLERANCE_PX / self._scale()
         for info in reversed(annots):
-            if info.editable and info.rect.adjusted(-tol, -tol, tol, tol).contains(pos):
+            if info.editable and annot_hit(info, pos, tol):
                 return info
         return None
 
@@ -314,6 +319,7 @@ class AnnotToolBase(Tool):
         px = _viewport_pos(event)
         handle = self._handle_at(page, pos)
         current = self.selection.current
+        # A markup's item has no handles; ``movable`` guards against a stale item.
         if handle is not None and current is not None and current.movable:
             self._drag = _Drag(_Mode.RESIZE, current, pos, px, handle=handle)
             return True
@@ -358,7 +364,7 @@ class AnnotToolBase(Tool):
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
             if not drag.info.movable:
-                return True  # a text markup stays on its text (never moved)
+                return True  # a text markup stays on its text (never moved, D10)
             drag.mode = _Mode.MOVE
         delta = pos - drag.start
         rect = drag.info.rect
@@ -463,8 +469,13 @@ class AnnotToolBase(Tool):
             handle = self._handle_at(page, pos)
             if handle is not None:
                 shape = _HANDLE_CURSORS[handle]
-            elif self.annot_at(page, pos) is not None:
-                shape = Qt.CursorShape.SizeAllCursor
+            elif (hit := self.annot_at(page, pos)) is not None:
+                # A markup is selectable, not movable.
+                shape = (
+                    Qt.CursorShape.SizeAllCursor
+                    if hit.movable
+                    else Qt.CursorShape.PointingHandCursor
+                )
             elif alt or not self.form_field_at(page, pos):
                 rect = self.preview_rect(page, pos, alt)
                 preview = None if rect is None else (page, rect)
