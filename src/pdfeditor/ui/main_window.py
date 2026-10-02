@@ -614,6 +614,7 @@ class MainWindow(QMainWindow):
         self.thumbnails.context_menu_requested.connect(self._show_page_context_menu)
         self.document_view.document_changed.connect(self._on_document_changed)
         self.document_view.path_changed.connect(self._on_path_changed)
+        self.document_view.history_failed.connect(self._on_history_failed)
         self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
         self.color_button.clicked.connect(self.choose_text_color)
 
@@ -945,12 +946,31 @@ class MainWindow(QMainWindow):
     def undo(self) -> None:
         """Edit ▸ Undo: commit a pending field edit, then undo the last command (which
         is that edit when the value changed)."""
-        self.document_view.commit_pending_edits()
-        self.undo_stack.undo()
+        self.document_view.undo()
 
     def redo(self) -> None:
-        self.document_view.commit_pending_edits()
-        self.undo_stack.redo()
+        self.document_view.redo()
+
+    def _on_history_failed(self, kind: str, error: object) -> None:
+        """A command failed inside the undo stack: the history is already cleared."""
+        if kind == "undo":
+            title = self.tr("Undo")
+            text = self.tr(
+                "The last change could not be undone. The undo history has been cleared; the document stays as it is now and is marked as modified."  # noqa: E501
+            )
+        elif kind == "redo":
+            title = self.tr("Redo")
+            text = self.tr(
+                "The change could not be redone. The undo history has been cleared; the document stays as it is now and is marked as modified."  # noqa: E501
+            )
+        else:
+            title = APP_NAME
+            text = self.tr(
+                "The change could not be applied. The undo history has been cleared; the document stays as it is now and is marked as modified."  # noqa: E501
+            )
+        self._update_title()
+        self._update_actions()
+        dialogs.warn(self, title, text, details=str(error))
 
     def delete_annotation(self) -> None:
         """Edit ▸ Delete Annotation: delete the selection of the active annotation tool."""

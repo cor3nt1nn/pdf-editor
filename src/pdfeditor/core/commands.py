@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import weakref
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 from PySide6.QtCore import QCoreApplication, QRectF, QSizeF
@@ -30,6 +31,8 @@ from pdfeditor.core.document import (
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 from pdfeditor.core.signature import ImageData
 
+log = logging.getLogger(__name__)
+
 
 class DocumentCommand(QUndoCommand):
     """Base class for commands that mutate a PdfDocument (emitting page_changed etc.).
@@ -43,11 +46,27 @@ class DocumentCommand(QUndoCommand):
     ``dataclasses.replace(info, page=index)`` before use. A page id that is no longer in
     the document raises a :class:`DocumentError` (the command's own error class); with a
     linear undo stack that only happens after a bug.
+
+    Failure rule (docs/ARCHITECTURE.md Deviation 90): ``redo()``/``undo()`` never let an
+    exception escape (it would be swallowed by the Qt override while ``QUndoStack`` moves
+    its index anyway). They record it in :attr:`error` instead (None after a success);
+    whoever ran the stack (``DocumentView``) checks it, reports it and clears the history.
     """
 
     def __init__(self, doc: PdfDocument, text: str, parent: QUndoCommand | None = None):
         super().__init__(text, parent)
         self.doc = doc
+        #: The exception raised by the last ``redo()``/``undo()``, None if it succeeded.
+        self.error: Exception | None = None
+
+    def _guarded(self, step: Callable[[], None], what: str) -> None:
+        """Run ``step``, recording (never raising) its exception in :attr:`error`."""
+        self.error = None
+        try:
+            step()
+        except Exception as exc:  # nothing may escape a Qt override
+            log.warning("%s of %r failed: %s", what, self.text(), exc, exc_info=True)
+            self.error = exc
 
     def _index(self, page_id: PageId, error: type[DocumentError] = DocumentError) -> int:
         """The current index of page ``page_id``; raises ``error`` if it is gone."""
@@ -81,11 +100,12 @@ class _ImmediateCommand(DocumentCommand):
     def redo(self) -> None:
         if self._applied:
             self._applied = False
+            self.error = None
             return
-        self._redo()
+        self._guarded(self._redo, "redo")
 
     def undo(self) -> None:
-        self._undo()
+        self._guarded(self._undo, "undo")
 
     def _redo(self) -> None:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -361,7 +381,7 @@ class InsertPagesCommand(_InsertCommand):
 
 
 # -- form fields ---------------------------------------------------------------
-class SetFieldValueCommand(DocumentCommand):
+class SetFieldValueCommand(_ImmediateCommand):
     """Set one form field value (one undo step per commit, never merged).
 
     ``new_value``: a string for text/combo/list fields ("" clears), ``True``/``False``
@@ -396,22 +416,11 @@ class SetFieldValueCommand(DocumentCommand):
         else:
             self.old_value = info.value
             self.new_value = new_value
-        self._applied = False
 
     @property
     def page(self) -> int:
         """The widget's current page index."""
         return self._index(self.page_id, FieldError)
-
-    def apply_now(self) -> None:
-        """Apply the change immediately (raises :class:`FieldError` if the field is gone).
-
-        The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
-        failure is reported before anything reaches the undo stack (an exception raised
-        inside ``push`` would leave a broken command on the stack).
-        """
-        self.redo()
-        self._applied = True
 
     def _apply(self, value: str | bool, font_size: float | None) -> None:
         self.doc.set_field_value(
@@ -423,13 +432,10 @@ class SetFieldValueCommand(DocumentCommand):
             unrotated_rect=self.info.unrotated_rect,
         )
 
-    def redo(self) -> None:
-        if self._applied:
-            self._applied = False
-            return
+    def _redo(self) -> None:
         self._apply(self.new_value, self.font_size)
 
-    def undo(self) -> None:
+    def _undo(self) -> None:
         restore = None
         if self.font_size is not None and self.font_size != self.old_font_size:
             restore = self.old_font_size

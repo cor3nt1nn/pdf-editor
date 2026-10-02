@@ -4,17 +4,17 @@
 <context>
     <name>AnnotTools</name>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="84"/>
+        <location filename="../ui/tools/annot_tools.py" line="88"/>
         <source>The annotation could not be updated.</source>
         <translation>L’annotation n’a pas pu être mise à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="88"/>
+        <location filename="../ui/tools/annot_tools.py" line="92"/>
         <source>This is a form field: use the Form tool (F) to fill it. Hold Alt to place text over it anyway.</source>
         <translation>Ceci est un champ de formulaire : utilisez l’outil formulaire (F) pour le remplir. Maintenez Alt pour placer du texte par-dessus malgré tout.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="95"/>
+        <location filename="../ui/tools/annot_tools.py" line="99"/>
         <source>The image could not be read.</source>
         <translation>L’image n’a pas pu être lue.</translation>
     </message>
@@ -22,102 +22,103 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../core/commands.py" line="116"/>
+        <location filename="../core/commands.py" line="136"/>
         <source>Rotate page</source>
+        <extracomment>The exception raised by the last ``redo()``/``undo()``, None if it succeeded.</extracomment>
         <translation>la rotation de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="118"/>
+        <location filename="../core/commands.py" line="138"/>
         <source>Rotate pages</source>
         <translation>la rotation des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="199"/>
+        <location filename="../core/commands.py" line="219"/>
         <source>Delete page</source>
         <translation>la suppression de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="201"/>
+        <location filename="../core/commands.py" line="221"/>
         <source>Delete pages</source>
         <translation>la suppression des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="265"/>
+        <location filename="../core/commands.py" line="285"/>
         <source>Move pages</source>
         <translation>le déplacement des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="324"/>
+        <location filename="../core/commands.py" line="344"/>
         <source>Insert blank page</source>
         <translation>l’insertion d’une page vierge</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="346"/>
+        <location filename="../core/commands.py" line="366"/>
         <source>Insert pages</source>
         <translation>l’insertion des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="382"/>
+        <location filename="../core/commands.py" line="402"/>
         <source>Edit form field</source>
         <translation>la modification du champ</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="477"/>
+        <location filename="../core/commands.py" line="483"/>
         <source>Add signature</source>
         <translation>l’ajout de la signature</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="479"/>
+        <location filename="../core/commands.py" line="485"/>
         <source>Add stamp</source>
         <translation>l’ajout du tampon</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="481"/>
+        <location filename="../core/commands.py" line="487"/>
         <source>Add highlight</source>
         <translation>l’ajout du surlignage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="483"/>
+        <location filename="../core/commands.py" line="489"/>
         <source>Add underline</source>
         <translation>l’ajout du soulignement</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="485"/>
+        <location filename="../core/commands.py" line="491"/>
         <source>Add strike-through</source>
         <translation>l’ajout du texte barré</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="486"/>
+        <location filename="../core/commands.py" line="492"/>
         <source>Add text</source>
         <translation>l’ajout du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="562"/>
+        <location filename="../core/commands.py" line="568"/>
         <source>Change markup color</source>
         <translation>le changement de couleur du marquage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="564"/>
+        <location filename="../core/commands.py" line="570"/>
         <source>Edit text</source>
         <translation>la modification du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="571"/>
+        <location filename="../core/commands.py" line="577"/>
         <source>Move annotation</source>
         <translation>le déplacement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="572"/>
+        <location filename="../core/commands.py" line="578"/>
         <source>Resize annotation</source>
         <translation>le redimensionnement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="573"/>
+        <location filename="../core/commands.py" line="579"/>
         <source>Change text style</source>
         <translation>le changement de style du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="626"/>
+        <location filename="../core/commands.py" line="632"/>
         <source>Delete annotation</source>
         <translation>la suppression de l’annotation</translation>
     </message>
@@ -426,17 +427,18 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>DocumentView</name>
     <message>
-        <location filename="../ui/document_view.py" line="157"/>
+        <location filename="../ui/document_view.py" line="196"/>
         <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
+        <extracomment>A command failed while the stack ran it: (``&quot;undo&quot;``, ``&quot;redo&quot;`` or ``&quot;push&quot;``, the exception). The undo history is already cleared and the document marked modified (docs/ARCHITECTURE.md Deviation 90).</extracomment>
         <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="165"/>
+        <location filename="../ui/document_view.py" line="204"/>
         <source>Form filling is not permitted by this document’s security settings.</source>
         <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="171"/>
+        <location filename="../ui/document_view.py" line="210"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
     </message>
@@ -608,9 +610,9 @@ Redémarrer maintenant ?</translation>
     <name>MainWindow</name>
     <message>
         <location filename="../ui/main_window.py" line="172"/>
-        <location filename="../ui/main_window.py" line="1039"/>
-        <location filename="../ui/main_window.py" line="1045"/>
-        <location filename="../ui/main_window.py" line="1180"/>
+        <location filename="../ui/main_window.py" line="1059"/>
+        <location filename="../ui/main_window.py" line="1065"/>
+        <location filename="../ui/main_window.py" line="1200"/>
         <source>Pages</source>
         <extracomment>Range of the toolbar font-size spin box (pt). The user&apos;s saved signatures (injectable: tests pass a store in tmp_path).</extracomment>
         <translation>Pages</translation>
@@ -652,11 +654,13 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="217"/>
+        <location filename="../ui/main_window.py" line="957"/>
         <source>Undo</source>
         <translation>Annuler</translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="220"/>
+        <location filename="../ui/main_window.py" line="962"/>
         <source>Redo</source>
         <translation>Rétablir</translation>
     </message>
@@ -867,7 +871,7 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <location filename="../ui/main_window.py" line="484"/>
-        <location filename="../ui/main_window.py" line="814"/>
+        <location filename="../ui/main_window.py" line="815"/>
         <source>Signatures</source>
         <translation>Signatures</translation>
     </message>
@@ -924,102 +928,117 @@ Redémarrer maintenant ?</translation>
         <translation>Page actuelle</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="624"/>
+        <location filename="../ui/main_window.py" line="625"/>
         <source>{name}[*] — {app}</source>
         <translation>{name}[*] — {app}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="670"/>
+        <location filename="../ui/main_window.py" line="671"/>
         <source>Page {current} / {total}</source>
         <translation>Page {current} / {total}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="814"/>
+        <location filename="../ui/main_window.py" line="815"/>
         <source>The signature could not be saved.</source>
         <translation>La signature n’a pas pu être enregistrée.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="876"/>
+        <location filename="../ui/main_window.py" line="877"/>
         <source>Add a signature first (Signatures ▸ Add Signature…).</source>
         <translation>Ajoutez d’abord une signature (Signatures ▸ Ajouter une signature…).</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1014"/>
+        <location filename="../ui/main_window.py" line="959"/>
+        <source>The last change could not be undone. The undo history has been cleared; the document stays as it is now and is marked as modified.</source>
+        <translation>La dernière modification n’a pas pu être annulée. L’historique d’annulation a été effacé ; le document reste dans son état actuel et est marqué comme modifié.</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="964"/>
+        <source>The change could not be redone. The undo history has been cleared; the document stays as it is now and is marked as modified.</source>
+        <translation>La modification n’a pas pu être rétablie. L’historique d’annulation a été effacé ; le document reste dans son état actuel et est marqué comme modifié.</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="969"/>
+        <source>The change could not be applied. The undo history has been cleared; the document stays as it is now and is marked as modified.</source>
+        <translation>La modification n’a pas pu être appliquée. L’historique d’annulation a été effacé ; le document reste dans son état actuel et est marqué comme modifié.</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1034"/>
         <source>A document must keep at least one page.</source>
         <translation>Un document doit conserver au moins une page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1017"/>
+        <location filename="../ui/main_window.py" line="1037"/>
         <source>Page operations are not permitted by this document’s security settings.</source>
         <translation>Les opérations sur les pages ne sont pas autorisées par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1020"/>
+        <location filename="../ui/main_window.py" line="1040"/>
         <source>The page could not be deleted: no room for the undo copy.</source>
         <translation>La page n’a pas pu être supprimée : pas d’espace pour la copie d’annulation.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1021"/>
+        <location filename="../ui/main_window.py" line="1041"/>
         <source>The page operation failed.</source>
         <translation>L’opération sur les pages a échoué.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1114"/>
+        <location filename="../ui/main_window.py" line="1134"/>
         <source>Inserted {count} pages</source>
         <translation>{count} pages insérées</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1117"/>
+        <location filename="../ui/main_window.py" line="1137"/>
         <source>Some inserted form fields were renamed because the document already had fields with the same names.</source>
         <translation>Certains champs de formulaire insérés ont été renommés car le document contenait déjà des champs portant les mêmes noms.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1141"/>
-        <location filename="../ui/main_window.py" line="1174"/>
+        <location filename="../ui/main_window.py" line="1161"/>
+        <location filename="../ui/main_window.py" line="1194"/>
         <source>Copying pages is not permitted by this document’s security settings.</source>
         <translation>La copie de pages n’est pas autorisée par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1152"/>
+        <location filename="../ui/main_window.py" line="1172"/>
         <source>Extract Pages</source>
         <translation>Extraire les pages</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1181"/>
+        <location filename="../ui/main_window.py" line="1201"/>
         <source>The pages could not be written.</source>
         <translation>Les pages n’ont pas pu être écrites.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1197"/>
+        <location filename="../ui/main_window.py" line="1217"/>
         <source>{stem} - pages.pdf</source>
         <translation>{stem} - pages.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1205"/>
+        <location filename="../ui/main_window.py" line="1225"/>
         <source>Extracted {count} pages to “{name}”</source>
         <translation>{count} pages extraites vers « {name} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1231"/>
+        <location filename="../ui/main_window.py" line="1251"/>
         <source>Split into {count} files in “{folder}”</source>
         <translation>Document scindé en {count} fichiers dans « {folder} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1293"/>
+        <location filename="../ui/main_window.py" line="1313"/>
         <source>Pointer and editing</source>
         <translation>Souris et saisie</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1350"/>
-        <location filename="../ui/main_window.py" line="1361"/>
-        <location filename="../ui/main_window.py" line="1434"/>
+        <location filename="../ui/main_window.py" line="1370"/>
+        <location filename="../ui/main_window.py" line="1381"/>
+        <location filename="../ui/main_window.py" line="1454"/>
         <source>Cannot open file</source>
         <translation>Impossible d’ouvrir le fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1351"/>
-        <location filename="../ui/main_window.py" line="1362"/>
-        <location filename="../ui/main_window.py" line="1435"/>
+        <location filename="../ui/main_window.py" line="1371"/>
+        <location filename="../ui/main_window.py" line="1382"/>
+        <location filename="../ui/main_window.py" line="1455"/>
         <source>“{path}” could not be opened as a PDF document.
 
 {error}</source>
@@ -1028,132 +1047,132 @@ Redémarrer maintenant ?</translation>
 {error}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1363"/>
-        <location filename="../ui/main_window.py" line="1456"/>
+        <location filename="../ui/main_window.py" line="1383"/>
+        <location filename="../ui/main_window.py" line="1476"/>
         <source>An unexpected error occurred.</source>
         <translation>Une erreur inattendue s’est produite.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1374"/>
+        <location filename="../ui/main_window.py" line="1394"/>
         <source>Adding text and stamps is not permitted by this document’s security settings.</source>
         <translation>L’ajout de texte et de tampons n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1380"/>
+        <location filename="../ui/main_window.py" line="1400"/>
         <source>The file was repaired while opening; saving will rewrite it completely.</source>
         <translation>Le fichier a été réparé à l’ouverture ; l’enregistrement le réécrira entièrement.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1401"/>
+        <location filename="../ui/main_window.py" line="1421"/>
         <source>No recent files</source>
         <translation>Aucun fichier récent</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1436"/>
-        <location filename="../ui/main_window.py" line="1448"/>
+        <location filename="../ui/main_window.py" line="1456"/>
+        <location filename="../ui/main_window.py" line="1468"/>
         <source>The file does not exist.</source>
         <translation>Le fichier n’existe pas.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1450"/>
+        <location filename="../ui/main_window.py" line="1470"/>
         <source>The file could not be read. It may be locked by another program.</source>
         <translation>Le fichier n’a pas pu être lu. Il est peut-être verrouillé par un autre programme.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1452"/>
+        <location filename="../ui/main_window.py" line="1472"/>
         <source>The file is empty.</source>
         <translation>Le fichier est vide.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1453"/>
+        <location filename="../ui/main_window.py" line="1473"/>
         <source>The file is damaged or is not a PDF document.</source>
         <translation>Le fichier est endommagé ou n’est pas un document PDF.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1454"/>
+        <location filename="../ui/main_window.py" line="1474"/>
         <source>The document has no pages.</source>
         <translation>Le document ne contient aucune page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1476"/>
+        <location filename="../ui/main_window.py" line="1496"/>
         <source>The file “{name}” no longer exists. Use Save As to save a copy.</source>
         <translation>Le fichier « {name} » n’existe plus. Utilisez « Enregistrer sous » pour en enregistrer une copie.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1496"/>
+        <location filename="../ui/main_window.py" line="1516"/>
         <source>Saved</source>
         <translation>Enregistré</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1509"/>
+        <location filename="../ui/main_window.py" line="1529"/>
         <source>The document could not be saved and had to be closed.</source>
         <translation>Le document n’a pas pu être enregistré et a dû être fermé.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1533"/>
+        <location filename="../ui/main_window.py" line="1553"/>
         <source>The document could not be saved as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>Le document n’a pas pu être enregistré sous « {name} ». Vérifiez que le dossier existe et que vous avez le droit d’y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1563"/>
+        <location filename="../ui/main_window.py" line="1583"/>
         <source>{stem} - flattened.pdf</source>
         <translation>{stem} - aplati.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1565"/>
+        <location filename="../ui/main_window.py" line="1585"/>
         <source>{stem} - copy.pdf</source>
         <translation>{stem} - copie.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1573"/>
+        <location filename="../ui/main_window.py" line="1593"/>
         <source>Export Copy</source>
         <translation>Exporter une copie</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1153"/>
-        <location filename="../ui/main_window.py" line="1574"/>
+        <location filename="../ui/main_window.py" line="1173"/>
+        <location filename="../ui/main_window.py" line="1594"/>
         <source>Choose another name: the copy cannot replace the open document.</source>
         <translation>Choisissez un autre nom : la copie ne peut pas remplacer le document ouvert.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1589"/>
+        <location filename="../ui/main_window.py" line="1609"/>
         <source>Export failed</source>
         <translation>Échec de l’exportation</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1591"/>
+        <location filename="../ui/main_window.py" line="1611"/>
         <source>The copy could not be written as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>La copie n’a pas pu être écrite sous « {name} ». Vérifiez que le dossier existe et que vous pouvez y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1597"/>
+        <location filename="../ui/main_window.py" line="1617"/>
         <source>Exported to “{name}”</source>
         <translation>Exporté vers « {name} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1622"/>
+        <location filename="../ui/main_window.py" line="1642"/>
         <source>Registered with Windows</source>
         <translation>Enregistré dans Windows</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1626"/>
+        <location filename="../ui/main_window.py" line="1646"/>
         <source>Removed from Windows</source>
         <translation>Retiré de Windows</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1635"/>
+        <location filename="../ui/main_window.py" line="1655"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1636"/>
+        <location filename="../ui/main_window.py" line="1656"/>
         <source>The registration could not be changed.</source>
         <translation>L’enregistrement n’a pas pu être modifié.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1475"/>
-        <location filename="../ui/main_window.py" line="1508"/>
-        <location filename="../ui/main_window.py" line="1531"/>
+        <location filename="../ui/main_window.py" line="1495"/>
+        <location filename="../ui/main_window.py" line="1528"/>
+        <location filename="../ui/main_window.py" line="1551"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
     </message>

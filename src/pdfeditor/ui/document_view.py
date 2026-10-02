@@ -26,6 +26,10 @@ class DocumentView(QWidget):
 
     document_changed = Signal()  # a document was opened or closed
     path_changed = Signal(str)
+    #: A command failed while the stack ran it: (``"undo"``, ``"redo"`` or ``"push"``,
+    #: the exception). The undo history is already cleared and the document marked
+    #: modified (docs/ARCHITECTURE.md Deviation 90).
+    history_failed = Signal(str, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -94,6 +98,41 @@ class DocumentView(QWidget):
         """
         self.commit_pending_edits()
         self.undo_stack.push(command)
+        self._check(command, "push")
+
+    def undo(self) -> None:
+        """Commit a pending edit, then undo the last command; a failure clears the
+        history (see :meth:`_check`)."""
+        self.commit_pending_edits()
+        index = self.undo_stack.index()
+        if index <= 0:
+            return
+        command = self.undo_stack.command(index - 1)
+        self.undo_stack.undo()
+        self._check(command, "undo")
+
+    def redo(self) -> None:
+        """Commit a pending edit, then redo the next command (failure: see :meth:`_check`)."""
+        self.commit_pending_edits()
+        index = self.undo_stack.index()
+        if index >= self.undo_stack.count():
+            return
+        command = self.undo_stack.command(index)
+        self.undo_stack.redo()
+        self._check(command, "redo")
+
+    def _check(self, command: QUndoCommand | None, kind: str) -> None:
+        """After the stack ran ``command``: if it recorded an error (``DocumentCommand``
+        never raises from ``redo``/``undo``), the document no longer matches the stack's
+        index, so the history is cleared and the document marked modified (Discard
+        must still be asked before closing), then :attr:`history_failed` is emitted."""
+        error = getattr(command, "error", None)
+        if error is None:
+            return
+        log.warning("%s failed, clearing the undo history: %s", kind, error)
+        self.undo_stack.clear()
+        self.undo_stack.resetClean()
+        self.history_failed.emit(kind, error)
 
     def _replace(self, document: PdfDocument | None) -> None:
         old = self._document
