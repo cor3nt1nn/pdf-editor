@@ -467,6 +467,9 @@ def insert_pages(
         raise IndexError(f"source page out of range: {selected}")
     had_co = has_calc_order(doc)
     before = set(_top_fields(doc))
+    # A target without fields gets the source's AcroForm instead of its own (P4): keep
+    # its /XFA (a static XFA form whose field pages were deleted stays one).
+    xfa_kind, xfa_value = _key(doc, doc.pdf_catalog(), "AcroForm/XFA")
     if len(_runs(selected)) == 1:
         first, last = selected[0], selected[-1]
         _graft(doc, src, first, last, index)
@@ -482,6 +485,8 @@ def insert_pages(
         drop_empty_calc_order(doc)
     if not had_xfa and has_xfa(doc):
         strip_foreign_xfa(doc)
+    elif had_xfa and xfa_kind in ("array", "xref") and not has_xfa(doc):
+        _set_acroform_key(doc, "XFA", xfa_value)
     return len(selected)
 
 

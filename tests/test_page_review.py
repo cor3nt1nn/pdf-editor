@@ -581,3 +581,23 @@ def test_insert_without_room_for_its_copy_is_refused(simple_pdf, lo_form_pdf, tm
         assert doc.page_count == 3
     finally:
         doc.close()
+
+
+def test_insert_into_fieldless_static_xfa_keeps_its_xfa(static_xfa_pdf, lo_form_pdf) -> None:
+    """Fuzzer (after B2): with no field left, MuPDF's graft replaces the target's
+    AcroForm by the source's; the target keeps its /XFA and stays STATIC."""
+    with pymupdf.open(lo_form_pdf) as src:
+        data = pages.subdocument_bytes(src, [1])
+    doc = PdfDocument.open(static_xfa_pdf)
+    try:
+        InsertBlankPageCommand(doc, 1, QSizeF(200, 400)).apply_now()
+        DeletePagesCommand(doc, [0]).apply_now()
+        assert doc.xfa_kind is XfaKind.STATIC and not doc.is_form
+        insert = InsertPagesCommand(doc, data, 0, 1)
+        insert.apply_now()
+        assert doc.xfa_kind is XfaKind.STATIC and doc.is_form
+        insert.undo()
+        assert insert.error is None
+        assert doc.xfa_kind is XfaKind.STATIC
+    finally:
+        doc.close()
