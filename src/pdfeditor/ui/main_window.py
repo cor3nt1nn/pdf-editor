@@ -63,6 +63,7 @@ from pdfeditor.ui.tools.annot_tools import AnnotToolBase, SignatureTool, StampTo
 from pdfeditor.ui.tools.base import ToolManager
 from pdfeditor.ui.tools.form_tool import FormTool
 from pdfeditor.ui.tools.hand_tool import HandTool
+from pdfeditor.ui.tools.markup_tools import MarkupTool, TextSelectTool, selected_text
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
 log = logging.getLogger(__name__)
@@ -281,6 +282,26 @@ class MainWindow(QMainWindow):
             self.tr("&Text Tool"), QKeySequence("T"), None, "text_tool"
         )
         self.act_text_tool.setToolTip(self.tr("Text (T)"))
+        # Text selection and markups (M6b): Shift+letter, E stays free for M7.
+        self.act_select_text = self._action(
+            self.tr("Select Te&xt"), QKeySequence("Shift+T"), None, "select_text_tool"
+        )
+        self.act_select_text.setToolTip(self.tr("Select text (Shift+T)"))
+        self.act_highlight = self._action(
+            self.tr("Hi&ghlight"), QKeySequence("Shift+H"), None, "highlight_tool"
+        )
+        self.act_highlight.setToolTip(self.tr("Highlight (Shift+H)"))
+        self.act_underline = self._action(
+            self.tr("&Underline"), QKeySequence("Shift+U"), None, "underline_tool"
+        )
+        self.act_underline.setToolTip(self.tr("Underline (Shift+U)"))
+        self.act_strikeout = self._action(
+            self.tr("Stri&ke Through"), QKeySequence("Shift+S"), None, "strikeout_tool"
+        )
+        self.act_strikeout.setToolTip(self.tr("Strike through (Shift+S)"))
+        self.act_copy_text = self._action(
+            self.tr("&Copy Text"), QKeySequence.StandardKey.Copy, self.copy_text, "copy_text"
+        )
         self.act_stamp_check = self._action(
             self.tr("Check Mark Stamp"), QKeySequence("1"), None, "stamp_check"
         )
@@ -404,6 +425,10 @@ class MainWindow(QMainWindow):
             (self.act_hand_tool, "hand"),
             (self.act_form_tool, "form"),
             (self.act_text_tool, "text"),
+            (self.act_select_text, "select_text"),
+            (self.act_highlight, "highlight"),
+            (self.act_underline, "underline"),
+            (self.act_strikeout, "strikeout"),
             (self.act_stamp_check, "stamp_check"),
             (self.act_stamp_cross, "stamp_cross"),
             (self.act_stamp_dot, "stamp_dot"),
@@ -418,6 +443,9 @@ class MainWindow(QMainWindow):
         self.form_tool = FormTool(self.document_view, self.settings, self)
         self.form_tool.message.connect(self._show_message)
         self.tool_manager.register(self.form_tool, self.act_form_tool)
+        self.select_text_tool = TextSelectTool(self.document_view, self)
+        self.select_text_tool.message.connect(self._show_message)
+        self.tool_manager.register(self.select_text_tool, self.act_select_text)
         self.text_tool = TextTool(self.document_view, self.settings, self)
         self.stamp_tools = {
             stamp: StampTool(self.document_view, self.settings, stamp, self)
@@ -446,9 +474,20 @@ class MainWindow(QMainWindow):
         self.act_signature_tool.setData(self.signature_tool.name)
         tm.action_group.addAction(self.act_signature_tool)
         tm.actions[self.signature_tool.name] = self.act_signature_tool
+        self.markup_tools: dict[AnnotKind, MarkupTool] = {}
+        for kind, action in self._markup_kind_actions():
+            tool = MarkupTool(self.document_view, self.settings, kind, self)
+            tool.message.connect(self._show_message)
+            self.tool_manager.register(tool, action)
+            self.markup_tools[kind] = tool
+            self.annot_tools.append(tool)
         self.tool_manager.tool_changed.connect(self._update_delete_action)
-        self.document_view.annot_selection.changed.connect(self._update_delete_action)
-        self.document_view.annot_selection.changed.connect(self._sync_style_widgets)
+        self.tool_manager.tool_changed.connect(self._sync_style_widgets)
+        selection = self.document_view.annot_selection
+        selection.changed.connect(self._update_delete_action)
+        selection.changed.connect(self._sync_style_widgets)
+        selection.changed.connect(self._update_copy_action)
+        self.document_view.text_selection.changed.connect(self._update_copy_action)
 
     def _create_menus(self) -> None:
         bar = self.menuBar()
@@ -475,8 +514,11 @@ class MainWindow(QMainWindow):
         self.menu_edit.addAction(self.act_undo)
         self.menu_edit.addAction(self.act_redo)
         self.menu_edit.addSeparator()
+        self.menu_edit.addAction(self.act_copy_text)
+        self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_hand_tool)
         self.menu_edit.addAction(self.act_form_tool)
+        self.menu_edit.addAction(self.act_select_text)
         self.menu_edit.addSeparator()
         for act in self._annot_actions():
             self.menu_edit.addAction(act)
@@ -487,6 +529,9 @@ class MainWindow(QMainWindow):
         self.menu_edit.addMenu(self.menu_signatures)
         self._rebuild_signatures_menu()
         self.signature_store.changed.connect(self._rebuild_signatures_menu)
+        self.menu_edit.addSeparator()
+        for act in self._markup_actions():
+            self.menu_edit.addAction(act)
         self.menu_edit.addAction(self.act_delete_annot)
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_auto_shrink)
@@ -551,6 +596,7 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction(self.act_hand_tool)
         tb.addAction(self.act_form_tool)
+        tb.addAction(self.act_select_text)
         tb.addSeparator()
         for act in self._annot_actions():
             tb.addAction(act)
@@ -561,6 +607,9 @@ class MainWindow(QMainWindow):
         self.signature_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.signature_button.setMenu(self.menu_signatures)
         tb.addWidget(self.signature_button)
+        tb.addSeparator()
+        for act in self._markup_actions():
+            tb.addAction(act)
         tb.addSeparator()
         self.font_size_spin = QSpinBox(self)
         self.font_size_spin.setObjectName("font_size_spin")
@@ -657,8 +706,12 @@ class MainWindow(QMainWindow):
         for act in self._annot_actions():
             act.setEnabled(can_annotate)
         self.act_signature_tool.setEnabled(can_annotate)
+        for act in self._markup_actions():
+            act.setEnabled(can_annotate)
+        self.act_select_text.setEnabled(has_doc)
         self._update_style_enabled()
         self._update_delete_action()
+        self._update_copy_action()
         if has_doc:
             cur = self.page_view.current_page
             self.act_prev_page.setEnabled(cur > 0)
@@ -694,6 +747,16 @@ class MainWindow(QMainWindow):
     def _annot_actions(self) -> tuple[QAction, ...]:
         return (self.act_text_tool, self.act_stamp_check, self.act_stamp_cross, self.act_stamp_dot)
 
+    def _markup_kind_actions(self) -> tuple[tuple[AnnotKind, QAction], ...]:
+        return (
+            (AnnotKind.HIGHLIGHT, self.act_highlight),
+            (AnnotKind.UNDERLINE, self.act_underline),
+            (AnnotKind.STRIKEOUT, self.act_strikeout),
+        )
+
+    def _markup_actions(self) -> tuple[QAction, ...]:
+        return tuple(action for _kind, action in self._markup_kind_actions())
+
     def _can_annotate(self) -> bool:
         doc = self.document_view.document
         return doc is not None and doc.can_annotate
@@ -708,6 +771,38 @@ class MainWindow(QMainWindow):
             and self._active_annot_tool() is not None
             and self.document_view.annot_selection.current is not None
         )
+
+    def _can_copy_text(self) -> bool:
+        doc = self.document_view.document
+        return doc is not None and doc.can_extract
+
+    def _update_copy_action(self, *_args: object) -> None:
+        """Copy Text works on the text selection or a selected markup, where the
+        document's permissions allow copying."""
+        current = self.document_view.annot_selection.current
+        self.act_copy_text.setEnabled(
+            self._can_copy_text()
+            and (
+                not self.document_view.text_selection.is_empty
+                or (current is not None and current.is_markup)
+            )
+        )
+
+    def copy_text(self) -> bool:
+        """Edit ▸ Copy Text (Ctrl+C): the selected text, else the text under the
+        selected markup, as plain text to the clipboard."""
+        if not self._can_copy_text():
+            if self.document_view.document is not None:
+                self._show_message(
+                    self.tr("Copying text is not permitted by this document’s security settings.")
+                )
+            return False
+        text = selected_text(self.document_view)
+        if not text:
+            return False
+        QApplication.clipboard().setText(text)
+        self._show_message(self.tr("Text copied"))
+        return True
 
     # -- text style widgets -----------------------------------------------------------
     def _show_style(self, font_size: float, color: QColor) -> None:
@@ -740,24 +835,58 @@ class MainWindow(QMainWindow):
         current = self.document_view.annot_selection.current
         return current is not None and current.kind is AnnotKind.SIGNATURE
 
+    def _active_markup_tool(self) -> MarkupTool | None:
+        tool = self.tool_manager.active_tool
+        return tool if isinstance(tool, MarkupTool) else None
+
+    def _markup_selected(self) -> bool:
+        current = self.document_view.annot_selection.current
+        return current is not None and current.is_markup
+
     def _update_style_enabled(self) -> None:
         """The style widgets work with a document that allows annotations, and are
-        inert while a signature (which has no text style) is selected."""
+        inert while a signature (which has no text style) is selected. The font size is
+        inert for markups (a selected markup, or a markup tool without a selection)."""
         enabled = self._can_annotate() and not self._signature_selected()
-        self.font_size_spin.setEnabled(enabled)
+        markup = self._markup_selected() or (
+            self._active_markup_tool() is not None
+            and self.document_view.annot_selection.current is None
+        )
+        self.font_size_spin.setEnabled(enabled and not markup)
         self.color_button.setEnabled(enabled)
 
-    def _sync_style_widgets(self) -> None:
+    def _color_tooltip(self, kind: AnnotKind | None) -> str:
+        if kind is AnnotKind.HIGHLIGHT:
+            return self.tr("Highlight color")
+        if kind is AnnotKind.UNDERLINE:
+            return self.tr("Underline color")
+        if kind is AnnotKind.STRIKEOUT:
+            return self.tr("Strike-through color")
+        if kind is AnnotKind.SQUIGGLY:
+            return self.tr("Markup color")
+        return self.tr("Text color")
+
+    def _sync_style_widgets(self, *_args: object) -> None:
         """Show the selected annotation's style, or the defaults without a selection
-        (and for a selected signature, which has no style of its own)."""
+        (and for a selected signature, which has no style of its own): the active markup
+        tool's colour, else the text box style."""
         current = self.document_view.annot_selection.current
         font_size = self.settings.annot_font_size
         color = QColor(self.settings.annot_color)
+        kind: AnnotKind | None = None
+        markup_tool = self._active_markup_tool()
+        if markup_tool is not None:
+            kind = markup_tool.kind
+            color = QColor(self.settings.markup_color(kind.value))
         if current is not None and current.kind is not AnnotKind.SIGNATURE:
             color = QColor.fromRgbF(*current.color)
+            kind = current.kind if current.is_markup else None
             if current.kind is AnnotKind.TEXT:
                 font_size = current.font_size
         self._show_style(font_size, color)
+        tooltip = self._color_tooltip(kind)
+        self.color_button.setToolTip(tooltip)
+        self.color_button.setAccessibleName(tooltip)
         self._update_style_enabled()
 
     def _apply_style(self, font_size: float | None = None, color: QColor | None = None) -> None:
@@ -775,7 +904,8 @@ class MainWindow(QMainWindow):
         self._apply_style(font_size=float(value))
 
     def choose_text_color(self) -> None:
-        """Toolbar colour button: pick the text colour (defaults and selection)."""
+        """Toolbar colour button: pick the text colour (defaults and selection), or the
+        markup colour (active markup tool, selected markup)."""
         color = dialogs.get_color(self, self.text_color)
         if color is None:
             return

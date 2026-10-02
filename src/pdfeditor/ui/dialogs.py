@@ -413,6 +413,14 @@ def interaction_shortcuts() -> list[tuple[str, str]]:
         (QCoreApplication.translate("Dialogs", "Toggle the focused checkbox"), keys("Space")),
         (QCoreApplication.translate("Dialogs", "Cancel, deselect"), keys("Esc")),
         (
+            QCoreApplication.translate("Dialogs", "Select a word / a line"),
+            QCoreApplication.translate("Dialogs", "Double-click / Triple-click"),
+        ),
+        (
+            QCoreApplication.translate("Dialogs", "Extend the text selection"),
+            QCoreApplication.translate("Dialogs", "Shift+Click"),
+        ),
+        (
             QCoreApplication.translate("Dialogs", "Reorder pages"),
             QCoreApplication.translate("Dialogs", "Drag thumbnails"),
         ),
