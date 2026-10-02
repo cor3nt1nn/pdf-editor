@@ -5,9 +5,11 @@ from __future__ import annotations
 import shutil
 
 import fixtures
+import pymupdf
 import pytest
 from PySide6.QtGui import QUndoStack
 
+from pdfeditor.core import pages
 from pdfeditor.core.annotations import is_synthetic
 from pdfeditor.core.commands import (
     DeleteAnnotCommand,
@@ -146,3 +148,61 @@ def test_failed_redo_delete_keeps_the_previous_copy(simple, monkeypatch) -> None
     assert isinstance(delete.error, PageError)
     assert delete.snapshot_id == first
     assert len(simple.snapshots) == 1
+
+
+# -- M1: prune_fields keeps fields that have no widget ---------------------------------
+def _hidden_field_doc() -> pymupdf.Document:
+    """Three pages, a text field on page 1 and a widget-less calculated field "total"
+    (with /V, listed in /CO) and a widget-less parent "group" with a widget-less kid."""
+    doc = pymupdf.open()
+    for _ in range(3):
+        doc.new_page()
+    widget = pymupdf.Widget()
+    widget.field_name = "visible"
+    widget.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    widget.rect = pymupdf.Rect(50, 50, 200, 80)
+    doc[0].add_widget(widget)
+    hidden = doc.get_new_xref()
+    doc.update_object(hidden, "<</FT/Tx/T(total)/V(42)>>")
+    group = doc.get_new_xref()
+    kid = doc.get_new_xref()
+    doc.update_object(group, f"<</T(group)/Kids[{kid} 0 R]>>")
+    doc.update_object(kid, f"<</FT/Tx/T(sub)/V(7)/Parent {group} 0 R>>")
+    cat = doc.pdf_catalog()
+    fields = pages._refs(doc.xref_get_key(cat, "AcroForm/Fields")[1])
+    doc.xref_set_key(cat, "AcroForm/Fields", pages._array([*fields, hidden, group]))
+    doc.xref_set_key(cat, "AcroForm/CO", f"[{hidden} 0 R]")
+    data = doc.tobytes(garbage=0)
+    doc.close()
+    return pymupdf.open(stream=data, filetype="pdf")
+
+
+def _field_names(doc: pymupdf.Document) -> list[str]:
+    fields = pages._refs(doc.xref_get_key(doc.pdf_catalog(), "AcroForm/Fields")[1])
+    return [doc.xref_get_key(x, "T")[1] for x in fields]
+
+
+def test_prune_keeps_widgetless_fields() -> None:
+    doc = _hidden_field_doc()
+    try:
+        assert _field_names(doc) == ["visible", "total", "group"]
+        pages.delete_pages(doc, [2])  # a page without fields
+        assert _field_names(doc) == ["visible", "total", "group"]
+        pages.delete_pages(doc, [0])  # the page of "visible"
+        assert _field_names(doc) == ["total", "group"]
+        cat = doc.pdf_catalog()
+        hidden = pages._refs(doc.xref_get_key(cat, "AcroForm/Fields")[1])[0]
+        assert doc.xref_get_key(hidden, "V") == ("string", "42")
+        assert pages._refs(doc.xref_get_key(cat, "AcroForm/CO")[1]) == [hidden]
+    finally:
+        doc.close()
+
+
+def test_prune_still_drops_a_field_whose_widgets_are_gone(lo_form_pdf) -> None:
+    doc = pymupdf.open(lo_form_pdf)
+    try:
+        before = len(_field_names(doc))
+        pages.delete_pages(doc, [0])
+        assert len(_field_names(doc)) < before
+    finally:
+        doc.close()

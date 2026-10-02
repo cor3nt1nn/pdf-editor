@@ -55,15 +55,24 @@ def _array(xrefs: Iterable[int]) -> str:
     return "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]"
 
 
+def _is_widget(doc: pymupdf.Document, xref: int) -> bool:
+    """``xref`` is a widget annotation (possibly merged with its field): /Subtype
+    /Widget, or a /Rect (a widget without /Subtype is still drawn by most readers)."""
+    return _key(doc, xref, "Subtype") == ("name", "/Widget") or _key(doc, xref, "Rect")[0] != "null"
+
+
 def prune_fields(doc: pymupdf.Document) -> int:
-    """Remove from ``/AcroForm /Fields`` the fields no page shows any more; returns the
+    """Remove from ``/AcroForm /Fields`` the widgets no page shows any more; returns the
     number of entries (fields and kids) dropped.
 
-    A terminal field is kept iff some page's /Annots references it; a field with /Kids is
-    kept iff it keeps at least one kid (its /Kids is rewritten). Repeated references
-    (MuPDF's graft can write ``/Kids [33 0 R 33 0 R]``) are kept once, cycles dropped.
-    The array is written on the AcroForm object itself when it is indirect (the path form
-    through the catalog writes ``fitz: replace me!``, PyMuPDF 1.28).
+    A widget (``/Subtype /Widget`` or a /Rect, merged field or kid) is kept iff some
+    page's /Annots references it; a field with /Kids is kept iff it keeps at least one kid
+    (its /Kids is rewritten). A field that is not a widget and has no kids (a hidden
+    calculated or data field) is always kept: it never belonged to a page
+    (docs/ARCHITECTURE.md Deviation 92). Repeated references (MuPDF's graft can write
+    ``/Kids [33 0 R 33 0 R]``) are kept once, cycles dropped. The array is written on
+    the AcroForm object itself when it is indirect (the path form through the catalog
+    writes ``fitz: replace me!``, PyMuPDF 1.28).
     """
     catalog = doc.pdf_catalog()
     kind, value = _key(doc, catalog, "AcroForm/Fields")
@@ -87,14 +96,16 @@ def prune_fields(doc: pymupdf.Document) -> int:
             return decided[xref]
         decided[xref] = False  # a cycle back to this field does not keep it
         kids_kind, kids = _key(doc, xref, "Kids")
-        if kids_kind == "array":
-            old = _refs(kids)
+        old = _refs(kids) if kids_kind == "array" else []
+        if old:
             kept = survivors(old)
             if kept and kept != old:
                 doc.xref_set_key(xref, "Kids", _array(kept))
-            result = bool(kept) or (not old and xref in live)
-        else:
+            result = bool(kept)
+        elif _is_widget(doc, xref):
             result = xref in live
+        else:
+            result = True  # a field without widgets: not shown by any page
         decided[xref] = result
         return result
 
