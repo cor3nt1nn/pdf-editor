@@ -794,11 +794,11 @@ class MainWindow(QMainWindow):
         return doc is not None and doc.can_extract
 
     def _update_copy_action(self, *_args: object) -> None:
-        """Copy Text works on the text selection or a selected markup, where the
-        document's permissions allow copying."""
+        """Copy Text works on the text selection or a selected markup. It stays enabled
+        where the document's permissions forbid copying: :meth:`copy_text` then says so."""
         current = self.document_view.annot_selection.current
         self.act_copy_text.setEnabled(
-            self._can_copy_text()
+            self.document_view.document is not None
             and (
                 not self.document_view.text_selection.is_empty
                 or (current is not None and current.is_markup)

@@ -52,6 +52,20 @@ log = logging.getLogger(__name__)
 #: Markup kinds the tools create (Squiggly is only read, recoloured and deleted).
 TOOL_KINDS = (AnnotKind.HIGHLIGHT, AnnotKind.UNDERLINE, AnnotKind.STRIKEOUT)
 
+#: Latin ligature code points (U+FB00–U+FB06) → their letters, for copied text only (the
+#: page text model keeps one char per glyph: M7 needs it).
+_LIGATURES = str.maketrans(
+    {
+        "ﬀ": "ff",
+        "ﬁ": "fi",
+        "ﬂ": "fl",
+        "ﬃ": "ffi",
+        "ﬄ": "ffl",
+        "ﬅ": "st",  # long s + t
+        "ﬆ": "st",
+    }
+)
+
 
 def no_text_message() -> str:
     return QCoreApplication.translate("MarkupTools", "No selectable text here (scanned page?).")
@@ -70,17 +84,23 @@ def markup_text(document: PdfDocument, info: AnnotInfo) -> str:
     return pt.text_of(refs)
 
 
+def expand_ligatures(text: str) -> str:
+    """``text`` with the Latin ligature code points (U+FB00–U+FB06) spelt out as letters."""
+    return text.translate(_LIGATURES)
+
+
 def selected_text(document_view: DocumentView) -> str:
     """What Edit ▸ Copy Text copies: the text selection, else the text under the
-    selected markup ("" when there is neither)."""
+    selected markup ("" when there is neither), ligatures spelt out
+    (:func:`expand_ligatures`)."""
     sel = document_view.text_selection
     if not sel.is_empty:
-        return sel.text()
+        return expand_ligatures(sel.text())
     info = document_view.annot_selection.current
     doc = document_view.document
     if info is None or not info.is_markup or doc is None or not doc.is_open:
         return ""
-    return markup_text(doc, info)
+    return expand_ligatures(markup_text(doc, info))
 
 
 @dataclass
@@ -504,6 +524,7 @@ __all__ = [
     "TOOL_KINDS",
     "MarkupTool",
     "TextSelectTool",
+    "expand_ligatures",
     "markup_text",
     "no_text_message",
     "selected_text",

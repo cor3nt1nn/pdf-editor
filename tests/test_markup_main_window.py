@@ -117,7 +117,7 @@ def test_enablement_without_document_and_with_permissions(window, tmp_path, owne
     assert not doc.can_annotate and not doc.can_extract
     w.act_select_text.trigger()
     w.document_view.text_selection.set(0, 0, 3)
-    assert not w.act_copy_text.isEnabled()
+    assert w.act_copy_text.isEnabled()  # enabled, so that Ctrl+C explains (M6b review)
     messages = []
     w.statusBar().messageChanged.connect(messages.append)
     assert not w.copy_text()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import fixtures
 import pymupdf
 import pytest
@@ -11,11 +13,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.main_window import MainWindow
+from pdfeditor.ui.tools.markup_tools import expand_ligatures
 
 NO_MOD = Qt.KeyboardModifier.NoModifier
 LEFT = Qt.MouseButton.LeftButton
 LINE_1 = TEXT_LINES[0][0]
 QUICK = LINE_1.index("quick")
+ARIAL = Path("C:/Windows/Fonts/arial.ttf")
 
 
 @pytest.fixture
@@ -99,3 +103,55 @@ def test_tool_flush_pending_default_is_a_no_op(text_window) -> None:
     for tool in w.tool_manager.tools.values():
         tool.flush_pending()
     assert w.undo_stack.count() == 0
+
+
+# -- 5: Copy Text explains why it cannot copy -------------------------------------------
+def test_copy_text_on_a_copy_protected_document_explains(qtbot, window, owner_locked_pdf):
+    w = window
+    assert w.open_file(str(owner_locked_pdf))
+    assert not w.document_view.document.can_extract
+    w.act_select_text.trigger()
+    assert not w.act_copy_text.isEnabled()  # nothing selected
+    w.document_view.text_selection.set(0, 0, 3)
+    assert w.act_copy_text.isEnabled()
+    clipboard = QApplication.clipboard()
+    clipboard.setText("before")
+    messages = []
+    w.statusBar().messageChanged.connect(messages.append)
+    w.page_view.setFocus()
+    qtbot.keyClick(w.page_view, Qt.Key.Key_C, Qt.KeyboardModifier.ControlModifier)
+    assert messages[-1] == "Copying text is not permitted by this document’s security settings."
+    assert clipboard.text() == "before"
+
+
+# -- 7: ligatures are spelt out in copied text ----------------------------------------
+def test_expand_ligatures() -> None:
+    assert expand_ligatures("\ufb00 \ufb01 \ufb02 \ufb03 \ufb04 \ufb05 \ufb06 x") == (
+        "ff fi fl ffi ffl st st x"
+    )
+
+
+@pytest.mark.skipif(not ARIAL.is_file(), reason="Arial is not installed")
+def test_copy_text_spells_out_ligatures(qtbot, window, tmp_path) -> None:
+    w = window
+    path = tmp_path / "lig.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_font(fontname="FA", fontfile=str(ARIAL))
+    page.insert_text((72, 100), "o\ufb03ce \ufb01le", fontname="FA", fontsize=14)
+    doc.save(path)
+    doc.close()
+    assert w.open_file(str(path))
+    pt = w.document_view.document.page_text(0)
+    assert "\ufb03" in pt.text  # the model keeps one char per glyph
+    w.act_select_text.trigger()
+    w.document_view.text_selection.set(0, 0, len(pt.chars) - 1)
+    assert w.copy_text()
+    assert QApplication.clipboard().text().replace("\xa0", " ") == "office file"
+    # The text under a markup too.
+    w.act_highlight.trigger()
+    w.document_view.text_selection.set(0, 0, len(pt.chars) - 1)
+    info = w.tool_manager.active_tool.commit_selection()
+    assert w.document_view.annot_selection.current.name == info.name
+    assert w.copy_text()
+    assert QApplication.clipboard().text().replace("\xa0", " ") == "office file"
