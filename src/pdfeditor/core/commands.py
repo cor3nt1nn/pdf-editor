@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
-from PySide6.QtCore import QCoreApplication, QRectF
+from PySide6.QtCore import QCoreApplication, QRectF, QSizeF
 from PySide6.QtGui import QUndoCommand
 
 from pdfeditor.core.annotations import (
@@ -16,124 +17,42 @@ from pdfeditor.core.annotations import (
     new_name,
     spec_from,
 )
-from pdfeditor.core.document import PdfDocument
+from pdfeditor.core.document import (
+    AnnotError,
+    DocumentError,
+    FieldError,
+    PageError,
+    PageId,
+    PdfDocument,
+)
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 from pdfeditor.core.signature import ImageData
 
 
 class DocumentCommand(QUndoCommand):
-    """Base class for commands that mutate a PdfDocument (emitting page_changed etc.)."""
+    """Base class for commands that mutate a PdfDocument (emitting page_changed etc.).
+
+    Page identity rule (docs/M6_PLAN.md D4): page insertions, deletions and moves never
+    clear the undo stack, so a command never keeps a page *index* across calls. It
+    captures ``doc.page_id(index)`` at construction, resolves the current index with
+    :meth:`_index` (``doc.page_index(page_id)``) in every ``redo()``/``undo()``, and
+    compares page ids (never indexes) in ``mergeWith``. Snapshots carrying a page index
+    (``AnnotInfo``, ``AnnotSpec``, ``WidgetInfo``) are re-targeted with
+    ``dataclasses.replace(info, page=index)`` before use. A page id that is no longer in
+    the document raises a :class:`DocumentError` (the command's own error class); with a
+    linear undo stack that only happens after a bug.
+    """
 
     def __init__(self, doc: PdfDocument, text: str, parent: QUndoCommand | None = None):
         super().__init__(text, parent)
         self.doc = doc
 
-
-class RotatePageCommand(DocumentCommand):
-    """Rotate one page by ``delta`` degrees (multiple of 90).
-
-    Consecutive rotations of the same page merge into one undo step; rotating back to
-    the original orientation makes the merged command obsolete.
-    """
-
-    ID = 1001
-
-    def __init__(self, doc: PdfDocument, page: int, delta: int) -> None:
-        super().__init__(doc, QCoreApplication.translate("Commands", "Rotate page"))
-        if delta % 90:
-            raise ValueError(f"rotation delta must be a multiple of 90: {delta}")
-        self.page = page
-        self.old_rotation = doc.page_rotation(page)
-        self.new_rotation = (self.old_rotation + delta) % 360
-
-    def redo(self) -> None:
-        self.doc.set_page_rotation(self.page, self.new_rotation)
-
-    def undo(self) -> None:
-        self.doc.set_page_rotation(self.page, self.old_rotation)
-
-    def id(self) -> int:
-        return self.ID
-
-    def mergeWith(self, other: QUndoCommand) -> bool:
-        if (
-            not isinstance(other, RotatePageCommand)
-            or other.doc is not self.doc
-            or other.page != self.page
-        ):
-            return False
-        self.new_rotation = other.new_rotation
-        if self.new_rotation == self.old_rotation:
-            self.setObsolete(True)
-        return True
-
-
-class SetFieldValueCommand(DocumentCommand):
-    """Set one form field value (one undo step per commit, never merged).
-
-    ``new_value``: a string for text/combo/list fields ("" clears), ``True``/``False``
-    for a checkbox/radio widget (``True`` selects ``info``'s on state). ``font_size``
-    (0 = auto-size) is applied with the value; undo restores the old value and, if it was
-    changed, the old font size. The widget is re-resolved on every redo/undo (by xref,
-    then name and rect), so the command survives saves that renumber objects.
-    """
-
-    def __init__(
-        self,
-        doc: PdfDocument,
-        info: WidgetInfo,
-        new_value: str | bool,
-        font_size: float | None = None,
-    ) -> None:
-        super().__init__(doc, QCoreApplication.translate("Commands", "Edit form field"))
-        self.info = info
-        self.font_size = font_size
-        self.old_font_size = info.font_size
-        self.new_value: str | bool
-        self.old_value: str | bool
-        if info.kind in (FieldKind.CHECKBOX, FieldKind.RADIO):
-            # Values are on-state names, so that undo re-selects the sibling radio button
-            # that was on before (on any page of the field).
-            self.old_value = doc.field_button_state(info)
-            if isinstance(new_value, bool):
-                new_value = info.on_state if new_value and info.on_state else new_value
-            self.new_value = new_value
-        else:
-            self.old_value = info.value
-            self.new_value = new_value
-        self._applied = False
-
-    def apply_now(self) -> None:
-        """Apply the change immediately (raises :class:`FieldError` if the field is gone).
-
-        The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
-        failure is reported before anything reaches the undo stack (an exception raised
-        inside ``push`` would leave a broken command on the stack).
-        """
-        self.redo()
-        self._applied = True
-
-    def _apply(self, value: str | bool, font_size: float | None) -> None:
-        self.doc.set_field_value(
-            self.info.page,
-            self.info.xref,
-            value,
-            font_size=font_size,
-            name=self.info.name,
-            unrotated_rect=self.info.unrotated_rect,
-        )
-
-    def redo(self) -> None:
-        if self._applied:
-            self._applied = False
-            return
-        self._apply(self.new_value, self.font_size)
-
-    def undo(self) -> None:
-        restore = None
-        if self.font_size is not None and self.font_size != self.old_font_size:
-            restore = self.old_font_size
-        self._apply(self.old_value, restore)
+    def _index(self, page_id: PageId, error: type[DocumentError] = DocumentError) -> int:
+        """The current index of page ``page_id``; raises ``error`` if it is gone."""
+        index = self.doc.page_index(page_id)
+        if index is None:
+            raise error(f"page {page_id} is not in the document")
+        return index
 
 
 class _ImmediateCommand(DocumentCommand):
@@ -147,8 +66,9 @@ class _ImmediateCommand(DocumentCommand):
         self._applied = False
 
     def apply_now(self) -> None:
-        """Apply the change immediately (raises :class:`AnnotError` if it fails, e.g. the
-        annotation is gone).
+        """Apply the change immediately (raises a :class:`DocumentError` if it fails:
+        :class:`AnnotError` when the annotation is gone, :class:`PageError` when a page
+        operation is refused...).
 
         The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
         failure is reported before anything reaches the undo stack.
@@ -172,6 +92,335 @@ class _ImmediateCommand(DocumentCommand):
         raise NotImplementedError
 
 
+# -- pages -------------------------------------------------------------------
+class RotatePagesCommand(_ImmediateCommand):
+    """Rotate the pages ``indexes`` by ``delta`` degrees (multiple of 90), one undo step.
+
+    Consecutive rotations of the same set of pages merge into one undo step; rotating
+    back to the original orientations makes the merged command obsolete. Refused
+    (:class:`PageError` from :meth:`PdfDocument.set_page_rotation`) without
+    :attr:`PdfDocument.can_assemble`.
+    """
+
+    ID = 1001
+
+    def __init__(self, doc: PdfDocument, indexes: Sequence[int], delta: int) -> None:
+        if delta % 90:
+            raise ValueError(f"rotation delta must be a multiple of 90: {delta}")
+        pages = sorted(set(int(i) for i in indexes))
+        if not pages:
+            raise ValueError("RotatePagesCommand needs at least one page")
+        if len(pages) == 1:
+            text = QCoreApplication.translate("Commands", "Rotate page")
+        else:
+            text = QCoreApplication.translate("Commands", "Rotate pages")
+        super().__init__(doc, text)
+        self.page_ids: list[PageId] = [doc.page_id(i) for i in pages]
+        self.old_rotations: dict[PageId, int] = {
+            pid: doc.page_rotation(i) for pid, i in zip(self.page_ids, pages, strict=True)
+        }
+        self.new_rotations: dict[PageId, int] = {
+            pid: (old + delta) % 360 for pid, old in self.old_rotations.items()
+        }
+
+    @property
+    def pages(self) -> list[int]:
+        """The current indexes of the rotated pages."""
+        return [self._index(pid, PageError) for pid in self.page_ids]
+
+    def _apply(self, rotations: dict[PageId, int]) -> None:
+        for pid in self.page_ids:
+            self.doc.set_page_rotation(self._index(pid, PageError), rotations[pid])
+
+    def _redo(self) -> None:
+        self._apply(self.new_rotations)
+
+    def _undo(self) -> None:
+        self._apply(self.old_rotations)
+
+    def id(self) -> int:
+        return self.ID
+
+    def mergeWith(self, other: QUndoCommand) -> bool:
+        if (
+            not isinstance(other, RotatePagesCommand)
+            or other.doc is not self.doc
+            or set(other.page_ids) != set(self.page_ids)
+        ):
+            return False
+        self.new_rotations = dict(other.new_rotations)
+        if self.new_rotations == self.old_rotations:
+            self.setObsolete(True)
+        return True
+
+
+class RotatePageCommand(RotatePagesCommand):
+    """Rotate one page by ``delta`` degrees (see :class:`RotatePagesCommand`)."""
+
+    def __init__(self, doc: PdfDocument, page: int, delta: int) -> None:
+        super().__init__(doc, [page], delta)
+
+    @property
+    def page(self) -> int:
+        return self.pages[0]
+
+    @property
+    def old_rotation(self) -> int:
+        return self.old_rotations[self.page_ids[0]]
+
+    @property
+    def new_rotation(self) -> int:
+        return self.new_rotations[self.page_ids[0]]
+
+
+class DeletePagesCommand(_ImmediateCommand):
+    """Delete the pages ``indexes`` (one undo step).
+
+    The first redo stores a whole-document :meth:`PdfDocument.snapshot` in
+    ``doc.snapshots`` before deleting; undo reopens it (:meth:`PdfDocument.restore_snapshot`
+    with the page ids of that moment), so annotations, links, outline and form fields
+    come back exactly. Later redos delete again (the document is then in the same state
+    as at the first redo). Raises :class:`PageError`: "last_page" when every page would
+    go, "snapshot" when the undo copy cannot be stored or read back (nothing deleted).
+    """
+
+    def __init__(self, doc: PdfDocument, indexes: Sequence[int]) -> None:
+        pages = sorted(set(int(i) for i in indexes))
+        if not pages:
+            raise ValueError("DeletePagesCommand needs at least one page")
+        if len(pages) == 1:
+            text = QCoreApplication.translate("Commands", "Delete page")
+        else:
+            text = QCoreApplication.translate("Commands", "Delete pages")
+        super().__init__(doc, text)
+        self.page_ids: list[PageId] = [doc.page_id(i) for i in pages]
+        # Page ids of the whole document before deleting (set by the first redo).
+        self.saved_ids: list[PageId] | None = None
+        self.snapshot_id: int | None = None
+
+    def _redo(self) -> None:
+        doc = self.doc
+        indexes = [self._index(pid, PageError) for pid in self.page_ids]
+        if not doc.can_assemble:
+            raise PageError("page operations are not permitted by this document", "permission")
+        if doc.page_count - len(indexes) < 1:
+            raise PageError("a document must keep at least one page", "last_page")
+        fresh = self.snapshot_id is None
+        if fresh:
+            ids = doc.page_ids()
+            data = doc.snapshot()
+            try:
+                self.snapshot_id = doc.snapshots.put(data)
+            except OSError as exc:
+                raise PageError(f"no room for the undo copy: {exc}", "snapshot") from exc
+            self.saved_ids = ids
+        try:
+            doc.delete_pages(indexes)
+        except Exception:
+            if fresh and self.snapshot_id is not None:
+                doc.snapshots.discard(self.snapshot_id)
+                self.snapshot_id = self.saved_ids = None
+            raise
+
+    def _undo(self) -> None:
+        if self.snapshot_id is None or self.saved_ids is None:
+            raise PageError("nothing to undo", "snapshot")
+        try:
+            data = self.doc.snapshots.get(self.snapshot_id)
+        except (KeyError, OSError) as exc:
+            raise PageError(f"the undo copy is gone: {exc}", "snapshot") from exc
+        self.doc.restore_snapshot(data, self.saved_ids)
+
+
+class MovePagesCommand(_ImmediateCommand):
+    """Move the pages ``indexes`` (kept in their order) before the page now at
+    ``target`` (``page_count`` = to the end), one undo step; undo restores the former
+    order. A move that changes nothing is obsolete (:attr:`is_noop`; ``QUndoStack.push``
+    then drops it)."""
+
+    def __init__(self, doc: PdfDocument, indexes: Sequence[int], target: int) -> None:
+        pages = sorted(set(int(i) for i in indexes))
+        if not pages:
+            raise ValueError("MovePagesCommand needs at least one page")
+        if not 0 <= target <= doc.page_count:
+            raise IndexError(f"move target out of range: {target}")
+        for i in pages:
+            doc.page_id(i)  # IndexError if out of range
+        super().__init__(doc, QCoreApplication.translate("Commands", "Move pages"))
+        self.old_order: list[PageId] = doc.page_ids()
+        moving = [self.old_order[i] for i in pages]
+        chosen = set(pages)
+        rest = [pid for i, pid in enumerate(self.old_order) if i not in chosen]
+        at = sum(1 for i in range(target) if i not in chosen)
+        self.new_order: list[PageId] = rest[:at] + moving + rest[at:]
+        self.page_ids = moving
+        if self.is_noop:
+            self.setObsolete(True)
+
+    @property
+    def is_noop(self) -> bool:
+        return self.new_order == self.old_order
+
+    def _redo(self) -> None:
+        self.doc.reorder_pages(self.new_order)
+
+    def _undo(self) -> None:
+        self.doc.reorder_pages(self.old_order)
+
+
+def _anchor(doc: PdfDocument, index: int) -> PageId | None:
+    """The id of the page now at ``index`` (insertions go before it), None for the end."""
+    if not 0 <= index <= doc.page_count:
+        raise IndexError(f"insert position out of range: {index}")
+    return doc.page_id(index) if index < doc.page_count else None
+
+
+class _InsertCommand(_ImmediateCommand):
+    """Common part of the insert commands: the position is remembered as the id of the
+    page the new pages go before (None = at the end); undo deletes the inserted pages by
+    id (their new objects become orphans that the next save drops)."""
+
+    def __init__(self, doc: PdfDocument, text: str, index: int) -> None:
+        super().__init__(doc, text)
+        self.before: PageId | None = _anchor(doc, index)
+        # Ids of the inserted pages (set by the first redo, reinstalled by later ones).
+        self.page_ids: list[PageId] | None = None
+
+    def _position(self) -> int:
+        if self.before is None:
+            return self.doc.page_count
+        return self._index(self.before, PageError)
+
+    @property
+    def pages(self) -> list[int]:
+        """Current indexes of the inserted pages ([] before the first redo)."""
+        return [self._index(pid, PageError) for pid in self.page_ids or []]
+
+    def _undo(self) -> None:
+        if self.page_ids:
+            self.doc.delete_pages(self.pages)
+
+
+class InsertBlankPageCommand(_InsertCommand):
+    """Insert an empty page of ``size`` points at ``index`` (one undo step)."""
+
+    def __init__(self, doc: PdfDocument, index: int, size: QSizeF) -> None:
+        super().__init__(doc, QCoreApplication.translate("Commands", "Insert blank page"), index)
+        self.size = QSizeF(size)
+
+    def _redo(self) -> None:
+        pid = self.page_ids[0] if self.page_ids else None
+        new = self.doc.insert_blank_page(self._position(), self.size, page_id=pid)
+        self.page_ids = [new]
+
+
+class InsertPagesCommand(_InsertCommand):
+    """Insert every page of the sub-document ``data`` (``count`` pages, see
+    :func:`pages.subdocument_bytes`; ``password`` decrypts it) at ``index``, one undo
+    step. Every redo inserts from ``data``, never from the source file."""
+
+    def __init__(
+        self,
+        doc: PdfDocument,
+        data: bytes,
+        index: int,
+        count: int,
+        password: str | None = None,
+    ) -> None:
+        super().__init__(doc, QCoreApplication.translate("Commands", "Insert pages"), index)
+        self.data = bytes(data)
+        # Undo removes the /AcroForm the inserted fields brought into a form-less document.
+        self.had_form = doc.has_acroform
+        self.count = int(count)
+        self.password = password
+
+    def _redo(self) -> None:
+        self.page_ids = self.doc.insert_pages(
+            self.data, self._position(), password=self.password, page_ids=self.page_ids
+        )
+
+    def _undo(self) -> None:
+        if self.page_ids:
+            self.doc.delete_pages(self.pages, drop_empty_form=not self.had_form)
+
+
+# -- form fields ---------------------------------------------------------------
+class SetFieldValueCommand(DocumentCommand):
+    """Set one form field value (one undo step per commit, never merged).
+
+    ``new_value``: a string for text/combo/list fields ("" clears), ``True``/``False``
+    for a checkbox/radio widget (``True`` selects ``info``'s on state). ``font_size``
+    (0 = auto-size) is applied with the value; undo restores the old value and, if it was
+    changed, the old font size. The widget is re-resolved on every redo/undo (its page by
+    id, then the widget by xref, then name and rect), so the command survives page moves
+    and saves that renumber objects.
+    """
+
+    def __init__(
+        self,
+        doc: PdfDocument,
+        info: WidgetInfo,
+        new_value: str | bool,
+        font_size: float | None = None,
+    ) -> None:
+        super().__init__(doc, QCoreApplication.translate("Commands", "Edit form field"))
+        self.info = info
+        self.page_id: PageId = doc.page_id(info.page)
+        self.font_size = font_size
+        self.old_font_size = info.font_size
+        self.new_value: str | bool
+        self.old_value: str | bool
+        if info.kind in (FieldKind.CHECKBOX, FieldKind.RADIO):
+            # Values are on-state names, so that undo re-selects the sibling radio button
+            # that was on before (on any page of the field).
+            self.old_value = doc.field_button_state(info)
+            if isinstance(new_value, bool):
+                new_value = info.on_state if new_value and info.on_state else new_value
+            self.new_value = new_value
+        else:
+            self.old_value = info.value
+            self.new_value = new_value
+        self._applied = False
+
+    @property
+    def page(self) -> int:
+        """The widget's current page index."""
+        return self._index(self.page_id, FieldError)
+
+    def apply_now(self) -> None:
+        """Apply the change immediately (raises :class:`FieldError` if the field is gone).
+
+        The next ``redo()`` (the one ``QUndoStack.push`` performs) is then skipped, so a
+        failure is reported before anything reaches the undo stack (an exception raised
+        inside ``push`` would leave a broken command on the stack).
+        """
+        self.redo()
+        self._applied = True
+
+    def _apply(self, value: str | bool, font_size: float | None) -> None:
+        self.doc.set_field_value(
+            self.page,
+            self.info.xref,
+            value,
+            font_size=font_size,
+            name=self.info.name,
+            unrotated_rect=self.info.unrotated_rect,
+        )
+
+    def redo(self) -> None:
+        if self._applied:
+            self._applied = False
+            return
+        self._apply(self.new_value, self.font_size)
+
+    def undo(self) -> None:
+        restore = None
+        if self.font_size is not None and self.font_size != self.old_font_size:
+            restore = self.old_font_size
+        self._apply(self.old_value, restore)
+
+
+# -- annotations -----------------------------------------------------------------
 def _claimed(doc: PdfDocument, info: AnnotInfo) -> AnnotInfo:
     """``info`` under its lasting /NM (a synthetic name is claimed: the /NM is written
     now, so undo/redo keep working across saves)."""
@@ -180,7 +429,18 @@ def _claimed(doc: PdfDocument, info: AnnotInfo) -> AnnotInfo:
     return replace(info, name=doc.claim_annot_name(info.page, info.name))
 
 
-class AddAnnotCommand(_ImmediateCommand):
+class _AnnotCommand(_ImmediateCommand):
+    """An annotation command: the annotation's page is kept by id (:attr:`page_id`)."""
+
+    page_id: PageId
+
+    @property
+    def page(self) -> int:
+        """The annotation's current page index."""
+        return self._index(self.page_id, AnnotError)
+
+
+class AddAnnotCommand(_AnnotCommand):
     """Create a text box, stamp or signature from ``spec`` (one undo step).
 
     The /NM is fixed here (``spec.name``, or a new uuid4), so undo/redo cycles and saves
@@ -196,39 +456,39 @@ class AddAnnotCommand(_ImmediateCommand):
         else:
             text = QCoreApplication.translate("Commands", "Add text")
         super().__init__(doc, text)
+        self.page_id = doc.page_id(spec.page)
         self.spec = replace(spec, name=spec.name or new_name())
         # Snapshot of the created annotation (None before the first redo).
         self.info: AnnotInfo | None = None
-
-    @property
-    def page(self) -> int:
-        return self.spec.page
 
     @property
     def name(self) -> str:
         return self.spec.name
 
     def _redo(self) -> None:
+        page = self.page
         if self.info is None:
             fit = self.spec.kind is AnnotKind.TEXT
-            self.info = self.doc.add_annot(self.spec, fit_height=fit)
+            self.info = self.doc.add_annot(replace(self.spec, page=page), fit_height=fit)
         else:
             # A signature keeps the spec's samples (shared with the document's image
             # object when it still exists, re-created after a full save dropped it).
-            self.info = self.doc.add_annot(spec_from(self.info, image=self.spec.image))
+            info = replace(self.info, page=page)
+            self.info = self.doc.add_annot(spec_from(info, image=self.spec.image))
 
     def _undo(self) -> None:
-        self.doc.delete_annot(self.spec.page, self.spec.name)
+        self.doc.delete_annot(self.page, self.spec.name)
 
 
-class EditAnnotCommand(_ImmediateCommand):
+class EditAnnotCommand(_AnnotCommand):
     """Change the text, style or rect (page space) of annotation ``info`` (one undo step).
 
     ``None`` keeps a property. ``fit_height`` (default: ``text is not None``) makes a
     text box's height hug its text after the change. Undo restores the text/colour that
     were changed and always the old rect and font size (a text change refits the height,
-    a stamp resize rescales the glyph). The annotation is resolved by ``(page, name)`` on
-    every redo/undo, so the command survives saves; :class:`AnnotError` if it is gone.
+    a stamp resize rescales the glyph). The annotation is resolved by ``(page id, name)``
+    on every redo/undo, so the command survives saves and page moves; :class:`AnnotError`
+    if it is gone.
     """
 
     def __init__(
@@ -245,6 +505,7 @@ class EditAnnotCommand(_ImmediateCommand):
         if text is None and font_size is None and color is None and rect is None:
             raise ValueError("EditAnnotCommand needs at least one change")
         super().__init__(doc, self._label(info, text, font_size, color, rect))
+        self.page_id = doc.page_id(info.page)
         self.info = info
         self.new_text = text
         self.new_font_size = font_size
@@ -273,15 +534,11 @@ class EditAnnotCommand(_ImmediateCommand):
         return QCoreApplication.translate("Commands", "Change text style")
 
     @property
-    def page(self) -> int:
-        return self.info.page
-
-    @property
     def name(self) -> str:
         return self.info.name
 
     def _redo(self) -> None:
-        self.info = _claimed(self.doc, self.info)
+        self.info = _claimed(self.doc, replace(self.info, page=self.page))
         self.doc.update_annot(
             self.info.page,
             self.info.name,
@@ -295,7 +552,7 @@ class EditAnnotCommand(_ImmediateCommand):
     def _undo(self) -> None:
         old = self.info
         self.doc.update_annot(
-            old.page,
+            self.page,
             old.name,
             text=old.text if self.new_text is not None else None,
             font_size=old.font_size,
@@ -304,7 +561,7 @@ class EditAnnotCommand(_ImmediateCommand):
         )
 
 
-class DeleteAnnotCommand(_ImmediateCommand):
+class DeleteAnnotCommand(_AnnotCommand):
     """Delete annotation ``info``; undo re-creates it from the snapshot (same /NM, rect,
     rotation and style; appended at the end of the page's /Annots).
 
@@ -315,20 +572,17 @@ class DeleteAnnotCommand(_ImmediateCommand):
 
     def __init__(self, doc: PdfDocument, info: AnnotInfo) -> None:
         super().__init__(doc, QCoreApplication.translate("Commands", "Delete annotation"))
+        self.page_id = doc.page_id(info.page)
         self.info = info
         # Signature samples (None until the first redo, and for other kinds).
         self.image: ImageData | None = None
-
-    @property
-    def page(self) -> int:
-        return self.info.page
 
     @property
     def name(self) -> str:
         return self.info.name
 
     def _redo(self) -> None:
-        self.info = _claimed(self.doc, self.info)
+        self.info = _claimed(self.doc, replace(self.info, page=self.page))
         image = self.image
         if self.info.kind is AnnotKind.SIGNATURE and image is None:
             image = self.doc.annot_image(self.info.page, self.info.name)
@@ -336,4 +590,4 @@ class DeleteAnnotCommand(_ImmediateCommand):
         self.image = image
 
     def _undo(self) -> None:
-        self.doc.add_annot(spec_from(self.info, image=self.image))
+        self.doc.add_annot(spec_from(replace(self.info, page=self.page), image=self.image))

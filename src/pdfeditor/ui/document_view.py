@@ -105,6 +105,9 @@ class DocumentView(QWidget):
         self.field_editor.close()
         self.annot_editor.close()
         self.undo_stack.clear()
+        if old is not None:
+            # The cleared commands' undo copies of deleted pages (memory, temp files).
+            old.snapshots.clear()
         self._document = document
         if document is not None:
             document.path_changed.connect(self.path_changed)

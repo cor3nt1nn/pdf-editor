@@ -246,7 +246,9 @@ def test_encrypted_render_after_save_has_no_mupdf_warnings(
         assert pymupdf.TOOLS.mupdf_warnings() == ""
         reloads: list[bool] = []
         doc.reloaded.connect(lambda: reloads.append(True))
-        doc.set_page_rotation(1, 90)
+        # A fill (rotation needs ASSEMBLE, which LO_PERMISSIONS lacks).
+        text = next(w for w in doc.widgets(1) if w.editable and w.kind is FieldKind.TEXT)
+        doc.set_field_value(1, text.xref, "x")
         doc.save(force_full=force_full)
         assert reloads == [True]  # the saved bytes were reloaded (and decrypt correctly)
         assert doc.can_save_incrementally()

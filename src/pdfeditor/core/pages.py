@@ -113,6 +113,29 @@ def has_xfa(doc: pymupdf.Document) -> bool:
     return _key(doc, doc.pdf_catalog(), "AcroForm/XFA")[0] != "null"
 
 
+def has_acroform(doc: pymupdf.Document) -> bool:
+    """The catalog has an /AcroForm (possibly with no fields)."""
+    return _key(doc, doc.pdf_catalog(), "AcroForm")[0] != "null"
+
+
+def drop_empty_acroform(doc: pymupdf.Document) -> bool:
+    """Remove an /AcroForm that has no fields and no /XFA; True if one was removed.
+
+    Undoing the insertion of pages with form fields into a document without a form
+    deletes the pages and prunes their fields, but MuPDF's graft left an /AcroForm
+    (``/Fields [] /CO []``, maybe /DR /DA): this puts the catalog back as it was.
+    """
+    if not has_acroform(doc) or has_xfa(doc):
+        return False
+    kind, value = _key(doc, doc.pdf_catalog(), "AcroForm/Fields")
+    if kind not in ("null", "array") or _refs(value):
+        return False
+    mupdf = pymupdf.mupdf
+    catalog = mupdf.pdf_new_indirect(pymupdf._as_pdf_document(doc), doc.pdf_catalog(), 0)
+    mupdf.pdf_dict_dels(catalog, "AcroForm")
+    return True
+
+
 def strip_foreign_xfa(doc: pymupdf.Document) -> bool:
     """Remove an /XFA grafted by an insertion into a document that had none; True if one
     was removed (the inserted pages keep their AcroForm fields)."""
@@ -179,7 +202,23 @@ def insert_blank(doc: pymupdf.Document, index: int, width: float, height: float)
     """Insert an empty ``width`` x ``height`` page so that it becomes page ``index``."""
     if not 0 <= index <= doc.page_count:
         raise IndexError(f"insert position out of range: {index}")
+    had_labels = _has_page_labels(doc)
     doc.new_page(index if index < doc.page_count else -1, width=width, height=height)
+    _drop_new_page_labels(doc, had_labels)
+
+
+def _has_page_labels(doc: pymupdf.Document) -> bool:
+    return _key(doc, doc.pdf_catalog(), "PageLabels")[0] != "null"
+
+
+def _drop_new_page_labels(doc: pymupdf.Document, had_labels: bool) -> None:
+    """Remove a /PageLabels that MuPDF created while inserting at page 0 of a document
+    without labels: it writes ``[0 <</S/D>> n <</S/D>>]``, which makes the old first page
+    restart at "1" (labels 1, 1, 2, 3...; docs/ARCHITECTURE.md M6a deviations)."""
+    if not had_labels and _has_page_labels(doc):
+        mupdf = pymupdf.mupdf
+        catalog = mupdf.pdf_new_indirect(pymupdf._as_pdf_document(doc), doc.pdf_catalog(), 0)
+        mupdf.pdf_dict_dels(catalog, "PageLabels")
 
 
 def insert_pages(
@@ -228,6 +267,7 @@ def _graft(doc: pymupdf.Document, src: pymupdf.Document, first: int, last: int, 
     pages (seen with the LibreOffice-like form's "Nom" field).
     """
     count = last - first + 1
+    had_labels = _has_page_labels(doc)
     doc.insert_pdf(
         src,
         from_page=first,
@@ -236,6 +276,7 @@ def _graft(doc: pymupdf.Document, src: pymupdf.Document, first: int, last: int, 
         links=True,
         annots=True,
     )
+    _drop_new_page_labels(doc, had_labels)
     for i in range(at, at + count):
         page_xref = doc.page_xref(i)
         for xref, _subtype, _nm in doc[i].annot_xrefs():

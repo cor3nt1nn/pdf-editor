@@ -61,7 +61,8 @@ def test_forced_full_save_in_place(qtbot, simple_pdf, tmp_path) -> None:
 
 
 def test_encrypted_save_keeps_password(encrypted_pdf) -> None:
-    doc = PdfDocument.open(encrypted_pdf, password=PASSWORD)
+    # The owner password: rotating needs ASSEMBLE, which the user permissions lack.
+    doc = PdfDocument.open(encrypted_pdf, password="owner-" + PASSWORD)
     doc.set_page_rotation(0, 90)
     doc.save()
     doc.set_page_rotation(1, 90)

@@ -426,8 +426,13 @@ class PdfDocument(QObject):
             return int(self.fitz[i].rotation)
 
     def set_page_rotation(self, i: int, degrees: int) -> None:
-        """Set the absolute rotation of page ``i`` (multiple of 90). Emits page_changed."""
+        """Set the absolute rotation of page ``i`` (multiple of 90). Emits page_changed.
+
+        Raises :class:`PageError` ("permission") without :attr:`can_assemble`.
+        """
         self._check_index(i)
+        if not self._can_assemble:
+            raise PageError("page operations are not permitted by this document", "permission")
         if int(degrees) % 90:
             raise ValueError(f"rotation must be a multiple of 90: {degrees}")
         degrees = int(degrees) % 360
@@ -526,10 +531,17 @@ class PdfDocument(QObject):
             out.append(index)
         return out
 
-    def delete_pages(self, indexes: list[int]) -> None:
+    @property
+    def has_acroform(self) -> bool:
+        """The catalog has an /AcroForm dictionary (possibly without fields)."""
+        with self.lock:
+            return self._doc is not None and page_ops.has_acroform(self._doc)
+
+    def delete_pages(self, indexes: list[int], *, drop_empty_form: bool = False) -> None:
         """Delete the pages at ``indexes`` (form fields pruned, links to them dropped,
-        outline items to them greyed). Raises :class:`PageError` (permissions, dynamic
-        XFA, every page, failure)."""
+        outline items to them greyed). ``drop_empty_form`` then also removes an /AcroForm
+        left without fields (undo of an insertion into a document without a form).
+        Raises :class:`PageError` (permissions, dynamic XFA, every page, failure)."""
         self._check_assemble()
         targets = sorted(set(int(i) for i in indexes))
         if not targets:
@@ -541,6 +553,8 @@ class PdfDocument(QObject):
         with self.lock:
             try:
                 page_ops.delete_pages(self.fitz, targets)
+                if drop_empty_form:
+                    page_ops.drop_empty_acroform(self.fitz)
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise PageError(str(exc)) from exc
         gone = set(targets)

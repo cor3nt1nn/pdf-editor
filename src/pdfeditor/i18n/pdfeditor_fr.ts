@@ -22,52 +22,82 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../core/commands.py" line="42"/>
+        <location filename="../core/commands.py" line="114"/>
         <source>Rotate page</source>
         <translation>la rotation de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="88"/>
+        <location filename="../core/commands.py" line="116"/>
+        <source>Rotate pages</source>
+        <translation>la rotation des pages</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="192"/>
+        <source>Delete page</source>
+        <translation>la suppression de la page</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="194"/>
+        <source>Delete pages</source>
+        <translation>la suppression des pages</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="249"/>
+        <source>Move pages</source>
+        <translation>le déplacement des pages</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="309"/>
+        <source>Insert blank page</source>
+        <translation>l’insertion d’une page vierge</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="332"/>
+        <source>Insert pages</source>
+        <translation>l’insertion des pages</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="368"/>
         <source>Edit form field</source>
         <translation>la modification du champ</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="193"/>
+        <location filename="../core/commands.py" line="455"/>
         <source>Add signature</source>
         <translation>l’ajout de la signature</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="195"/>
+        <location filename="../core/commands.py" line="457"/>
         <source>Add stamp</source>
         <translation>l’ajout du tampon</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="197"/>
+        <location filename="../core/commands.py" line="459"/>
         <source>Add text</source>
         <translation>l’ajout du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="264"/>
+        <location filename="../core/commands.py" line="527"/>
         <source>Edit text</source>
         <translation>la modification du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="271"/>
+        <location filename="../core/commands.py" line="534"/>
         <source>Move annotation</source>
         <translation>le déplacement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="272"/>
+        <location filename="../core/commands.py" line="535"/>
         <source>Resize annotation</source>
         <translation>le redimensionnement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="273"/>
+        <location filename="../core/commands.py" line="536"/>
         <source>Change text style</source>
         <translation>le changement de style du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="317"/>
+        <location filename="../core/commands.py" line="576"/>
         <source>Delete annotation</source>
         <translation>la suppression de l’annotation</translation>
     </message>
@@ -346,17 +376,17 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>DocumentView</name>
     <message>
-        <location filename="../ui/document_view.py" line="154"/>
+        <location filename="../ui/document_view.py" line="157"/>
         <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
         <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="162"/>
+        <location filename="../ui/document_view.py" line="165"/>
         <source>Form filling is not permitted by this document’s security settings.</source>
         <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="168"/>
+        <location filename="../ui/document_view.py" line="171"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
     </message>

@@ -187,3 +187,8 @@ def many_signatures_pdf(tmp_path):
 @pytest.fixture
 def odd_stamps_pdf(tmp_path):
     return fixtures.make_odd_stamps_pdf(tmp_path / "odd_stamps.pdf")
+
+
+@pytest.fixture
+def outlined_pdf(tmp_path):
+    return fixtures.make_outlined_pdf(tmp_path / "outlined.pdf")

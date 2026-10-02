@@ -900,7 +900,7 @@ class MainWindow(QMainWindow):
     def rotate_current_page(self, delta: int) -> None:
         doc = self.document_view.document
         page = self.page_view.current_page
-        if doc is None or page < 0:
+        if doc is None or page < 0 or not doc.can_assemble:
             return
         self.document_view.commit_pending_edits()  # before the command's snapshot
         self.document_view.push(RotatePageCommand(doc, page, delta))

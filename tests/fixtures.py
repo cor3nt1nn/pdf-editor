@@ -1352,3 +1352,32 @@ def fill_lo_form(doc) -> None:
     for name, (index, value) in LO_FILL.items():
         w = [x for x in widgets if x.name == name][index]
         doc.set_field_value(w.page, w.xref, value, name=w.name, unrotated_rect=w.unrotated_rect)
+
+
+#: Links of :func:`make_outlined_pdf` page 1: (kind, rect, target) with target the
+#: 0-based page of the GoTo link and the URI of the URI link.
+OUTLINED_LINKS = (
+    (pymupdf.LINK_GOTO, (72, 100, 200, 120), 2),
+    (pymupdf.LINK_URI, (72, 140, 200, 160), "https://example.org/outlined"),
+)
+
+
+def make_outlined_pdf(path: Path) -> Path:
+    """Three A4 pages labelled "Page 1".."Page 3" with an outline entry per page
+    ("Chapter 1".."Chapter 3"); page 1 holds the ``OUTLINED_LINKS`` (a GoTo link to page
+    3 and a URI link)."""
+    doc = pymupdf.open()
+    for n in range(1, 4):
+        _label(doc.new_page(width=A4[0], height=A4[1]), f"Page {n}")
+    page = doc[0]
+    for kind, rect, target in OUTLINED_LINKS:
+        link: dict[str, object] = {"kind": kind, "from": pymupdf.Rect(rect)}
+        if kind == pymupdf.LINK_GOTO:
+            link["page"] = target
+        else:
+            link["uri"] = target
+        page.insert_link(link)
+    doc.set_toc([[1, f"Chapter {n}", n] for n in range(1, 4)])
+    doc.save(path)
+    doc.close()
+    return path
