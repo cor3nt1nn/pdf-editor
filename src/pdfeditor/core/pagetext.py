@@ -150,13 +150,19 @@ class Quad(NamedTuple):
 
 class _LineGeom(NamedTuple):
     """Line-local frame of a line: unit direction ``d`` and normal ``n`` (page space),
-    the line quad's extent along ``d`` and ``n``, and every char's extent along ``d``."""
+    the line quad's extent along ``d`` and ``n``, every char's extent along ``d``, and the
+    per-char lower/upper bounds along ``d`` (``lo``/``hi``) and ``n`` (``top``/``bottom``)
+    as flat tuples (fast ``min``/``max`` over a slice in :meth:`PageText.range_quads`)."""
 
     d: tuple[float, float]
     n: tuple[float, float]
     along: tuple[float, float]
     across: tuple[float, float]
     chars: tuple[tuple[float, float], ...]
+    lo: tuple[float, ...] = ()
+    hi: tuple[float, ...] = ()
+    top: tuple[float, ...] = ()
+    bottom: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True, eq=False)
@@ -391,9 +397,11 @@ class PageText:
         return out
 
     def range_quads(self, a: CharRef | int, b: CharRef | int) -> list[Quad]:
-        """One quad per line covering chars ``a``..``b`` inclusive (either order): from
-        the first char's upper/lower-left corner to the last char's upper/lower-right
-        corner (non-rectangular for slanted text)."""
+        """One quad per line covering chars ``a``..``b`` inclusive (either order): the
+        union of the selected chars' quads in the line's frame (extents along its writing
+        direction and its normal), so it is non-rectangular in page space for slanted text
+        and covers right-to-left runs, whose chars come in logical order with boxes
+        running right to left, and mixed-direction lines."""
         i, j = sorted((_index(a), _index(b)))
         if not self.chars:
             return []
@@ -404,9 +412,16 @@ class PageText:
             last = min(j, starts[k + 1] - 1)
             if first > last:
                 continue
-            q0 = self._char_quad(first)
-            q1 = q0 if last == first else self._char_quad(last)
-            out.append(Quad(q0.ul, q1.ur, q0.ll, q1.lr))
+            g = self._geoms[k]
+            s0, s1 = first - starts[k], last - starts[k] + 1
+            out.append(
+                _frame_quad(
+                    g.d,
+                    g.n,
+                    (min(g.lo[s0:s1]), max(g.hi[s0:s1])),
+                    (min(g.top[s0:s1]), max(g.bottom[s0:s1])),
+                )
+            )
         return out
 
     def text_of(self, chars: Iterable[CharRef | int]) -> str:
@@ -706,41 +721,75 @@ def _char_quad(d: tuple[float, float], span: Span, bbox: QRectF) -> Quad:
     return Quad(QPointF(*ul), QPointF(*ur), QPointF(*ll), QPointF(*lr))
 
 
+def _frame_quad(
+    d: tuple[float, float],
+    n: tuple[float, float],
+    along: tuple[float, float],
+    across: tuple[float, float],
+) -> Quad:
+    """The quad spanning ``along`` (on ``d``) × ``across`` (on ``n``), page space; upper =
+    the low ``n`` side, left = the low ``d`` side (PyMuPDF's corner naming)."""
+
+    def pt(a: float, c: float) -> QPointF:
+        return QPointF(a * d[0] + c * n[0], a * d[1] + c * n[1])
+
+    (a0, a1), (c0, c1) = along, across
+    return Quad(pt(a0, c0), pt(a1, c0), pt(a0, c1), pt(a1, c1))
+
+
 def _line_geom(line: Line) -> _LineGeom:
     cos, sin = line.dir
     norm = math.hypot(cos, sin) or 1.0
     d = (cos / norm, sin / norm)
     n = (-d[1], d[0])
     extents: list[tuple[float, float]] = []
-    pts: list[QPointF] = []
+    tops: list[float] = []
+    bottoms: list[float] = []
     if _axis_aligned(line.dir):
         # Fast path: char quads are their boxes.
         horizontal = abs(d[0]) >= abs(d[1])
         s = 1.0 if (d[0] if horizontal else d[1]) > 0 else -1.0
-        x0 = y0 = math.inf
-        x1 = y1 = -math.inf
+        # The normal is (-d.y, d.x): (0, s) for a horizontal line, (-s, 0) for a vertical one.
+        t = s if horizontal else -s
         for span in line.spans:
             for ch in span.chars:
                 b = ch.bbox
                 bx0, by0, bx1, by1 = b.left(), b.top(), b.right(), b.bottom()
                 lo, hi = (bx0, bx1) if horizontal else (by0, by1)
                 extents.append((lo * s, hi * s) if s > 0 else (hi * s, lo * s))
-                x0, y0, x1, y1 = min(x0, bx0), min(y0, by0), max(x1, bx1), max(y1, by1)
-        if extents:
-            pts = [QPointF(x0, y0), QPointF(x1, y1), QPointF(x0, y1), QPointF(x1, y0)]
+                lo, hi = (by0, by1) if horizontal else (bx0, bx1)
+                c0, c1 = (lo * t, hi * t) if t > 0 else (hi * t, lo * t)
+                tops.append(c0)
+                bottoms.append(c1)
     else:
         for span in line.spans:
             for ch in span.chars:
                 q = _char_quad(line.dir, span, ch.bbox)
                 along = [p.x() * d[0] + p.y() * d[1] for p in q]
+                across = [p.x() * n[0] + p.y() * n[1] for p in q]
                 extents.append((min(along), max(along)))
-                pts.extend(q)
-    if not pts:
+                tops.append(min(across))
+                bottoms.append(max(across))
+    if extents:
+        along_ext = (min(e[0] for e in extents), max(e[1] for e in extents))
+        across_ext = (min(tops), max(bottoms))
+    else:
         r = line.bbox
         pts = [r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()]
-    along = [p.x() * d[0] + p.y() * d[1] for p in pts]
-    across = [p.x() * n[0] + p.y() * n[1] for p in pts]
-    return _LineGeom(d, n, (min(along), max(along)), (min(across), max(across)), tuple(extents))
+        al = [p.x() * d[0] + p.y() * d[1] for p in pts]
+        ac = [p.x() * n[0] + p.y() * n[1] for p in pts]
+        along_ext, across_ext = (min(al), max(al)), (min(ac), max(ac))
+    return _LineGeom(
+        d,
+        n,
+        along_ext,
+        across_ext,
+        tuple(extents),
+        tuple(e[0] for e in extents),
+        tuple(e[1] for e in extents),
+        tuple(tops),
+        tuple(bottoms),
+    )
 
 
 def _outside(v: float, extent: tuple[float, float]) -> float:
