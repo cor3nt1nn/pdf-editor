@@ -450,11 +450,12 @@ Run it on copies of your own documents, with the zip built by `scripts\build_exe
 ## Page tools (Milestone 6a)
 
 Reorder, delete, insert, extract and split pages, with full undo. The **Pages** menu (between
-Edit and View) works on the pages selected in the thumbnail sidebar when two or more are
-selected, otherwise on the current page; a right-click on a thumbnail offers the same actions
-for the clicked pages. In the sidebar, **Ctrl+click** / **Shift+click** build a multi-selection,
-**dragging** thumbnails moves them before the drop position, and **Delete** removes the selected
-pages. Nothing asks for confirmation: every operation is one Undo step (Ctrl+Z / Ctrl+Y),
+Edit and View) works on the pages selected (highlighted) in the thumbnail sidebar, or on the
+current page when none is; a right-click on a thumbnail offers the same actions for the clicked
+pages (inserts go next to the clicked page). In the sidebar, **Ctrl+click** / **Shift+click**
+build a multi-selection, **dragging** thumbnails moves them where the insertion line shows
+(the list scrolls when the pointer nears its top or bottom edge), and **Delete** removes the
+selected pages. Nothing asks for confirmation: every operation is one Undo step (Ctrl+Z / Ctrl+Y),
 including deletions (the document is restored exactly: annotations, links, outline and form
 fields included).
 
@@ -469,16 +470,18 @@ fields included).
 
 - **Inserting from another PDF** copies its pages with their annotations, links between the
   copied pages and form fields; fields whose names the document already has are renamed
-  "Name (2)", "Name (3)"… (the status bar says so). An encrypted source asks for its password. A document cannot be
-  inserted into itself.
+  "Name (2)", "Name (3)"… (the status bar says so). An encrypted source asks for its password;
+  a source whose security settings forbid copying is refused (unless opened with its owner
+  password). A document cannot be inserted into itself.
 - **Extracted and split files** are rewritten from scratch (no earlier revisions) and keep the
   protection of the original: a file opened with a password gives files with the same password;
   a file restricted by its author without a password gives files with the same restrictions.
 - **Saving after a page operation** rewrites the whole file once (deleted pages leave no trace);
-  later saves are incremental again. A static XFA form loses its XFA at that save (the
-  AcroForm fields remain). Dynamic XFA forms and documents whose security settings forbid
-  assembling pages open with the Pages menu disabled; copying pages (Extract, Split) follows the
-  copy permission.
+  later saves are incremental again. A static XFA form loses its XFA at that save, and in
+  exported, extracted and split copies (the AcroForm fields remain); it stays a static form even
+  when the pages holding its fields are deleted. Dynamic XFA forms and documents whose security
+  settings forbid assembling pages open with the Pages menu disabled (and thumbnails cannot be
+  dragged); copying pages (Extract, Split) follows the copy permission.
 - A document always keeps at least one page.
 
 Known limitations:
