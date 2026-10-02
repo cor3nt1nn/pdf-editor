@@ -176,7 +176,7 @@ def _check_sections(window: MainWindow, sections) -> None:
         for action, keys in section_rows:
             assert action and keys
     interaction = dict(sections[-1][1])
-    assert len(interaction) == 8
+    assert len(interaction) == 9
     assert len(sections) >= 5
 
 
@@ -195,7 +195,7 @@ def test_f1_opens_shortcuts_dialog(window: MainWindow, monkeypatch) -> None:
 def test_shortcut_sections_grouped_by_menu(window: MainWindow) -> None:
     sections = window.shortcut_sections()
     titles = [t for t, _rows in sections]
-    assert titles == ["File", "Edit", "View", "Help", "Pointer and editing"]
+    assert titles == ["File", "Edit", "Pages", "View", "Help", "Pointer and editing"]
     file_rows = dict(sections[0][1])
     native = QKeySequence.SequenceFormat.NativeText
     assert file_rows["Open…"] == QKeySequence("Ctrl+O").toString(native)

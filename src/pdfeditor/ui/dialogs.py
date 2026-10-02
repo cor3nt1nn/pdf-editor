@@ -229,6 +229,34 @@ def get_export_path(parent: QWidget | None, suggested: str) -> str | None:
     return get_save_path(parent, suggested, title)
 
 
+def get_extract_path(parent: QWidget | None, suggested: str) -> str | None:
+    """Target of Pages ▸ Extract Pages…; same rules as :func:`get_save_path`."""
+    title = QCoreApplication.translate("Dialogs", "Extract Pages")
+    return get_save_path(parent, suggested, title)
+
+
+def get_directory(parent: QWidget | None, directory: str) -> str | None:
+    """Choose a folder (Pages ▸ Split Document…); ``None`` when cancelled."""
+    path = QFileDialog.getExistingDirectory(
+        parent, QCoreApplication.translate("Dialogs", "Folder"), directory
+    )
+    return path or None
+
+
+def confirm_overwrite_files(parent: QWidget | None, paths: list[str]) -> bool:
+    """Ask before replacing several existing files (their names under Show Details…)."""
+    box = QMessageBox(
+        QMessageBox.Icon.Question,
+        QCoreApplication.translate("Dialogs", "Split Document"),
+        QCoreApplication.translate("Dialogs", "Some files already exist. Replace them?"),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        parent,
+    )
+    box.setDefaultButton(QMessageBox.StandardButton.No)
+    box.setDetailedText("\n".join(os.path.basename(p) for p in paths))
+    return box.exec() == QMessageBox.StandardButton.Yes
+
+
 def get_save_path(parent: QWidget | None, suggested: str, title: str | None = None) -> str | None:
     """Ask for a target path; always ends in ".pdf" and never silently overwrites."""
     path = _run_save_dialog(parent, suggested, title)
@@ -384,6 +412,10 @@ def interaction_shortcuts() -> list[tuple[str, str]]:
         (QCoreApplication.translate("Dialogs", "Next / previous field"), keys("Tab", "Shift+Tab")),
         (QCoreApplication.translate("Dialogs", "Toggle the focused checkbox"), keys("Space")),
         (QCoreApplication.translate("Dialogs", "Cancel, deselect"), keys("Esc")),
+        (
+            QCoreApplication.translate("Dialogs", "Reorder pages"),
+            QCoreApplication.translate("Dialogs", "Drag thumbnails"),
+        ),
     ]
 
 

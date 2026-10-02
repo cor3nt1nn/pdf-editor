@@ -188,9 +188,13 @@ class DocumentView(QWidget):
         """Document changes that belong to every save (Save and Save As).
 
         A filled static XFA form loses its /XFA: XFA-aware viewers would otherwise show
-        the stale XFA datasets instead of the AcroForm values just entered.
+        the stale XFA datasets instead of the AcroForm values just entered. So does a
+        static XFA form whose pages were inserted, deleted or moved (the XFA template
+        would no longer match the pages).
         """
-        if document.xfa_kind is XfaKind.STATIC and document.form_edited:
+        if document.xfa_kind is XfaKind.STATIC and (
+            document.form_edited or document.structure_edited
+        ):
             document.strip_xfa()
 
     def shutdown(self) -> None:

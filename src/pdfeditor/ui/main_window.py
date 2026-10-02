@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 
-from PySide6.QtCore import QDir, QProcess, Qt
+from PySide6.QtCore import QDir, QPoint, QProcess, Qt
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -34,15 +34,28 @@ from PySide6.QtWidgets import (
 from pdfeditor.constants import APP_NAME, ZoomMode
 from pdfeditor.core import file_assoc, recent
 from pdfeditor.core.annotations import AnnotKind
-from pdfeditor.core.commands import RotatePageCommand
-from pdfeditor.core.document import DocumentError, OpenError, PasswordRequired, SaveError
+from pdfeditor.core.commands import (
+    DeletePagesCommand,
+    InsertBlankPageCommand,
+    InsertPagesCommand,
+    MovePagesCommand,
+    RotatePagesCommand,
+    _ImmediateCommand,
+)
+from pdfeditor.core.document import (
+    DocumentError,
+    OpenError,
+    PageError,
+    PasswordRequired,
+    SaveError,
+)
 from pdfeditor.core.files import same_file
 from pdfeditor.core.forms import XfaKind
 from pdfeditor.core.settings import Settings
 from pdfeditor.core.signature_store import SignatureStore
 from pdfeditor.i18n import LANGUAGE_NAMES, current_language
 from pdfeditor.resources import app_icon, icon
-from pdfeditor.ui import dialogs, signature_dialogs
+from pdfeditor.ui import dialogs, page_dialogs, signature_dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.export_dialog import ExportDialog
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
@@ -220,14 +233,41 @@ class MainWindow(QMainWindow):
         self.act_rotate_cw = self._action(
             self.tr("Rotate Page &Clockwise"),
             QKeySequence("Ctrl+R"),
-            lambda: self.rotate_current_page(90),
+            lambda: self.rotate_pages(None, 90),
             "rotate_cw",
         )
         self.act_rotate_ccw = self._action(
             self.tr("Rotate Page C&ounterclockwise"),
             QKeySequence("Ctrl+Shift+R"),
-            lambda: self.rotate_current_page(-90),
+            lambda: self.rotate_pages(None, -90),
             "rotate_ccw",
+        )
+        self.act_insert_blank = self._action(
+            self.tr("Insert &Blank Page"),
+            QKeySequence("Ctrl+Shift+N"),
+            self.insert_blank_page,
+            "insert_blank_page",
+        )
+        self.act_insert_pages = self._action(
+            self.tr("Insert Pages from &File…"),
+            QKeySequence("Ctrl+Shift+I"),
+            self.insert_pages,
+            "insert_pages",
+        )
+        self.act_delete_pages = self._action(
+            self.tr("&Delete Pages"),
+            QKeySequence("Ctrl+Shift+Delete"),
+            lambda: self.delete_pages(None),
+            "delete_pages",
+        )
+        self.act_extract_pages = self._action(
+            self.tr("&Extract Pages…"),
+            QKeySequence("Ctrl+Shift+E"),
+            lambda: self.extract_pages(None),
+            "extract_pages",
+        )
+        self.act_split = self._action(
+            self.tr("Sp&lit Document…"), None, self.split_document, "split_document"
         )
         # Plain-key tool shortcuts: text editors and spin boxes accept ShortcutOverride
         # for printable keys, so typing there never switches tools.
@@ -435,9 +475,6 @@ class MainWindow(QMainWindow):
         self.menu_edit.addAction(self.act_undo)
         self.menu_edit.addAction(self.act_redo)
         self.menu_edit.addSeparator()
-        self.menu_edit.addAction(self.act_rotate_cw)
-        self.menu_edit.addAction(self.act_rotate_ccw)
-        self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_hand_tool)
         self.menu_edit.addAction(self.act_form_tool)
         self.menu_edit.addSeparator()
@@ -453,6 +490,13 @@ class MainWindow(QMainWindow):
         self.menu_edit.addAction(self.act_delete_annot)
         self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_auto_shrink)
+        self.menu_pages = bar.addMenu(self.tr("&Pages"))
+        self.menu_pages.setObjectName("pages_menu")
+        for act in self._page_menu_actions():
+            if act is None:
+                self.menu_pages.addSeparator()
+            else:
+                self.menu_pages.addAction(act)
         self.menu_view = bar.addMenu(self.tr("&View"))
         for act in (
             self.act_zoom_in,
@@ -565,6 +609,9 @@ class MainWindow(QMainWindow):
         self.zoom_widget.mode_requested.connect(pv.set_zoom_mode)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.thumbnails.page_requested.connect(pv.scroll_to_page)
+        self.thumbnails.pages_move_requested.connect(self.move_pages)
+        self.thumbnails.pages_delete_requested.connect(self.delete_pages)
+        self.thumbnails.context_menu_requested.connect(self._show_page_context_menu)
         self.document_view.document_changed.connect(self._on_document_changed)
         self.document_view.path_changed.connect(self._on_path_changed)
         self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
@@ -593,10 +640,14 @@ class MainWindow(QMainWindow):
             self.act_actual_size,
             self.act_prev_page,
             self.act_next_page,
-            self.act_rotate_cw,
-            self.act_rotate_ccw,
         ):
             act.setEnabled(has_doc)
+        can_assemble = self._can_assemble()
+        for act in self._assemble_actions():
+            act.setEnabled(can_assemble)
+        can_extract = self._can_extract()
+        self.act_extract_pages.setEnabled(can_extract)
+        self.act_split.setEnabled(can_extract)
         self.page_spin.setEnabled(has_doc)
         self.act_form_tool.setEnabled(self._can_fill_forms())
         can_annotate = self._can_annotate()
@@ -845,7 +896,17 @@ class MainWindow(QMainWindow):
         self._update_title()
         self._update_status()
 
+    def _sync_page_count(self) -> None:
+        """Page spin box range and total (the page count changes with page operations)."""
+        n = self.page_view.page_count
+        self.page_spin.blockSignals(True)
+        self.page_spin.setRange(1 if n else 0, n)
+        self.page_spin.blockSignals(False)
+        self.page_total_label.setText(f" / {n} ")
+
     def _on_current_page_changed(self, index: int) -> None:
+        # Also emitted after every page operation (PageView), with the new page count.
+        self._sync_page_count()
         self.page_spin.blockSignals(True)
         self.page_spin.setValue(index + 1)
         self.page_spin.blockSignals(False)
@@ -898,12 +959,306 @@ class MainWindow(QMainWindow):
             tool.delete_selection()
 
     def rotate_current_page(self, delta: int) -> None:
-        doc = self.document_view.document
+        """Rotate the current page (kept for callers predating M6: see rotate_pages)."""
         page = self.page_view.current_page
-        if doc is None or page < 0 or not doc.can_assemble:
-            return
-        self.document_view.commit_pending_edits()  # before the command's snapshot
-        self.document_view.push(RotatePageCommand(doc, page, delta))
+        if page >= 0:
+            self.rotate_pages([page], delta)
+
+    # -- pages ------------------------------------------------------------------------
+    def _page_menu_actions(self) -> list[QAction | None]:
+        """Pages menu order; None = separator."""
+        return [
+            self.act_insert_blank,
+            self.act_insert_pages,
+            self.act_delete_pages,
+            None,
+            self.act_rotate_cw,
+            self.act_rotate_ccw,
+            None,
+            self.act_extract_pages,
+            self.act_split,
+        ]
+
+    def _assemble_actions(self) -> tuple[QAction, ...]:
+        return (
+            self.act_insert_blank,
+            self.act_insert_pages,
+            self.act_delete_pages,
+            self.act_rotate_cw,
+            self.act_rotate_ccw,
+        )
+
+    def _can_assemble(self) -> bool:
+        """Page operations (insert, delete, move, rotate) are allowed: the permissions
+        allow assembling and the document is not a dynamic XFA form."""
+        doc = self.document_view.document
+        return doc is not None and doc.can_assemble and doc.xfa_kind is not XfaKind.DYNAMIC
+
+    def _can_extract(self) -> bool:
+        doc = self.document_view.document
+        return doc is not None and doc.can_extract and doc.xfa_kind is not XfaKind.DYNAMIC
+
+    def target_pages(self) -> list[int]:
+        """Pages a Pages menu action works on: the thumbnail selection when it holds two
+        or more pages, else the current page."""
+        if self.document_view.document is None:
+            return []
+        selected = self.thumbnails.selected_pages()
+        if len(selected) >= 2:
+            return selected
+        current = self.page_view.current_page
+        return [current] if current >= 0 else []
+
+    def _page_error_text(self, reason: str) -> str:
+        if reason == "last_page":
+            return self.tr("A document must keep at least one page.")
+        if reason in ("permission", "xfa"):
+            return self.tr(
+                "Page operations are not permitted by this document’s security settings."
+            )
+        if reason == "snapshot":
+            return self.tr("The page could not be deleted: no room for the undo copy.")
+        return self.tr("The page operation failed.")
+
+    def _run_page_command(self, make) -> _ImmediateCommand | None:
+        """Build a page command with ``make()`` (after committing pending edits, so it
+        sees their result), apply it, then push it. Refusals and failures are reported
+        and leave the undo stack untouched; returns the pushed command or None."""
+        if self.document_view.document is None:
+            return None
+        self.document_view.commit_pending_edits()
+        try:
+            command = make()
+            if isinstance(command, MovePagesCommand) and command.is_noop:
+                return None
+            command.apply_now()
+        except PageError as exc:
+            log.warning("page operation refused: %s (%s)", exc, exc.reason)
+            text = self._page_error_text(exc.reason)
+            if exc.reason in ("snapshot", "failed"):
+                dialogs.warn(self, self.tr("Pages"), text, details=str(exc))
+            else:
+                self._show_message(text)
+            return None
+        except (DocumentError, IndexError, ValueError) as exc:
+            log.warning("page operation failed: %s", exc)
+            dialogs.warn(self, self.tr("Pages"), self._page_error_text("failed"), details=str(exc))
+            return None
+        self.document_view.push(command)
+        return command
+
+    def _refuse_assemble(self) -> bool:
+        """True (and a status message) when page operations are not allowed."""
+        if self._can_assemble():
+            return False
+        if self.document_view.document is not None:
+            self._show_message(self._page_error_text("permission"))
+        return True
+
+    def rotate_pages(self, rows: list[int] | None, delta: int) -> bool:
+        """Pages ▸ Rotate: ``rows`` (default :meth:`target_pages`) by ``delta`` degrees."""
+        doc = self.document_view.document
+        if doc is None or self._refuse_assemble():
+            return False
+        rows = self.target_pages() if rows is None else list(rows)
+        if not rows:
+            return False
+        return self._run_page_command(lambda: RotatePagesCommand(doc, rows, delta)) is not None
+
+    def delete_pages(self, rows: list[int] | None = None) -> bool:
+        """Pages ▸ Delete Pages (and Delete in the thumbnails): ``rows`` (default
+        :meth:`target_pages`). Undoable, so no confirmation."""
+        doc = self.document_view.document
+        if doc is None or self._refuse_assemble():
+            return False
+        rows = self.target_pages() if rows is None else list(rows)
+        if not rows:
+            return False
+        return self._run_page_command(lambda: DeletePagesCommand(doc, rows)) is not None
+
+    def move_pages(self, rows: list[int], target: int) -> bool:
+        """Thumbnail drag and drop: move ``rows`` before the page at ``target``."""
+        doc = self.document_view.document
+        if doc is None or not rows or self._refuse_assemble():
+            return False
+        return self._run_page_command(lambda: MovePagesCommand(doc, rows, target)) is not None
+
+    def insert_blank_page(self) -> bool:
+        """Pages ▸ Insert Blank Page: after the current page, with its size."""
+        doc = self.document_view.document
+        if doc is None or self._refuse_assemble():
+            return False
+        current = max(0, self.page_view.current_page)
+        size = doc.page_size(current)
+        cmd = self._run_page_command(lambda: InsertBlankPageCommand(doc, current + 1, size))
+        return cmd is not None
+
+    def insert_pages(self) -> bool:
+        """Pages ▸ Insert Pages from File…."""
+        doc = self.document_view.document
+        if doc is None or self._refuse_assemble():
+            return False
+        self.document_view.commit_pending_edits()
+        request = page_dialogs.insert_pages(self, doc, self.page_view.current_page, self.settings)
+        if request is None:
+            return False
+        cmd = self._run_page_command(
+            lambda: InsertPagesCommand(doc, request.data, request.index, request.count)
+        )
+        if cmd is None:
+            return False
+        text = self.tr("Inserted {count} pages").format(count=request.count)
+        if doc.last_insert_renamed_fields:
+            text += " — " + self.tr(
+                "Some inserted form fields were renamed because the document already had fields with the same names."  # noqa: E501
+            )
+        self._show_message(text)
+        return True
+
+    def _stem(self) -> str:
+        doc = self.document_view.document
+        if doc is not None and doc.path:
+            return os.path.splitext(os.path.basename(doc.path))[0]
+        return "document"
+
+    def _output_dir(self) -> str:
+        doc = self.document_view.document
+        return self.settings.last_open_dir or (
+            os.path.dirname(doc.path) if doc is not None and doc.path else ""
+        )
+
+    def _check_extract(self) -> bool:
+        """Extract/Split are allowed (else a status message explains why not)."""
+        doc = self.document_view.document
+        if doc is None:
+            return False
+        if not doc.can_extract:
+            self._show_message(
+                self.tr("Copying pages is not permitted by this document’s security settings.")
+            )
+            return False
+        return self._can_extract()
+
+    def _replaces_open_document(self, paths: list[str]) -> bool:
+        doc = self.document_view.document
+        if doc is None or doc.path is None or not any(same_path(p, doc.path) for p in paths):
+            return False
+        dialogs.warn(
+            self,
+            self.tr("Extract Pages"),
+            self.tr("Choose another name: the copy cannot replace the open document."),
+        )
+        return True
+
+    def _write_pages(self, write) -> bool:
+        """Run ``write()`` (extract or split) with a wait cursor; report failures."""
+        error: Exception | None = None
+        refused = False
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            write()
+        except PageError as exc:
+            log.warning("copying pages refused: %s", exc)
+            refused = True
+        except (DocumentError, ValueError) as exc:
+            log.warning("writing pages failed: %s", exc)
+            error = exc
+        finally:
+            QApplication.restoreOverrideCursor()
+        if refused:
+            self._show_message(
+                self.tr("Copying pages is not permitted by this document’s security settings.")
+            )
+            return False
+        if error is not None:
+            dialogs.warn(
+                self,
+                self.tr("Pages"),
+                self.tr("The pages could not be written."),
+                details=str(error),
+            )
+            return False
+        return True
+
+    def extract_pages(self, rows: list[int] | None = None) -> bool:
+        """Pages ▸ Extract Pages…: write ``rows`` (default :meth:`target_pages`) to a new
+        file. The open document is unchanged."""
+        doc = self.document_view.document
+        if not self._check_extract():
+            return False
+        rows = self.target_pages() if rows is None else list(rows)
+        if not rows:
+            return False
+        self.document_view.commit_pending_edits()  # the copy includes the value typed
+        name = self.tr("{stem} - pages.pdf").format(stem=self._stem())
+        path = dialogs.get_extract_path(self, os.path.join(self._output_dir(), name))
+        if not path or self._replaces_open_document([path]):
+            return False
+        if not self._write_pages(lambda: doc.extract_pages(rows, path)):
+            return False
+        self.settings.last_open_dir = os.path.dirname(path)
+        self._show_message(
+            self.tr("Extracted {count} pages to “{name}”").format(
+                count=len(rows), name=os.path.basename(path)
+            )
+        )
+        return True
+
+    def split_document(self) -> bool:
+        """Pages ▸ Split Document…: write groups of pages to numbered files."""
+        doc = self.document_view.document
+        if not self._check_extract():
+            return False
+        self.document_view.commit_pending_edits()
+        result = page_dialogs.split_document(self, doc.page_count, self._output_dir(), self._stem())
+        if result is None:
+            return False
+        groups, paths = result
+        if self._replaces_open_document(paths):
+            return False
+        existing = [p for p in paths if os.path.exists(p)]
+        if existing and not dialogs.confirm_overwrite_files(self, existing):
+            return False
+        if not self._write_pages(lambda: doc.split_document(groups, paths)):
+            return False
+        folder = os.path.dirname(paths[0])
+        self.settings.last_open_dir = folder
+        self._show_message(
+            self.tr("Split into {count} files in “{folder}”").format(
+                count=len(paths), folder=QDir.toNativeSeparators(folder)
+            )
+        )
+        return True
+
+    def page_context_menu(self, rows: list[int]) -> QMenu:
+        """The thumbnail context menu: the Pages menu actions applied to ``rows``."""
+        menu = QMenu(self)
+        menu.setObjectName("page_context_menu")
+        targets = list(rows)
+
+        def add(source: QAction, slot) -> None:
+            act = menu.addAction(source.icon(), source.text())
+            act.setObjectName(source.objectName())
+            act.setEnabled(source.isEnabled())
+            act.triggered.connect(lambda _checked=False: slot())
+
+        add(self.act_insert_blank, self.insert_blank_page)
+        add(self.act_insert_pages, self.insert_pages)
+        add(self.act_delete_pages, lambda: self.delete_pages(targets))
+        menu.addSeparator()
+        add(self.act_rotate_cw, lambda: self.rotate_pages(targets, 90))
+        add(self.act_rotate_ccw, lambda: self.rotate_pages(targets, -90))
+        menu.addSeparator()
+        add(self.act_extract_pages, lambda: self.extract_pages(targets))
+        add(self.act_split, self.split_document)
+        return menu
+
+    def _show_page_context_menu(self, rows: list[int], pos: QPoint) -> None:
+        menu = self.page_context_menu(rows)
+        try:
+            menu.exec(pos)
+        finally:
+            menu.deleteLater()
 
     def show_about(self) -> None:
         dialogs.show_about(self)
@@ -917,6 +1272,7 @@ class MainWindow(QMainWindow):
         for menu in (
             self.menu_file,
             self.menu_edit,
+            self.menu_pages,
             self.menu_view,
             self.menu_settings,
             self.menu_help,

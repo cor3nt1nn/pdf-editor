@@ -18,6 +18,10 @@ SHIFT = Qt.KeyboardModifier.ShiftModifier
 def window(qtbot, settings, tmp_path):
     path = fixtures.make_many_pages_pdf(tmp_path / "six.pdf", count=6)
     w = MainWindow(settings)
+    # Sidebar requests only (MainWindow's handlers are tested in test_page_tools_ui).
+    w.thumbnails.pages_move_requested.disconnect(w.move_pages)
+    w.thumbnails.pages_delete_requested.disconnect(w.delete_pages)
+    w.thumbnails.context_menu_requested.disconnect(w._show_page_context_menu)
     qtbot.addWidget(w)
     w.resize(1000, 900)
     w.show()
