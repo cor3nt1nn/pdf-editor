@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
@@ -47,6 +48,10 @@ from pdfeditor.core.pagetext import PageText
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import PageShapes
 from pdfeditor.core.snapshots import SnapshotStore
+
+if TYPE_CHECKING:  # core/textedit.py imports DocumentError from here
+    from pdfeditor.core.fontmatch import SystemFonts
+    from pdfeditor.core.textedit import Run, TextEditResult
 
 log = logging.getLogger(__name__)
 
@@ -228,6 +233,7 @@ class PdfDocument(QObject):
         self._form_edited = False
         self._can_assemble = False
         self._can_extract = False
+        self._can_modify = False
         self._structure_edited = False
         self._page_ids: list[PageId] = new_page_ids(self._page_count)
         self._page_index: dict[PageId, int] = {}
@@ -398,7 +404,7 @@ class PdfDocument(QObject):
             doc = self._doc
             if doc is None:
                 self._is_form = self._can_fill_forms = self._can_annotate = False
-                self._can_assemble = self._can_extract = False
+                self._can_assemble = self._can_extract = self._can_modify = False
                 self._xfa_kind = XfaKind.NONE
                 return
             self._is_form = bool(doc.is_form_pdf)
@@ -416,6 +422,13 @@ class PdfDocument(QObject):
         self._can_annotate = bool(perms & pymupdf.PDF_PERM_ANNOTATE)
         self._can_assemble = bool(perms & (pymupdf.PDF_PERM_ASSEMBLE | pymupdf.PDF_PERM_MODIFY))
         self._can_extract = bool(perms & pymupdf.PDF_PERM_COPY)
+        self._can_modify = bool(perms & pymupdf.PDF_PERM_MODIFY)
+
+    @property
+    def can_modify(self) -> bool:
+        """The permissions allow changing the page content (``PDF_PERM_MODIFY``): editing
+        page text (M7). Computed on open and after each reload."""
+        return self._can_modify
 
     @property
     def was_repaired(self) -> bool:
@@ -1207,6 +1220,59 @@ class PdfDocument(QObject):
                 self._text_cache[i] = cached
         return cached
 
+    # -- page text editing (M7) ----------------------------------------------
+    def replace_text_run(
+        self, page: int, run: Run, text: str, *, fonts: SystemFonts | None = None
+    ) -> TextEditResult:
+        """Replace ``run`` (chars of :meth:`page_text` ``page``) by ``text`` in the page
+        content; see :func:`pdfeditor.core.textedit.replace_run`. ``fonts`` overrides the
+        installed fonts (tests). Emits ``page_changed`` (text, shapes and annotation
+        caches dropped). The next save is a full one (MuPDF's redaction flag).
+
+        Raises :class:`~pdfeditor.core.textedit.TextEditError` with a reason
+        (``PERMISSION`` without :attr:`can_modify`, ...); the page is then unchanged.
+        ``ValueError`` for a multi-line ``text``.
+        """
+        from pdfeditor.core import textedit
+
+        self._check_index(page)
+        if not self._can_modify:
+            raise textedit.TextEditError(
+                "modifying this document is not permitted", textedit.EditReason.PERMISSION
+            )
+        with self.lock:
+            page_text = self.page_text(page)
+            try:
+                result = textedit.replace_run(self.fitz, page, page_text, run, text, fonts=fonts)
+            except (textedit.TextEditError, ValueError):
+                raise
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise textedit.TextEditError(str(exc)) from exc
+        log.info("page %d: replaced %r by %r", page + 1, result.old_text, result.new_text)
+        self.page_changed.emit(page)
+        return result
+
+    def set_page_content(self, page: int, data: bytes, expect: bytes | None = None) -> None:
+        """Make ``data`` the whole content of page ``page`` (undo/redo of a text edit:
+        :attr:`TextEditResult.before`/``after``). With ``expect`` the current content must
+        equal it, else :class:`~pdfeditor.core.textedit.TextEditError` (``STALE``) and
+        nothing changes. Emits ``page_changed``."""
+        from pdfeditor.core import textedit
+
+        self._check_index(page)
+        if not self._can_modify:
+            raise textedit.TextEditError(
+                "modifying this document is not permitted", textedit.EditReason.PERMISSION
+            )
+        with self.lock:
+            try:
+                textedit.set_page_content(self.fitz, self.fitz[page], data, expect)
+            except textedit.TextEditError:
+                raise
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise textedit.TextEditError(str(exc)) from exc
+        self.page_changed.emit(page)
+
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
         self._clear_annot_cache()
@@ -1425,7 +1491,8 @@ class PdfDocument(QObject):
         self._clear_annot_cache()
         self._clear_shapes_cache()
         self._is_form = self._can_fill_forms = self._can_annotate = self._form_edited = False
-        self._can_assemble = self._can_extract = self._structure_edited = False
+        self._can_assemble = self._can_extract = self._can_modify = False
+        self._structure_edited = False
         self._xfa_kind = XfaKind.NONE
         self._page_ids = []
         self._reindex()

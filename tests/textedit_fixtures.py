@@ -13,6 +13,8 @@ Windows fonts Calibri, Arial and Times New Roman: guard such tests with
 * :func:`make_simple_font_pdf` — simple TrueType Calibri (WinAnsi, ``\\xe0`` = "à").
 * :func:`make_xobject_text_pdf`, :func:`make_ocr_pdf`, :func:`make_type3_pdf`,
   :func:`make_kerned_tj_pdf`, :func:`make_inherited_resources_pdf`.
+* :func:`make_overlap_pdf` (two words whose glyph boxes overlap: the collateral loop),
+  :func:`make_fake_bold_pdf` (text drawn twice at the same place), :func:`make_rtl_pdf`.
 * :func:`chars_of`, :func:`pixels_equal`, :func:`pixel_diff_bbox`, :func:`font_xref`.
 """
 
@@ -329,6 +331,73 @@ def make_inherited_resources_pdf(path: Path) -> Path:
     mupdf = pymupdf.mupdf
     obj = mupdf.pdf_load_object(pymupdf._as_pdf_document(doc), page.xref)
     mupdf.pdf_dict_dels(obj, "Resources")
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+OVERLAP_TEXT = "Facture totale"
+OVERLAP_RESOURCE = "CalO"
+#: TJ adjustment (1/1000 em) pulling the second word back over the end of the first.
+OVERLAP_KERN = 320
+
+
+def make_overlap_pdf(path: Path) -> Path:
+    """Simple Calibri ``TJ`` where "totale" is pulled back by :data:`OVERLAP_KERN`
+    so its first glyph box overlaps the final "e" of "Facture" (one span, 11 pt)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
+    page.insert_font(fontname=OVERLAP_RESOURCE, fontfile=str(CALIBRI_PATH), set_simple=True)
+    ops = (
+        f"BT /{OVERLAP_RESOURCE} 11 Tf 1 0 0 1 72 742 Tm [(Facture) {OVERLAP_KERN} ( totale)] TJ ET"
+    ).encode()
+    _set_contents(doc, page, ops)
+    doc.subset_fonts()
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+FAKE_BOLD_LINE = "Titre gras"
+FAKE_BOLD_ORIGIN = (72.0, 100.0)
+PART_BOLD_LINE = "Mot double"
+PART_BOLD_WORD = "double"
+PART_BOLD_ORIGIN = (72.0, 130.0)
+
+
+def make_fake_bold_pdf(path: Path) -> Path:
+    """Fake bold: :data:`FAKE_BOLD_LINE` drawn twice at :data:`FAKE_BOLD_ORIGIN`, and
+    :data:`PART_BOLD_LINE` whose last word only is drawn twice."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
+    calibri = {"fontname": "Calibri", "fontfile": str(CALIBRI_PATH), "fontsize": BODY_SIZE}
+    page.insert_text(FAKE_BOLD_ORIGIN, FAKE_BOLD_LINE, **calibri)
+    page.insert_text(FAKE_BOLD_ORIGIN, FAKE_BOLD_LINE, **calibri)
+    page.insert_text(PART_BOLD_ORIGIN, PART_BOLD_LINE, **calibri)
+    font = pymupdf.Font(fontfile=str(CALIBRI_PATH))
+    prefix = PART_BOLD_LINE[: PART_BOLD_LINE.index(PART_BOLD_WORD)]
+    x = PART_BOLD_ORIGIN[0] + font.text_length(prefix, fontsize=BODY_SIZE)
+    page.insert_text((x, PART_BOLD_ORIGIN[1]), PART_BOLD_WORD, **calibri)
+    doc.subset_fonts()
+    doc.save(path, garbage=3, deflate=True)
+    doc.close()
+    return path
+
+
+RTL_TEXT = "שלום"  # Hebrew "shalom"
+
+
+def make_rtl_pdf(path: Path) -> Path:
+    """Arial page with the Hebrew word :data:`RTL_TEXT` next to :data:`LINE1`."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
+    page.insert_text(
+        LINE1_ORIGIN, LINE1, fontsize=BODY_SIZE, fontname="Calibri", fontfile=str(CALIBRI_PATH)
+    )
+    page.insert_text(
+        (72, 140), RTL_TEXT, fontsize=BODY_SIZE, fontname="Arial", fontfile=str(ARIAL_PATH)
+    )
+    doc.subset_fonts()
     doc.save(path, garbage=3, deflate=True)
     doc.close()
     return path
