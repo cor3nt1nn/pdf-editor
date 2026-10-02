@@ -112,14 +112,51 @@ def prune_fields(doc: pymupdf.Document) -> int:
     old = _refs(value)
     kept = survivors(old)
     if kept != old:
-        acro = acroform_xref(doc)
-        if acro:
-            doc.xref_set_key(acro, "Fields", _array(kept))
-        else:
-            doc.xref_set_key(catalog, "AcroForm/Fields", _array(kept))
+        _set_acroform_key(doc, "Fields", _array(kept))
+    # The calculation order loses the fields just dropped.
+    co_kind, co = _key(doc, catalog, "AcroForm/CO")
+    if co_kind == "array":
+        order = _refs(co)
+        still = [x for x in order if decided.get(x, True)]
+        if still != order:
+            _set_acroform_key(doc, "CO", _array(still))
     if dropped:
         log.debug("pruned %d form field entries", dropped)
     return dropped
+
+
+def _set_acroform_key(doc: pymupdf.Document, key: str, value: str) -> None:
+    """Set ``key`` of the /AcroForm: on the AcroForm object itself when it is indirect
+    (the path form through the catalog writes ``fitz: replace me!``, PyMuPDF 1.28)."""
+    acro = acroform_xref(doc)
+    if acro:
+        doc.xref_set_key(acro, key, value)
+    else:
+        doc.xref_set_key(doc.pdf_catalog(), f"AcroForm/{key}", value)
+
+
+def has_calc_order(doc: pymupdf.Document) -> bool:
+    """The /AcroForm has a /CO (calculation order) entry, even empty."""
+    return _key(doc, doc.pdf_catalog(), "AcroForm/CO")[0] != "null"
+
+
+def drop_empty_calc_order(doc: pymupdf.Document) -> bool:
+    """Remove an empty ``/CO []`` (MuPDF's graft writes one into a form that had none);
+    True if one was removed."""
+    kind, value = _key(doc, doc.pdf_catalog(), "AcroForm/CO")
+    if kind != "array" or _refs(value):
+        return False
+    # Setting the key to "null" writes a literal ``/CO null``: delete it.
+    mupdf = pymupdf.mupdf
+    pdf = pymupdf._as_pdf_document(doc)
+    acro = acroform_xref(doc)
+    if acro:
+        form = mupdf.pdf_new_indirect(pdf, acro, 0)
+    else:
+        catalog = mupdf.pdf_new_indirect(pdf, doc.pdf_catalog(), 0)
+        form = mupdf.pdf_dict_gets(catalog, "AcroForm")
+    mupdf.pdf_dict_dels(form, "CO")
+    return True
 
 
 def has_xfa(doc: pymupdf.Document) -> bool:
@@ -300,6 +337,7 @@ def insert_pages(
     selected = list(range(src.page_count)) if pages is None else [int(p) for p in pages]
     if any(not 0 <= p < src.page_count for p in selected):
         raise IndexError(f"source page out of range: {selected}")
+    had_co = has_calc_order(doc)
     if len(_runs(selected)) == 1:
         first, last = selected[0], selected[-1]
         _graft(doc, src, first, last, index)
@@ -311,6 +349,8 @@ def insert_pages(
         finally:
             sub.close()
     prune_fields(doc)
+    if not had_co:
+        drop_empty_calc_order(doc)
     if not had_xfa and has_xfa(doc):
         strip_foreign_xfa(doc)
     return len(selected)

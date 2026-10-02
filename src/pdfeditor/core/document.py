@@ -541,11 +541,24 @@ class PdfDocument(QObject):
         with self.lock:
             return self._doc is not None and page_ops.has_acroform(self._doc)
 
-    def delete_pages(self, indexes: list[int], *, drop_empty_form: bool = False) -> None:
+    @property
+    def has_calc_order(self) -> bool:
+        """The /AcroForm has a /CO (calculation order) entry, possibly empty."""
+        with self.lock:
+            return self._doc is not None and page_ops.has_calc_order(self._doc)
+
+    def delete_pages(
+        self,
+        indexes: list[int],
+        *,
+        drop_empty_form: bool = False,
+        drop_empty_calc_order: bool = False,
+    ) -> None:
         """Delete the pages at ``indexes`` (form fields pruned, links to them dropped,
         outline items to them greyed). ``drop_empty_form`` then also removes an /AcroForm
-        left without fields (undo of an insertion into a document without a form).
-        Raises :class:`PageError` (permissions, dynamic XFA, every page, failure)."""
+        left without fields (undo of an insertion into a document without a form),
+        ``drop_empty_calc_order`` an empty /CO (undo of an insertion into a form without
+        one). Raises :class:`PageError` (permissions, dynamic XFA, every page, failure)."""
         self._check_assemble()
         targets = sorted(set(int(i) for i in indexes))
         if not targets:
@@ -557,6 +570,8 @@ class PdfDocument(QObject):
         with self.lock:
             try:
                 page_ops.delete_pages(self.fitz, targets)
+                if drop_empty_calc_order:
+                    page_ops.drop_empty_calc_order(self.fitz)
                 if drop_empty_form:
                     page_ops.drop_empty_acroform(self.fitz)
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)

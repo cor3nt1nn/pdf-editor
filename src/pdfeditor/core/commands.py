@@ -369,6 +369,8 @@ class InsertPagesCommand(_InsertCommand):
         self.data = bytes(data)
         # Undo removes the /AcroForm the inserted fields brought into a form-less document.
         self.had_form = doc.has_acroform
+        # ... and the /CO the inserted calculated fields brought into a form without one.
+        self.had_calc_order = doc.has_calc_order
         self.count = int(count)
         self.password = password
 
@@ -379,7 +381,11 @@ class InsertPagesCommand(_InsertCommand):
 
     def _undo(self) -> None:
         if self.page_ids:
-            self.doc.delete_pages(self.pages, drop_empty_form=not self.had_form)
+            self.doc.delete_pages(
+                self.pages,
+                drop_empty_form=not self.had_form,
+                drop_empty_calc_order=not self.had_calc_order,
+            )
 
 
 # -- form fields ---------------------------------------------------------------

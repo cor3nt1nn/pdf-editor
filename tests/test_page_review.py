@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 
 import fixtures
@@ -17,6 +18,7 @@ from pdfeditor.core.commands import (
     DeletePagesCommand,
     EditAnnotCommand,
     InsertBlankPageCommand,
+    InsertPagesCommand,
     MovePagesCommand,
     RotatePagesCommand,
 )
@@ -269,5 +271,67 @@ def test_export_and_extract_drop_xfa_after_page_ops(static_xfa_pdf, tmp_path) ->
         for name in ("copy.pdf", "one.pdf"):
             with pymupdf.open(tmp_path / name) as out:
                 assert detect_xfa(out) is XfaKind.NONE, name
+    finally:
+        doc.close()
+
+
+# -- m2: no empty /CO left behind by an insertion -------------------------------------
+def _norm(data: bytes) -> bytes:
+    return re.sub(rb"/ID\s*\[[^\]]*\]", b"/ID[]", data)
+
+
+def test_form_into_form_insert_undo_is_exact(lo_form_pdf, tmp_path) -> None:
+    """r3: insert a form page into a form without /CO, undo: no ``/CO []`` remains."""
+    src_path = fixtures.make_lo_form_pdf(tmp_path / "src.pdf")
+    doc = PdfDocument.open(lo_form_pdf)
+    try:
+        with doc.lock:
+            ref = _norm(doc.fitz.tobytes(garbage=3, deflate=True))
+        assert not doc.has_calc_order
+        with pymupdf.open(src_path) as src:
+            data = pages.subdocument_bytes(src, [0])
+        cmd = InsertPagesCommand(doc, data, 1, 1)
+        cmd.apply_now()
+        assert doc.last_insert_renamed_fields
+        assert not doc.has_calc_order
+        cmd.undo()
+        assert cmd.error is None
+        assert not doc.has_calc_order
+        with doc.lock:
+            assert _norm(doc.fitz.tobytes(garbage=3, deflate=True)) == ref
+    finally:
+        doc.close()
+
+
+def test_undo_insert_drops_brought_calc_order(lo_form_pdf) -> None:
+    """Inserted calculated fields bring a /CO into a form without one; undo removes it."""
+    src = _hidden_field_doc()
+    try:
+        cat = src.pdf_catalog()
+        visible = pages._refs(src.xref_get_key(cat, "AcroForm/Fields")[1])[0]
+        src.xref_set_key(cat, "AcroForm/CO", f"[{visible} 0 R]")
+        data = pages.subdocument_bytes(src, [0])
+    finally:
+        src.close()
+    doc = PdfDocument.open(lo_form_pdf)
+    try:
+        cmd = InsertPagesCommand(doc, data, 0, 1)
+        cmd.apply_now()
+        cmd.undo()
+        assert cmd.error is None
+        assert not doc.has_calc_order
+    finally:
+        doc.close()
+
+
+def test_prune_drops_calc_order_entries_of_removed_fields() -> None:
+    doc = _hidden_field_doc()
+    try:
+        cat = doc.pdf_catalog()
+        fields = pages._refs(doc.xref_get_key(cat, "AcroForm/Fields")[1])
+        visible, hidden = fields[0], fields[1]
+        doc.xref_set_key(cat, "AcroForm/CO", f"[{visible} 0 R {hidden} 0 R]")
+        pages.delete_pages(doc, [0])
+        assert pages._refs(doc.xref_get_key(cat, "AcroForm/CO")[1]) == [hidden]
     finally:
         doc.close()
