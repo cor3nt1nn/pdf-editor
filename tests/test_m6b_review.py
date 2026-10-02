@@ -101,3 +101,50 @@ def test_rtl_markup_text_and_copy(tmp_path):
         assert markup_text(doc, word) == pt.text[1:3]
     finally:
         doc.close()
+
+
+# -- 11: foreign /QuadPoints in the specification's point order ----------------------------
+def _foreign_highlight(path: Path, quadpoints: str, rotation: int = 0) -> Path:
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "The quick brown fox", fontsize=12, fontname="helv")
+    page.set_rotation(rotation)
+    ref = doc.page_xref(0)
+    hl = doc.get_new_xref()
+    doc.update_object(
+        hl,
+        f"<</Type/Annot/Subtype/Highlight/Rect[70 686 104 708]/QuadPoints[{quadpoints}]"
+        f"/C[1 1 0]/F 4/P {ref} 0 R>>",
+    )
+    doc.xref_set_key(ref, "Annots", f"[{hl} 0 R]")
+    doc.save(path)
+    doc.close()
+    return path
+
+
+# "The" at x 72..~94, baseline y 692 (PDF space): ll, lr, ur, ul vs ul, ur, ll, lr.
+SPEC_ORDER = "71 688 93 688 93 706 71 706"
+ACROBAT_ORDER = "71 706 93 706 71 688 93 688"
+
+
+@pytest.mark.parametrize("rotation", [0, 90])
+@pytest.mark.parametrize("order", [SPEC_ORDER, ACROBAT_ORDER])
+def test_foreign_quad_point_order_is_normalised(tmp_path, order, rotation):
+    from pdfeditor.core.document import PdfDocument
+    from pdfeditor.ui.tools.markup_tools import markup_text
+
+    doc = PdfDocument.open(str(_foreign_highlight(tmp_path / "f.pdf", order, rotation)))
+    try:
+        (info,) = [a for a in doc.annots(0) if a.is_markup]
+        (quad,) = info.quads
+        poly = quad.polygon()
+        # A simple (not self-intersecting) outline: its area equals the bounding rect's.
+        area = 0.0
+        for k in range(4):
+            a, b = poly[k], poly[(k + 1) % 4]
+            area += a.x() * b.y() - b.x() * a.y()
+        box = quad.bounding_rect()
+        assert abs(area) / 2 == pytest.approx(box.width() * box.height(), rel=1e-6)
+        assert markup_text(doc, info) == "The"
+    finally:
+        doc.close()

@@ -423,9 +423,29 @@ def _page_quads(annot: pymupdf.Annot, page: pymupdf.Page) -> tuple[Quad, ...]:
         group = points[i : i + 4]
         if not all(math.isfinite(v) and abs(v) < MAX_QUAD_COORD for p in group for v in p):
             continue
-        ul, ur, ll, lr = (QPointF(p.x, p.y) for p in group)
-        out.append(Quad(ul, ur, ll, lr))
+        out.append(_ordered_quad([QPointF(p.x, p.y) for p in group]))
     return tuple(out)
+
+
+def _ordered_quad(points: list[QPointF]) -> Quad:
+    """The four /QuadPoints corners of one quad as a :class:`Quad`, whatever order the
+    producer wrote them in: PyMuPDF/Acrobat write (ul, ur, ll, lr), the PDF specification
+    describes (ll, lr, ur, ul) — read as written, the latter gives a self-intersecting
+    outline. The first two points share an edge along the writing direction ``d`` in both
+    orders, so each corner is named by its projection on ``d`` and on the normal
+    (-d.y, d.x) (upper = the low side, as in :class:`~pdfeditor.core.pagetext.Quad`); the
+    points themselves are kept (slanted quads stay as they are). Degenerate input is
+    returned as written."""
+    p0, p1 = points[0], points[1]
+    dx, dy = p1.x() - p0.x(), p1.y() - p0.y()
+    length = math.hypot(dx, dy)
+    if length < 1e-9:
+        return Quad(*points)
+    dx, dy = dx / length, dy / length
+    across = sorted(points, key=lambda p: p.y() * dx - p.x() * dy)
+    upper = sorted(across[:2], key=lambda p: p.x() * dx + p.y() * dy)
+    lower = sorted(across[2:], key=lambda p: p.x() * dx + p.y() * dy)
+    return Quad(upper[0], upper[1], lower[0], lower[1])
 
 
 def _markup_info(
