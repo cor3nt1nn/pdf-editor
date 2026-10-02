@@ -25,7 +25,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, QObject, QPoint, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QCursor, QKeyEvent, QMouseEvent, QPainter, QPen
+from PySide6.QtGui import QColor, QCursor, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import QApplication
 
 from pdfeditor.core import snapping
@@ -45,7 +45,7 @@ from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import Snap, SnapKind
 from pdfeditor.ui.overlays.annot_items import Handle, annot_hit
 from pdfeditor.ui.overlays.floating_editor import normalize_newlines
-from pdfeditor.ui.tools.base import Tool, ToolEvent
+from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
 
 if TYPE_CHECKING:
     from pdfeditor.core.settings import Settings
@@ -154,7 +154,9 @@ def resized_rect(
     return QRectF(left, top, width, height)
 
 
-class _Mode(Enum):
+class DragMode(Enum):
+    """What a press on an annotation turned into (``AnnotToolBase``; markups stay PENDING)."""
+
     PENDING = auto()  # pressed on an annotation, not moved yet
     MOVE = auto()
     RESIZE = auto()
@@ -162,7 +164,7 @@ class _Mode(Enum):
 
 @dataclass
 class _Drag:
-    mode: _Mode
+    mode: DragMode
     info: AnnotInfo
     start: QPointF  # page space
     start_px: QPoint  # viewport
@@ -304,7 +306,7 @@ class AnnotToolBase(Tool):
 
     # -- mouse ------------------------------------------------------------------------
     def mouse_press(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._drag is not None  # other buttons are ignored during a drag
         doc = self._doc()
         if doc is None or self.view is None:
@@ -317,12 +319,12 @@ class AnnotToolBase(Tool):
             self.selection.clear()
             self._armed = None
             return False  # outside the pages: the view pans
-        px = _viewport_pos(event)
+        px = viewport_pos(event)
         handle = self._handle_at(page, pos)
         current = self.selection.current
         # A markup's item has no handles; ``movable`` guards against a stale item.
         if handle is not None and current is not None and current.movable:
-            self._drag = _Drag(_Mode.RESIZE, current, pos, px, handle=handle)
+            self._drag = _Drag(DragMode.RESIZE, current, pos, px, handle=handle)
             return True
         info = self.annot_at(page, pos)
         if info is not None:
@@ -333,7 +335,7 @@ class AnnotToolBase(Tool):
                 and self._armed == info.name
             )
             self._select(info)
-            self._drag = _Drag(_Mode.PENDING, info, pos, px, reopen=reopen)
+            self._drag = _Drag(DragMode.PENDING, info, pos, px, reopen=reopen)
             return True
         self.selection.clear()
         self._armed = None
@@ -360,16 +362,16 @@ class AnnotToolBase(Tool):
             self._cancel_drag()
             return True
         pos = self._page_pos(drag.info.page, event)
-        if drag.mode is _Mode.PENDING:
-            moved = _viewport_pos(event) - drag.start_px
+        if drag.mode is DragMode.PENDING:
+            moved = viewport_pos(event) - drag.start_px
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
             if not drag.info.movable:
                 return True  # a text markup stays on its text (never moved, D10)
-            drag.mode = _Mode.MOVE
+            drag.mode = DragMode.MOVE
         delta = pos - drag.start
         rect = drag.info.rect
-        if drag.mode is _Mode.MOVE:
+        if drag.mode is DragMode.MOVE:
             ghost = self._clamped(drag.info.page, rect.translated(delta))
         else:
             assert drag.handle is not None
@@ -396,7 +398,7 @@ class AnnotToolBase(Tool):
         drag = self._drag
         if drag is None:
             return False
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return True  # e.g. a right click during a left drag
         self._drag = None
         if not self._drag_alive(drag):
@@ -404,7 +406,7 @@ class AnnotToolBase(Tool):
             self.selection.set_ghost(None)
             return True
         info = drag.info
-        if drag.mode is _Mode.PENDING:
+        if drag.mode is DragMode.PENDING:
             if drag.reopen:
                 self.click_selected(info)
             else:
@@ -414,7 +416,7 @@ class AnnotToolBase(Tool):
         ghost = drag.ghost
         if ghost is None or _same_rect(ghost, info.rect):
             return True
-        fit = drag.mode is _Mode.RESIZE and info.kind is AnnotKind.TEXT
+        fit = drag.mode is DragMode.RESIZE and info.kind is AnnotKind.TEXT
         if self.edit(info, rect=ghost, fit_height=fit):
             # The edit may have given a foreign annotation its lasting name.
             current = self.selection.current
@@ -448,7 +450,7 @@ class AnnotToolBase(Tool):
         return cut if cut.width() >= MIN_SIDE and cut.height() >= MIN_SIDE else None
 
     def mouse_double_click(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._drag is not None
         info = self.annot_at(event.page_index, event.page_pos)
         if info is None:
@@ -985,7 +987,7 @@ class SignatureTool(AnnotToolBase):
         if self.view is None:
             return True
         if place.ghost is None:
-            moved = _viewport_pos(event) - place.start_px
+            moved = viewport_pos(event) - place.start_px
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
         ghost = self._drag_rect(place, self._page_pos(place.page, event))
@@ -998,7 +1000,7 @@ class SignatureTool(AnnotToolBase):
         place = self._place
         if place is None:
             return super().mouse_release(event)
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return True
         self._place = None
         self._set_preview(None)
@@ -1031,23 +1033,6 @@ def _record_aspect(record: SignatureRecord) -> float:
     return record.width / record.height if record.width > 0 and record.height > 0 else 1.0
 
 
-def _button(event: ToolEvent) -> Qt.MouseButton:
-    """The button that changed (``QMouseEvent.button()``), not all the held ones."""
-    qt_event = event.qt_event
-    if isinstance(qt_event, QMouseEvent):
-        return qt_event.button()
-    if event.buttons & Qt.MouseButton.LeftButton:
-        return Qt.MouseButton.LeftButton
-    return Qt.MouseButton.NoButton
-
-
-def _viewport_pos(event: ToolEvent) -> QPoint:
-    qt_event = event.qt_event
-    if isinstance(qt_event, QMouseEvent):
-        return qt_event.position().toPoint()
-    return QPoint()
-
-
 def _aspect(info: AnnotInfo) -> float | None:
     """Width / height a resize of ``info`` keeps (signatures only: the page-space aspect
     of its rect, which is the image's as placed)."""
@@ -1067,6 +1052,7 @@ def _same_rect(a: QRectF, b: QRectF) -> bool:
 
 __all__ = [
     "AnnotToolBase",
+    "DragMode",
     "SignatureTool",
     "StampTool",
     "TextTool",

@@ -38,8 +38,8 @@ from PySide6.QtWidgets import QApplication
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, Color, markup_spec
 from pdfeditor.core.document import DocumentError, PdfDocument
 from pdfeditor.core.pagetext import HIT_TOLERANCE, CharRef, PageText
-from pdfeditor.ui.tools.annot_tools import AnnotToolBase, _button, _Mode, _viewport_pos
-from pdfeditor.ui.tools.base import Tool, ToolEvent
+from pdfeditor.ui.tools.annot_tools import AnnotToolBase, DragMode
+from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
 
 if TYPE_CHECKING:
     from pdfeditor.core.settings import Settings
@@ -169,7 +169,7 @@ class _TextSelecting:
             sel.clear()
             self.message.emit(no_text_message())
             return True
-        px = _viewport_pos(event)
+        px = viewport_pos(event)
         if self._is_triple(page, px):
             self._last_double = None
             ref = pt.hit(pos, math.inf)
@@ -202,7 +202,7 @@ class _TextSelecting:
             return True
         pos = self._drag_pos(drag.page, event)
         if not drag.active:
-            moved = _viewport_pos(event) - drag.start_px
+            moved = viewport_pos(event) - drag.start_px
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
             if drag.anchor is None:
@@ -226,7 +226,7 @@ class _TextSelecting:
         drag = self._text_drag
         if drag is None:
             return False
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return True
         self._text_drag = None
         if drag.active and not self.text_selection.is_empty:
@@ -244,7 +244,7 @@ class _TextSelecting:
         pt = self._page_text(page)
         if pt is None or pt.is_empty:
             return True
-        self._last_double = (time.monotonic(), _viewport_pos(event), page)
+        self._last_double = (time.monotonic(), viewport_pos(event), page)
         word = pt.word_at(pos)
         if word is None:
             return True
@@ -260,7 +260,7 @@ class _TextSelecting:
         return had
 
     def _dragged(self, drag: _TextDrag, event: ToolEvent) -> bool:
-        moved = _viewport_pos(event) - drag.start_px
+        moved = viewport_pos(event) - drag.start_px
         return moved.manhattanLength() >= QApplication.startDragDistance()
 
     def _is_triple(self, page: int, px: QPoint) -> bool:
@@ -314,7 +314,7 @@ class TextSelectTool(_TextSelecting, Tool):
         self._last_double = None
 
     def mouse_press(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._text_drag is not None
         self.document_view.commit_pending_edits()
         self.document_view.annot_selection.clear()
@@ -327,7 +327,7 @@ class TextSelectTool(_TextSelecting, Tool):
         return self.text_release(event)
 
     def mouse_double_click(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._text_drag is not None
         return self.text_double_click(event)
 
@@ -410,7 +410,7 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
 
     # -- mouse ---------------------------------------------------------------------------
     def mouse_press(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._drag is not None or self._text_drag is not None
         doc = self._doc()
         if doc is None or self.view is None:
@@ -418,7 +418,7 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
         triple = (
             event.page_index is not None
             and self._word_timer.isActive()
-            and self._is_triple(event.page_index, _viewport_pos(event))
+            and self._is_triple(event.page_index, viewport_pos(event))
         )
         if triple:
             self._word_timer.stop()  # before commit_pending_edits would mark the word
@@ -442,11 +442,11 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
         drag = self._drag
         if (
             drag is not None
-            and drag.mode is _Mode.PENDING
+            and drag.mode is DragMode.PENDING
             and not drag.info.movable
             and self.view is not None
         ):
-            moved = _viewport_pos(event) - drag.start_px
+            moved = viewport_pos(event) - drag.start_px
             if moved.manhattanLength() >= QApplication.startDragDistance():
                 # Dragging from a markup selects the text under it (markups never move).
                 self._drag = None
@@ -468,12 +468,19 @@ class MarkupTool(_TextSelecting, AnnotToolBase):
         return super().mouse_release(event)
 
     def mouse_double_click(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._drag is not None or self._text_drag is not None
-        if self.annot_at(event.page_index, event.page_pos) is not None:
+        info = self.annot_at(event.page_index, event.page_pos)
+        if info is not None and not (info.is_markup and not info.movable):
             self._text_drag = None
             return super().mouse_double_click(event)
+        # Text already marked: the double-click marks its word (a markup is selected by
+        # a single click; a third click then marks the line).
         self._drag = None
+        if info is not None:
+            self.selection.clear()
+            self._armed = None
+            self._set_preview(None)
         return self.text_double_click(event)
 
     def key_press(self, event: ToolEvent) -> bool:

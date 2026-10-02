@@ -34,8 +34,7 @@ from pdfeditor.core.document import DocumentError, PdfDocument
 from pdfeditor.core.pagetext import HIT_TOLERANCE, CharRef, PageText
 from pdfeditor.core.textedit import MAX_CONTENT_MB, EditReason, Run, TextEditError, TextEditResult
 from pdfeditor.ui.overlays.textedit_items import clamp_to_span, editable, selection_run, span_run
-from pdfeditor.ui.tools.annot_tools import _button, _viewport_pos
-from pdfeditor.ui.tools.base import Tool, ToolEvent
+from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
 from pdfeditor.ui.tools.markup_tools import _TextDrag, _TextSelecting
 
 if TYPE_CHECKING:
@@ -232,7 +231,7 @@ class TextEditTool(_TextSelecting, Tool):
 
     # -- mouse ------------------------------------------------------------------------------
     def mouse_press(self, event: ToolEvent) -> bool:
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._text_drag is not None
         self.document_view.commit_pending_edits()
         self._open_timer.stop()
@@ -249,7 +248,7 @@ class TextEditTool(_TextSelecting, Tool):
         pt = self._page_text(page)
         if pt is None:
             return True
-        px = _viewport_pos(event)
+        px = viewport_pos(event)
         if self._is_triple(page, px):
             return True  # the third click of a triple-click keeps the span
         self._last_double = None
@@ -292,7 +291,7 @@ class TextEditTool(_TextSelecting, Tool):
         if pt is None or pt.is_empty or drag.anchor is None:
             return True
         if not drag.active:
-            moved = _viewport_pos(event) - drag.start_px
+            moved = viewport_pos(event) - drag.start_px
             if moved.manhattanLength() < QApplication.startDragDistance():
                 return True
             drag.active = True
@@ -311,7 +310,7 @@ class TextEditTool(_TextSelecting, Tool):
         drag = self._text_drag
         if drag is None:
             return False
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return True
         self._text_drag = None
         if self._open_pending:
@@ -321,7 +320,7 @@ class TextEditTool(_TextSelecting, Tool):
 
     def mouse_double_click(self, event: ToolEvent) -> bool:
         """Select the span (the chars of one style on the line) under the pointer."""
-        if _button(event) != Qt.MouseButton.LeftButton:
+        if event_button(event) != Qt.MouseButton.LeftButton:
             return self._text_drag is not None
         self._open_timer.stop()
         self._open_pending = False
@@ -336,7 +335,7 @@ class TextEditTool(_TextSelecting, Tool):
         ref = None if pt.is_empty else pt.hit(pos, HIT_TOLERANCE)
         if self._check_char(pt, ref) is not None or ref is None:
             return True  # the press already said why
-        self._last_double = (time.monotonic(), _viewport_pos(event), page)
+        self._last_double = (time.monotonic(), viewport_pos(event), page)
         span = span_run(pt, ref.index)
         self.text_selection.set(page, span.first, span.last)
         return True

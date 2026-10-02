@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QPainter
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QMouseEvent, QPainter
 
 if TYPE_CHECKING:
     from pdfeditor.ui.page_view import PageView
@@ -25,6 +25,24 @@ class ToolEvent:
     buttons: Qt.MouseButton
     modifiers: Qt.KeyboardModifier
     qt_event: QEvent
+
+
+def event_button(event: ToolEvent) -> Qt.MouseButton:
+    """The button that changed (``QMouseEvent.button()``), not all the held ones."""
+    qt_event = event.qt_event
+    if isinstance(qt_event, QMouseEvent):
+        return qt_event.button()
+    if event.buttons & Qt.MouseButton.LeftButton:
+        return Qt.MouseButton.LeftButton
+    return Qt.MouseButton.NoButton
+
+
+def viewport_pos(event: ToolEvent) -> QPoint:
+    """The pointer position of a mouse ``event`` in viewport pixels (``QPoint()`` else)."""
+    qt_event = event.qt_event
+    if isinstance(qt_event, QMouseEvent):
+        return qt_event.position().toPoint()
+    return QPoint()
 
 
 class Tool(QObject):

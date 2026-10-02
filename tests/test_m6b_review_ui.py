@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from pdfeditor.ui import dialogs
 from pdfeditor.ui.main_window import MainWindow
-from pdfeditor.ui.tools.markup_tools import expand_ligatures
+from pdfeditor.ui.tools.markup_tools import expand_ligatures, markup_text
 
 NO_MOD = Qt.KeyboardModifier.NoModifier
 LEFT = Qt.MouseButton.LeftButton
@@ -155,3 +155,31 @@ def test_copy_text_spells_out_ligatures(qtbot, window, tmp_path) -> None:
     assert w.document_view.annot_selection.current.name == info.name
     assert w.copy_text()
     assert QApplication.clipboard().text().replace("\xa0", " ") == "office file"
+
+
+# -- 6: double/triple-click on marked text marks the word/line ---------------------------
+def test_double_and_triple_click_on_marked_text(qtbot, text_window) -> None:
+    w = text_window
+    w.act_underline.trigger()
+    w.document_view.text_selection.set(0, QUICK, QUICK + len("quick brown") - 1)
+    w.tool_manager.active_tool.commit_selection()
+    assert len(_markups(w)) == 1
+    _dclick(qtbot, w, _char(w, QUICK + 1))
+    assert w.document_view.annot_selection.current is None
+    assert w.document_view.text_selection.text() == "quick"
+    qtbot.waitUntil(
+        lambda: len(_markups(w)) == 2, timeout=QApplication.doubleClickInterval() + 2000
+    )
+    doc = w.document_view.document
+    assert markup_text(doc, _markups(w)[-1]) == "quick"
+    # Triple-click on the (now twice) marked word: the line.
+    p = _char(w, QUICK + 2)
+    _dclick(qtbot, w, p)
+    qtbot.mouseClick(w.page_view.viewport(), LEFT, NO_MOD, _vp(w, p))
+    assert len(_markups(w)) == 3
+    assert markup_text(doc, _markups(w)[-1]) == LINE_1
+    qtbot.wait(QApplication.doubleClickInterval() + 100)
+    assert len(_markups(w)) == 3
+    # A single click still selects the markup under the pointer.
+    qtbot.mouseClick(w.page_view.viewport(), LEFT, NO_MOD, _vp(w, _char(w, QUICK + 1)))
+    assert w.document_view.annot_selection.current is not None
