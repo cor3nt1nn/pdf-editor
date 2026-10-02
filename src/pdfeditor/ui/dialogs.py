@@ -421,6 +421,10 @@ def interaction_shortcuts() -> list[tuple[str, str]]:
             QCoreApplication.translate("Dialogs", "Shift+Click"),
         ),
         (
+            QCoreApplication.translate("Dialogs", "Select a word / a line of page text"),
+            QCoreApplication.translate("Dialogs", "Click / Double-click"),
+        ),
+        (
             QCoreApplication.translate("Dialogs", "Reorder pages"),
             QCoreApplication.translate("Dialogs", "Drag thumbnails"),
         ),

@@ -97,9 +97,9 @@ def test_pages_menu_between_edit_and_view(window: MainWindow) -> None:
     assert shortcuts["insert_pages"] == "Ctrl+Shift+I"
     assert shortcuts["delete_pages"] == "Ctrl+Shift+Del"
     assert shortcuts["extract_pages"] == "Ctrl+Shift+E"
-    # "E" stays free (reserved for M7's Edit Page Text tool).
+    # "E" belongs to M7's Edit Page Text tool only.
     every = [s.toString() for a in window.findChildren(type(acts[0])) for s in a.shortcuts()]
-    assert "E" not in every
+    assert every.count("E") == 1 and window.act_textedit_tool.shortcut().toString() == "E"
 
 
 def _page_actions(w: MainWindow):

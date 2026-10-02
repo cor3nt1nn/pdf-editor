@@ -186,7 +186,7 @@ def _check_sections(window: MainWindow, sections) -> None:
         for action, keys in section_rows:
             assert action and keys
     interaction = dict(sections[-1][1])
-    assert len(interaction) == 11
+    assert len(interaction) == 12
     assert len(sections) >= 5
 
 

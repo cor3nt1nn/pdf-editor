@@ -95,9 +95,11 @@ def test_actions_shortcuts_icons_menus_and_toolbar(window) -> None:
     assert isinstance(w.select_text_tool, TextSelectTool)
     assert set(w.markup_tools) == {AnnotKind.HIGHLIGHT, AnnotKind.UNDERLINE, AnnotKind.STRIKEOUT}
     assert all(isinstance(t, MarkupTool) for t in w.markup_tools.values())
-    # E stays free for M7's Edit Page Text tool.
-    for act in w.findChildren(type(w.act_copy_text)):
-        assert QKeySequence("E") not in act.shortcuts()
+    # E belongs to M7's Edit Page Text tool only.
+    owners = [
+        a for a in w.findChildren(type(w.act_copy_text)) if QKeySequence("E") in a.shortcuts()
+    ]
+    assert owners == [w.act_textedit_tool]
 
 
 def test_enablement_without_document_and_with_permissions(window, tmp_path, owner_locked_pdf):

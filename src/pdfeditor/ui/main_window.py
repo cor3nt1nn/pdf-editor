@@ -64,6 +64,7 @@ from pdfeditor.ui.tools.base import ToolManager
 from pdfeditor.ui.tools.form_tool import FormTool
 from pdfeditor.ui.tools.hand_tool import HandTool
 from pdfeditor.ui.tools.markup_tools import MarkupTool, TextSelectTool, selected_text
+from pdfeditor.ui.tools.textedit_tool import TextEditTool
 from pdfeditor.ui.zoom_widget import ZoomWidget, format_zoom
 
 log = logging.getLogger(__name__)
@@ -327,6 +328,11 @@ class MainWindow(QMainWindow):
         self.act_manage_signatures = self._action(
             self.tr("Manage Signatures…"), None, self.manage_signatures, "manage_signatures"
         )
+        # Edit Page Text (M7): enabled where the permissions allow modifying the document.
+        self.act_textedit_tool = self._action(
+            self.tr("Edit &Page Text"), QKeySequence("E"), None, "textedit_tool"
+        )
+        self.act_textedit_tool.setToolTip(self.tr("Edit page text (E)"))
         self.act_delete_annot = self._action(
             self.tr("&Delete Annotation"),
             [QKeySequence(QKeySequence.StandardKey.Delete), QKeySequence(Qt.Key.Key_Backspace)],
@@ -433,6 +439,7 @@ class MainWindow(QMainWindow):
             (self.act_stamp_cross, "stamp_cross"),
             (self.act_stamp_dot, "stamp_dot"),
             (self.act_signature_tool, "signature"),
+            (self.act_textedit_tool, "textedit"),
             (self.act_thumbnails, "thumbnails"),
         ):
             act.setIcon(icon(name))
@@ -474,6 +481,9 @@ class MainWindow(QMainWindow):
         self.act_signature_tool.setData(self.signature_tool.name)
         tm.action_group.addAction(self.act_signature_tool)
         tm.actions[self.signature_tool.name] = self.act_signature_tool
+        self.textedit_tool = TextEditTool(self.document_view, self)
+        self.textedit_tool.message.connect(self._show_message)
+        tm.register(self.textedit_tool, self.act_textedit_tool)
         self.markup_tools: dict[AnnotKind, MarkupTool] = {}
         for kind, action in self._markup_kind_actions():
             tool = MarkupTool(self.document_view, self.settings, kind, self)
@@ -529,6 +539,7 @@ class MainWindow(QMainWindow):
         self.menu_edit.addMenu(self.menu_signatures)
         self._rebuild_signatures_menu()
         self.signature_store.changed.connect(self._rebuild_signatures_menu)
+        self.menu_edit.addAction(self.act_textedit_tool)
         self.menu_edit.addSeparator()
         for act in self._markup_actions():
             self.menu_edit.addAction(act)
@@ -607,6 +618,7 @@ class MainWindow(QMainWindow):
         self.signature_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.signature_button.setMenu(self.menu_signatures)
         tb.addWidget(self.signature_button)
+        tb.addAction(self.act_textedit_tool)
         tb.addSeparator()
         for act in self._markup_actions():
             tb.addAction(act)
@@ -709,6 +721,7 @@ class MainWindow(QMainWindow):
         for act in self._markup_actions():
             act.setEnabled(can_annotate)
         self.act_select_text.setEnabled(has_doc)
+        self.act_textedit_tool.setEnabled(self._can_modify())
         self._update_style_enabled()
         self._update_delete_action()
         self._update_copy_action()
@@ -760,6 +773,10 @@ class MainWindow(QMainWindow):
     def _can_annotate(self) -> bool:
         doc = self.document_view.document
         return doc is not None and doc.can_annotate
+
+    def _can_modify(self) -> bool:
+        doc = self.document_view.document
+        return doc is not None and doc.can_modify
 
     def _active_annot_tool(self) -> AnnotToolBase | None:
         tool = self.tool_manager.active_tool
