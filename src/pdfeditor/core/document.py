@@ -12,6 +12,7 @@ those same bytes.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import threading
@@ -25,6 +26,7 @@ from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
 from pdfeditor.core import annotations, orphans, signature, snapping
+from pdfeditor.core import pages as page_ops
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.files import same_file
 from pdfeditor.core.forms import (
@@ -43,6 +45,7 @@ from pdfeditor.core.forms import (
 from pdfeditor.core.geometry import fitz_from_qrect
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import PageShapes
+from pdfeditor.core.snapshots import SnapshotStore
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +90,28 @@ class FieldError(DocumentError):
 
 class AnnotError(DocumentError):
     """An annotation could not be found (anymore), created or changed."""
+
+
+class PageError(DocumentError):
+    """A page operation was refused (permissions, dynamic XFA, last page, unknown page)
+    or failed. ``reason`` is one of "permission", "xfa", "last_page", "missing",
+    "snapshot", "failed"."""
+
+    def __init__(self, message: str, reason: str = "failed") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+#: In-memory identity of a page, stable across moves, insertions, deletions of other
+#: pages, saves and undo (docs/M6_PLAN.md D4). Never written to the file.
+PageId = int
+
+_page_ids = itertools.count(1)
+
+
+def new_page_ids(n: int) -> list[PageId]:
+    """``n`` fresh page ids (unique for the life of the process)."""
+    return [next(_page_ids) for _ in range(n)]
 
 
 @dataclass(frozen=True)
@@ -134,8 +159,12 @@ class PdfDocument(QObject):
     #: compare ``page_size(i)`` with the size they laid out to tell a geometry change
     #: (relayout) from a content-only change (re-render in place, no scroll jump).
     page_changed = Signal(int)
-    #: Pages were added, removed or reordered.
+    #: Pages were added, removed or reordered. Emitted right after ``pages_remapped``.
     structure_changed = Signal()
+    #: Emitted by every structural change just before ``structure_changed`` with
+    #: ``old_to_new: list[int | None]``: for each former page index its new index, or
+    #: None if the page is gone. ``page_count`` and the page ids are already updated.
+    pages_remapped = Signal(object)
     #: The document now lives at another path (Save As). Content is unchanged.
     path_changed = Signal(str)
     #: The underlying ``pymupdf.Document`` was replaced by an identical one reloaded after
@@ -183,6 +212,16 @@ class PdfDocument(QObject):
         self._can_annotate = False
         self._xfa_kind = XfaKind.NONE
         self._form_edited = False
+        self._can_assemble = False
+        self._can_extract = False
+        self._structure_edited = False
+        self._page_ids: list[PageId] = new_page_ids(self._page_count)
+        self._page_index: dict[PageId, int] = {}
+        self._reindex()
+        #: Whole-document undo copies of page deletions (see core/snapshots.py).
+        self.snapshots = SnapshotStore()
+        # Fields inserted by the last insert_pages() collided with existing names.
+        self._last_insert_renamed = False
         self._read_form_state()
         # Connected first so that other slots see the refreshed caches.
         self.page_changed.connect(self._on_page_changed)
@@ -211,58 +250,18 @@ class PdfDocument(QObject):
         ``password_cb`` is called repeatedly until it returns the right password or ``None``.
         """
         path = str(path)
-        fitz_doc, stamp = cls._open_fitz(path)
+        fitz_doc, stamp = open_fitz(path)
         encrypted = bool(fitz_doc.needs_pass)
         used_password: str | None = None
         owner_access = False
         if encrypted:
-            used_password, owner_access = cls._authenticate(fitz_doc, password_cb, password)
+            used_password, owner_access = authenticate(fitz_doc, password_cb, password)
         if fitz_doc.page_count == 0:
             fitz_doc.close()
             raise OpenError(f"document has no pages: {path}", reason="no_pages")
         return cls(
             fitz_doc, path, used_password, encrypted, disk_stamp=stamp, owner_access=owner_access
         )
-
-    @staticmethod
-    def _authenticate(
-        fitz_doc: pymupdf.Document, password_cb: PasswordCallback | None, password: str | None
-    ) -> tuple[str, bool]:
-        """(password, owner access): ``authenticate()`` returns 2 for the user password,
-        4 for the owner password, 6 when both are the same."""
-        attempt = 0
-        candidate = password
-        while True:
-            if candidate is None and password_cb is not None:
-                candidate = password_cb(attempt)
-            if candidate is None:
-                fitz_doc.close()
-                raise PasswordRequired(wrong_password=attempt > 0)
-            level = int(fitz_doc.authenticate(candidate))
-            if level:
-                return candidate, bool(level & AUTH_OWNER)
-            attempt += 1
-            candidate = None
-            if password_cb is None:
-                fitz_doc.close()
-                raise PasswordRequired("wrong password", wrong_password=True)
-
-    @staticmethod
-    def _open_fitz(path: str) -> tuple[pymupdf.Document, DiskStamp]:
-        p = Path(path)
-        if not p.is_file():
-            raise OpenError(f"file not found: {path}", reason="missing")
-        try:
-            data = p.read_bytes()
-        except OSError as exc:
-            raise OpenError(str(exc), reason="unreadable") from exc
-        stamp = _stamp(path)
-        if stamp is None or not data:
-            raise OpenError(f"file is empty: {path}", reason="empty")
-        try:
-            return pymupdf.open(stream=data, filetype="pdf"), stamp
-        except Exception as exc:  # FileDataError, FzError*, ... -> OpenError
-            raise OpenError(str(exc), reason="corrupt") from exc
 
     # -- properties --------------------------------------------------------
     @property
@@ -384,6 +383,7 @@ class PdfDocument(QObject):
             doc = self._doc
             if doc is None:
                 self._is_form = self._can_fill_forms = self._can_annotate = False
+                self._can_assemble = self._can_extract = False
                 self._xfa_kind = XfaKind.NONE
                 return
             self._is_form = bool(doc.is_form_pdf)
@@ -395,6 +395,8 @@ class PdfDocument(QObject):
             perms = int(doc.permissions)
         self._can_fill_forms = bool(perms & (pymupdf.PDF_PERM_FORM | pymupdf.PDF_PERM_ANNOTATE))
         self._can_annotate = bool(perms & pymupdf.PDF_PERM_ANNOTATE)
+        self._can_assemble = bool(perms & (pymupdf.PDF_PERM_ASSEMBLE | pymupdf.PDF_PERM_MODIFY))
+        self._can_extract = bool(perms & pymupdf.PDF_PERM_COPY)
 
     @property
     def was_repaired(self) -> bool:
@@ -435,6 +437,311 @@ class PdfDocument(QObject):
                 return
             page.set_rotation(degrees)
         self.page_changed.emit(i)
+
+    # -- page identity and structure (M6a) -----------------------------------
+    def page_id(self, i: int) -> PageId:
+        """The stable id of the page now at index ``i``."""
+        self._check_index(i)
+        return self._page_ids[i]
+
+    def page_index(self, page_id: PageId) -> int | None:
+        """The current index of page ``page_id``, or None if it is not in the document."""
+        return self._page_index.get(page_id)
+
+    def page_ids(self) -> list[PageId]:
+        """The ids of every page, in page order."""
+        return list(self._page_ids)
+
+    def _reindex(self) -> None:
+        self._page_index = {pid: i for i, pid in enumerate(self._page_ids)}
+
+    @property
+    def can_assemble(self) -> bool:
+        """The permissions allow inserting, deleting, moving and rotating pages
+        (``PDF_PERM_ASSEMBLE`` or ``PDF_PERM_MODIFY``)."""
+        return self._can_assemble
+
+    @property
+    def can_extract(self) -> bool:
+        """The permissions allow copying pages into new files (``PDF_PERM_COPY``)."""
+        return self._can_extract
+
+    @property
+    def structure_edited(self) -> bool:
+        """Pages were inserted, deleted or moved since opening (not reset by saves; a
+        static XFA form then loses its /XFA at the next save)."""
+        return self._structure_edited
+
+    @property
+    def last_insert_renamed_fields(self) -> bool:
+        """The last :meth:`insert_pages` brought fields whose names the document already
+        had (MuPDF renamed the inserted ones "name [xref]")."""
+        return self._last_insert_renamed
+
+    def _check_assemble(self) -> None:
+        if self._doc is None:
+            raise PageError("document is closed")
+        if not self._can_assemble:
+            raise PageError("page operations are not permitted by this document", "permission")
+        if self._xfa_kind is XfaKind.DYNAMIC:
+            raise PageError("page operations are disabled on dynamic XFA forms", "xfa")
+
+    def snapshot(self) -> bytes:
+        """An in-memory write of the whole document as it is now (with its encryption),
+        for undo and for copying pages out. The next save is a full one (an incremental
+        write after an in-memory write produces a corrupt file, docs/M5_PLAN.md C1)."""
+        with self.lock:
+            try:
+                return self.fitz.tobytes(
+                    garbage=0, deflate=False, encryption=pymupdf.PDF_ENCRYPT_KEEP
+                )
+            finally:
+                self._needs_full_save = True
+
+    def _structure_done(self, ids: list[PageId], old_to_new: list[int | None]) -> None:
+        """Common tail of every structural change (lock released)."""
+        self._page_ids = list(ids)
+        self._reindex()
+        self._needs_full_save = True
+        self._structure_edited = True
+        self._drop_page_caches()
+        self._read_form_state()
+        self.pages_remapped.emit(list(old_to_new))
+        self.structure_changed.emit()
+
+    def _drop_page_caches(self) -> None:
+        with self.lock:
+            self._page_count = int(self._doc.page_count) if self._doc is not None else 0
+        self._size_cache.clear()
+        self._widget_cache.clear()
+        self._clear_annot_cache()
+        self._clear_shapes_cache()
+
+    def _resolve_ids(self, page_ids: list[PageId]) -> list[int]:
+        out = []
+        for pid in page_ids:
+            index = self._page_index.get(pid)
+            if index is None:
+                raise PageError(f"page {pid} is not in the document", "missing")
+            out.append(index)
+        return out
+
+    def delete_pages(self, indexes: list[int]) -> None:
+        """Delete the pages at ``indexes`` (form fields pruned, links to them dropped,
+        outline items to them greyed). Raises :class:`PageError` (permissions, dynamic
+        XFA, every page, failure)."""
+        self._check_assemble()
+        targets = sorted(set(int(i) for i in indexes))
+        if not targets:
+            return
+        for i in targets:
+            self._check_index(i)
+        if self._page_count - len(targets) < page_ops.MIN_PAGES:
+            raise PageError("a document must keep at least one page", "last_page")
+        with self.lock:
+            try:
+                page_ops.delete_pages(self.fitz, targets)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise PageError(str(exc)) from exc
+        gone = set(targets)
+        old_to_new: list[int | None] = []
+        kept: list[PageId] = []
+        for i, pid in enumerate(self._page_ids):
+            if i in gone:
+                old_to_new.append(None)
+            else:
+                old_to_new.append(len(kept))
+                kept.append(pid)
+        log.info("deleted pages %s", [i + 1 for i in targets])
+        self._structure_done(kept, old_to_new)
+
+    def reorder_pages(self, new_order: list[PageId]) -> None:
+        """Rearrange the pages into ``new_order`` (every page id once). Raises
+        :class:`PageError`."""
+        self._check_assemble()
+        if sorted(new_order) != sorted(self._page_ids):
+            raise PageError("the new order must list every page once", "missing")
+        order = [self._page_index[pid] for pid in new_order]
+        if order == list(range(self._page_count)):
+            return
+        with self.lock:
+            try:
+                page_ops.reorder(self.fitz, order)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise PageError(str(exc)) from exc
+        old_to_new: list[int | None] = [None] * len(order)
+        for new, old in enumerate(order):
+            old_to_new[old] = new
+        self._structure_done(list(new_order), old_to_new)
+
+    def insert_blank_page(
+        self, index: int, size: QSizeF, *, page_id: PageId | None = None
+    ) -> PageId:
+        """Insert an empty page of ``size`` points at ``index`` (0..page_count); returns
+        its id (``page_id`` when given: redo reinstalls the same id). Raises
+        :class:`PageError`."""
+        self._check_assemble()
+        if not 0 <= index <= self._page_count:
+            raise IndexError(f"insert position out of range: {index}")
+        pid = page_id if page_id is not None else new_page_ids(1)[0]
+        if pid in self._page_index:
+            raise PageError(f"page {pid} is already in the document")
+        with self.lock:
+            try:
+                page_ops.insert_blank(self.fitz, index, size.width(), size.height())
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise PageError(str(exc)) from exc
+        ids = self._page_ids[:index] + [pid] + self._page_ids[index:]
+        self._structure_done(ids, _shifted(len(self._page_ids), index, 1))
+        return pid
+
+    def insert_pages(
+        self,
+        data: bytes,
+        index: int,
+        *,
+        password: str | None = None,
+        page_ids: list[PageId] | None = None,
+    ) -> list[PageId]:
+        """Insert every page of the PDF ``data`` (a sub-document, see
+        :func:`pages.subdocument_bytes`; decrypted with ``password`` if needed) at
+        ``index``; returns their ids (``page_ids`` when given: redo reinstalls the same
+        ids). Sets :attr:`last_insert_renamed_fields`. Raises :class:`PageError`."""
+        self._check_assemble()
+        if not 0 <= index <= self._page_count:
+            raise IndexError(f"insert position out of range: {index}")
+        try:
+            src = pymupdf.open(stream=data, filetype="pdf")
+        except Exception as exc:
+            raise PageError(f"the pages to insert cannot be read: {exc}") from exc
+        try:
+            # needs_pass is read only before authenticate() (see open()).
+            if src.needs_pass and not src.authenticate(password or ""):
+                raise PageError("the pages to insert are encrypted", "failed")
+            count = int(src.page_count)
+            ids = list(page_ids) if page_ids is not None else new_page_ids(count)
+            if len(ids) != count or any(pid in self._page_index for pid in ids):
+                raise PageError("page ids do not match the pages to insert")
+            with self.lock:
+                try:
+                    doc = self.fitz
+                    collide = bool(
+                        doc.is_form_pdf and page_ops.field_names(src) & page_ops.field_names(doc)
+                    )
+                    page_ops.insert_pages(doc, src, index, had_xfa=page_ops.has_xfa(doc))
+                except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                    raise PageError(str(exc)) from exc
+        finally:
+            src.close()
+        self._last_insert_renamed = collide
+        new_ids = self._page_ids[:index] + ids + self._page_ids[index:]
+        log.info("inserted %d pages at %d", count, index + 1)
+        self._structure_done(new_ids, _shifted(len(self._page_ids), index, count))
+        return ids
+
+    def restore_snapshot(self, data: bytes, page_ids: list[PageId]) -> None:
+        """Replace the document by the :meth:`snapshot` ``data`` whose pages have the ids
+        ``page_ids`` (undo of a deletion). Emits ``pages_remapped`` and
+        ``structure_changed``. Raises :class:`PageError` (the document is unchanged)."""
+        try:
+            doc = pymupdf.open(stream=data, filetype="pdf")
+        except Exception as exc:
+            raise PageError(f"the undo copy cannot be read: {exc}", "snapshot") from exc
+        # Read needs_pass only before authenticate() (see open()).
+        locked = bool(doc.needs_pass)
+        if locked and self._password is not None:
+            locked = not doc.authenticate(self._password)
+        if locked or doc.page_count != len(page_ids):
+            doc.close()
+            raise PageError("the undo copy does not match the document", "snapshot")
+        with self.lock:
+            old, self._doc = self._doc, doc
+            self._first_new_xref = int(doc.xref_length())
+            self._load_generation += 1
+            if old is not None:
+                old.close()
+        index = {pid: i for i, pid in enumerate(page_ids)}
+        old_to_new = [index.get(pid) for pid in self._page_ids]
+        self._structure_done(list(page_ids), old_to_new)
+
+    # -- copying pages out ---------------------------------------------------
+    def _output_encryption(self) -> page_ops.OutputEncryption:
+        return page_ops.output_encryption(
+            is_encrypted=self._encrypted,
+            has_restrictions=self.has_restrictions,
+            password=self._password,
+            permissions=self.permissions,
+        )
+
+    def _check_extract(self, paths: list[str]) -> None:
+        if not self._can_extract:
+            raise PageError("copying pages is not permitted by this document", "permission")
+        for path in paths:
+            if self._path is not None and same_file(path, self._path):
+                raise ValueError("the open document cannot be replaced by extracted pages")
+
+    def _copy_bytes(self, data: bytes, indexes: list[int]) -> bytes:
+        """A new file of ``indexes`` from a fresh copy opened from ``data`` (the copy is
+        mutated by grafting, so each output gets its own)."""
+        copy = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            if copy.needs_pass and not copy.authenticate(self._password or ""):
+                raise SaveError("the copy could not be decrypted")
+            return page_ops.extract_bytes(copy, indexes, encryption=self._output_encryption())
+        finally:
+            copy.close()
+
+    def extract_pages(self, indexes: list[int], path: str | os.PathLike[str]) -> None:
+        """Write the pages ``indexes`` (in that order) to a new file ``path``, protected
+        as docs/M6_PLAN.md D5 says. The open document is not read directly (only an
+        in-memory copy), so it is unchanged; its next save is a full one. Raises
+        :class:`PageError` (permissions), ``ValueError`` (``path`` is the open document,
+        no pages) or :class:`SaveError`."""
+        path = str(path)
+        self._check_extract([path])
+        for i in indexes:
+            self._check_index(i)
+        if not indexes:
+            raise ValueError("no pages to extract")
+        data = self.snapshot()
+        try:
+            out = self._copy_bytes(data, list(indexes))
+        except SaveError:
+            raise
+        except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+            raise SaveError(str(exc)) from exc
+        try:
+            _write_atomically(path, out)
+        except OSError as exc:
+            raise SaveError(str(exc)) from exc
+        log.info("extracted %d pages to %s", len(indexes), path)
+
+    def split_document(self, groups: list[list[int]], paths: list[str | os.PathLike[str]]) -> None:
+        """Write each page group to the matching path (see :meth:`extract_pages`).
+        Raises :class:`PageError`, ``ValueError`` or :class:`SaveError` (files written
+        before a failure are kept)."""
+        targets = [str(p) for p in paths]
+        if len(targets) != len(groups) or not groups:
+            raise ValueError("one path per group is needed")
+        self._check_extract(targets)
+        for group in groups:
+            if not group:
+                raise ValueError("empty page group")
+            for i in group:
+                self._check_index(i)
+        data = self.snapshot()
+        for group, path in zip(groups, targets, strict=True):
+            try:
+                out = self._copy_bytes(data, list(group))
+            except SaveError:
+                raise
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise SaveError(str(exc)) from exc
+            try:
+                _write_atomically(path, out)
+            except OSError as exc:
+                raise SaveError(str(exc)) from exc
+        log.info("split %s into %d files", self._path, len(groups))
 
     # -- form widgets ------------------------------------------------------
     def widgets(self, i: int) -> list[WidgetInfo]:
@@ -1004,7 +1311,11 @@ class PdfDocument(QObject):
         self._clear_annot_cache()
         self._clear_shapes_cache()
         self._is_form = self._can_fill_forms = self._can_annotate = self._form_edited = False
+        self._can_assemble = self._can_extract = self._structure_edited = False
         self._xfa_kind = XfaKind.NONE
+        self._page_ids = []
+        self._reindex()
+        self.snapshots.clear()
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
@@ -1019,6 +1330,60 @@ class PdfDocument(QObject):
         self._widget_cache.clear()
         self._clear_annot_cache()
         self._clear_shapes_cache()
+
+
+def _shifted(count: int, index: int, n: int) -> list[int | None]:
+    """old_to_new of inserting ``n`` pages at ``index`` into ``count`` pages."""
+    return [i if i < index else i + n for i in range(count)]
+
+
+def authenticate(
+    fitz_doc: pymupdf.Document, password_cb: PasswordCallback | None, password: str | None
+) -> tuple[str, bool]:
+    """Authenticate a document whose ``needs_pass`` is set: (password, owner access).
+
+    ``authenticate()`` returns 2 for the user password, 4 for the owner password, 6 when
+    both are the same. ``password`` is tried first, then ``password_cb(attempt)`` until it
+    returns the right password or ``None``. Closes ``fitz_doc`` and raises
+    :class:`PasswordRequired` on failure.
+    """
+    attempt = 0
+    candidate = password
+    while True:
+        if candidate is None and password_cb is not None:
+            candidate = password_cb(attempt)
+        if candidate is None:
+            fitz_doc.close()
+            raise PasswordRequired(wrong_password=attempt > 0)
+        level = int(fitz_doc.authenticate(candidate))
+        if level:
+            return candidate, bool(level & AUTH_OWNER)
+        attempt += 1
+        candidate = None
+        if password_cb is None:
+            fitz_doc.close()
+            raise PasswordRequired("wrong password", wrong_password=True)
+
+
+def open_fitz(path: str) -> tuple[pymupdf.Document, DiskStamp]:
+    """Open ``path`` from an in-memory copy of its bytes: (document, disk stamp).
+
+    Raises :class:`OpenError` (missing, unreadable, empty or corrupt file).
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise OpenError(f"file not found: {path}", reason="missing")
+    try:
+        data = p.read_bytes()
+    except OSError as exc:
+        raise OpenError(str(exc), reason="unreadable") from exc
+    stamp = _stamp(path)
+    if stamp is None or not data:
+        raise OpenError(f"file is empty: {path}", reason="empty")
+    try:
+        return pymupdf.open(stream=data, filetype="pdf"), stamp
+    except Exception as exc:  # FileDataError, FzError*, ... -> OpenError
+        raise OpenError(str(exc), reason="corrupt") from exc
 
 
 def pdf_library_versions() -> list[tuple[str, str]]:
