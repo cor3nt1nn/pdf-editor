@@ -263,3 +263,25 @@ def test_target_pages_follow_a_single_remaining_selection(qtbot, window, six_pdf
     # Nothing selected: the current page.
     sidebar.clearSelection()
     assert window.target_pages() == [window.page_view.current_page]
+
+
+# -- m5: the form tool follows its fields across page operations -------------------------
+def test_form_tool_focus_follows_page_operations(window, tmp_path) -> None:
+    path = fixtures.make_multipage_radio_pdf(tmp_path / "radio.pdf")
+    assert window.open_file(str(path))
+    tool = window.form_tool
+    assert window.tool_manager.active_tool is tool
+    doc = window.document_view.document
+    button = doc.widgets(1)[0]  # the radio button on page 2
+    tool.focus(button)
+    assert tool.focused_button is not None and tool.focused_button.page == 1
+    assert window.move_pages([1], 0)
+    assert tool.focused_button is not None
+    assert tool.focused_button.page == 0
+    assert tool.focused_button.name == button.name
+    assert tool.focused_button.unrotated_rect == button.unrotated_rect
+    assert tool._last is not None and tool._last.page == 0
+    assert window.delete_pages([0])
+    assert tool.focused_button is None and tool._last is None
+    window.undo()
+    assert tool.focused_button is None

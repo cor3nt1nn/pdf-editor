@@ -10,6 +10,7 @@ The tool never mutates the document: every change is a ``SetFieldValueCommand``.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication, QObject, QPointF, Qt, Signal
@@ -120,13 +121,18 @@ class FormTool(Tool):
     def _on_document_changed(self) -> None:
         old, new = self._document, self.document
         if old is not None:
-            try:
-                old.reloaded.disconnect(self._on_reloaded)
-            except (RuntimeError, TypeError):
-                pass
+            for signal, slot in (
+                (old.reloaded, self._on_reloaded),
+                (old.pages_remapped, self._on_pages_remapped),
+            ):
+                try:
+                    signal.disconnect(slot)
+                except (RuntimeError, TypeError):
+                    pass
         self._document = new
         if new is not None:
             new.reloaded.connect(self._on_reloaded)
+            new.pages_remapped.connect(self._on_pages_remapped)
         self._shrunk_from.clear()
         self._reset()
 
@@ -137,6 +143,26 @@ class FormTool(Tool):
             self._last = self._fresh(self._last) or self._last
         if self._focused_button is not None:
             self._set_button_focus(self._fresh(self._focused_button))
+
+    def _on_pages_remapped(self, mapping: object) -> None:
+        """Pages were inserted, deleted or moved: follow the focused button and the last
+        focused field to their new page (dropped when their page is gone), so that
+        Space/Tab never act on a field of another page (docs/ARCHITECTURE.md
+        Deviation 101)."""
+        old_to_new = list(mapping)  # type: ignore[call-overload]
+
+        def moved(info: WidgetInfo | None) -> WidgetInfo | None:
+            if info is None or not 0 <= info.page < len(old_to_new):
+                return None
+            page = old_to_new[info.page]
+            if page is None:
+                return None
+            return replace(info, page=page)
+
+        last = moved(self._last)
+        self._last = (self._fresh(last) or last) if last is not None else None
+        button = moved(self._focused_button)
+        self._set_button_focus(self._fresh(button) if button is not None else None)
 
     # -- hit testing ------------------------------------------------------------
     def widget_at(self, page: int | None, pos: QPointF | None) -> WidgetInfo | None:
