@@ -569,6 +569,31 @@ def test_context_menu_acts_on_rows(window: MainWindow, simple_pdf) -> None:
     menu.deleteLater()
 
 
+def test_context_menu_inserts_next_to_clicked_row(
+    window: MainWindow, simple_pdf, tmp_path, monkeypatch
+) -> None:
+    doc = _open(window, simple_pdf)
+    window.page_view.scroll_to_page(0)  # the current page is not the clicked one
+    menu = window.page_context_menu([1])
+    blank = next(a for a in menu.actions() if a.objectName() == "insert_blank_page")
+    blank.trigger()
+    assert _texts(doc) == ["Page 1", "Page 2", "", "Page 3"]
+    assert window.page_view.current_page == 2
+    menu.deleteLater()
+
+    other = make_simple_pdf(tmp_path / "other.pdf")
+    monkeypatch.setattr(dialogs, "get_open_path", lambda *_a: str(other))
+    _accepting(
+        InsertPagesDialog, monkeypatch, lambda d: d.set_position(page_dialogs.BEFORE_CURRENT)
+    )
+    window.page_view.scroll_to_page(0)
+    menu = window.page_context_menu([2, 3])  # multi-selection: next to its last page
+    insert = next(a for a in menu.actions() if a.objectName() == "insert_pages")
+    insert.trigger()
+    assert _texts(doc) == ["Page 1", "Page 2", "", "Page 1", "Page 2", "Page 3", "Page 3"]
+    menu.deleteLater()
+
+
 def test_context_menu_signal_wired(window: MainWindow, simple_pdf, monkeypatch) -> None:
     _open(window, simple_pdf)
     shown: list[list[int]] = []

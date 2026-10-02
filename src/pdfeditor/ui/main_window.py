@@ -245,13 +245,13 @@ class MainWindow(QMainWindow):
         self.act_insert_blank = self._action(
             self.tr("Insert &Blank Page"),
             QKeySequence("Ctrl+Shift+N"),
-            self.insert_blank_page,
+            lambda: self.insert_blank_page(),
             "insert_blank_page",
         )
         self.act_insert_pages = self._action(
             self.tr("Insert Pages from &File…"),
             QKeySequence("Ctrl+Shift+I"),
-            self.insert_pages,
+            lambda: self.insert_pages(),
             "insert_pages",
         )
         self.act_delete_pages = self._action(
@@ -1083,23 +1083,27 @@ class MainWindow(QMainWindow):
             return False
         return self._run_page_command(lambda: MovePagesCommand(doc, rows, target)) is not None
 
-    def insert_blank_page(self) -> bool:
-        """Pages ▸ Insert Blank Page: after the current page, with its size."""
+    def insert_blank_page(self, anchor: int | None = None) -> bool:
+        """Pages ▸ Insert Blank Page: after page ``anchor`` (default the current page),
+        with its size."""
         doc = self.document_view.document
         if doc is None or self._refuse_assemble():
             return False
-        current = max(0, self.page_view.current_page)
+        current = self.page_view.current_page if anchor is None else anchor
+        current = min(max(0, current), doc.page_count - 1)
         size = doc.page_size(current)
         cmd = self._run_page_command(lambda: InsertBlankPageCommand(doc, current + 1, size))
         return cmd is not None
 
-    def insert_pages(self) -> bool:
-        """Pages ▸ Insert Pages from File…."""
+    def insert_pages(self, anchor: int | None = None) -> bool:
+        """Pages ▸ Insert Pages from File…: the dialog's "before/after the current page"
+        positions are relative to page ``anchor`` (default the current page)."""
         doc = self.document_view.document
         if doc is None or self._refuse_assemble():
             return False
         self.document_view.commit_pending_edits()
-        request = page_dialogs.insert_pages(self, doc, self.page_view.current_page, self.settings)
+        current = self.page_view.current_page if anchor is None else anchor
+        request = page_dialogs.insert_pages(self, doc, current, self.settings)
         if request is None:
             return False
         cmd = self._run_page_command(
@@ -1242,8 +1246,10 @@ class MainWindow(QMainWindow):
             act.setEnabled(source.isEnabled())
             act.triggered.connect(lambda _checked=False: slot())
 
-        add(self.act_insert_blank, self.insert_blank_page)
-        add(self.act_insert_pages, self.insert_pages)
+        # Inserts go next to the clicked page (the last page of a multi-selection).
+        anchor = max(targets) if targets else None
+        add(self.act_insert_blank, lambda: self.insert_blank_page(anchor))
+        add(self.act_insert_pages, lambda: self.insert_pages(anchor))
         add(self.act_delete_pages, lambda: self.delete_pages(targets))
         menu.addSeparator()
         add(self.act_rotate_cw, lambda: self.rotate_pages(targets, 90))
