@@ -6,8 +6,10 @@ Shared by text selection and markup (M6b), editing existing text (M7) and OCR (M
 dictionary of the page's display list **without annotations** (FreeText annotations and
 form-field values are not page text) in content order, plus ``get_fonts(full=True)`` to
 join every span to its font object and ``get_bboxlog()`` for the areas of invisible
-(render mode 3, e.g. OCR) text. Everything is turned into an immutable
-:class:`PageText` by :meth:`PageText.from_rawdict`, which also accepts a hand-made
+(render mode 3, e.g. OCR) text. On a page that draws Form XObjects, the page's own content
+is run a second time without them to tell the XObjects' text apart (:attr:`Span.in_xobject`:
+its fonts are named in the XObject's resources, not the page's). Everything is turned into
+an immutable :class:`PageText` by :meth:`PageText.from_rawdict`, which also accepts a hand-made
 rawdict-shaped dict (OCR results). Geometry is page space (rotation applied,
 cropbox-relative, points) as ``QRectF``/``QPointF``; queries are pure geometry and never
 touch MuPDF, so ``PdfDocument.page_text(i)`` can be used without the lock once cached.
@@ -67,6 +69,10 @@ class Span:
     ``font_xref``/``resource_name`` identify the font object and its name in the page's
     resources (``0``/``""`` when it could not be matched, see :func:`match_font`).
     ``invisible`` is true for text that is not painted (render mode 3, alpha 0).
+    ``in_xobject`` is true for text drawn by a Form XObject (e.g. ``show_pdf_page``): its
+    ``resource_name`` is always ``""`` (the name lives in the XObject's resources and must
+    never be written into the page content); ``font_xref`` is set when exactly one font
+    object of the XObjects' resources matches.
     """
 
     font: str
@@ -81,6 +87,7 @@ class Span:
     font_xref: int = 0
     resource_name: str = ""
     invisible: bool = False
+    in_xobject: bool = False
 
     @property
     def text(self) -> str:
@@ -178,9 +185,10 @@ class PageText:
         ``bboxlog`` are ``page.get_bboxlog()`` entries (unrotated coordinates, mapped to
         page space with ``rotation_matrix`` = ``page.rotation_matrix`` when given). Missing
         keys get neutral defaults, so a hand-made dict with only ``blocks → lines → spans
-        → chars (c, bbox)`` works.
+        → chars (c, bbox)`` works. A span key ``"in_xobject": True`` (set by
+        :func:`extract_page_text`) marks text drawn by a Form XObject.
         """
-        font_memo: dict[str, tuple[int, str]] = {}
+        font_memo: dict[tuple[str, bool], tuple[int, str]] = {}
         blocks: list[Block] = []
         images: list[QRectF] = []
         for b in rawdict.get("blocks", ()):
@@ -446,40 +454,148 @@ def extract_page_text(page: pymupdf.Page) -> PageText:
             bboxlog = page.get_bboxlog()
         except Exception:
             log.warning("could not read the bbox log of page %d", page.number, exc_info=True)
+        _mark_xobject_spans(page, rawdict)
     return PageText.from_rawdict(
         rawdict, fonts=fonts, bboxlog=bboxlog, rotation_matrix=page.rotation_matrix
     )
 
 
-def match_font(name: str, fonts: Sequence[Sequence[Any]]) -> tuple[int, str]:
-    """``(xref, resource_name)`` of the ``get_fonts(full=True)`` entry used by a span
-    whose font is ``name``, ``(0, "")`` when unknown or ambiguous.
+class FontCandidate(NamedTuple):
+    """A ``get_fonts(full=True)`` entry whose base font matches a span's font name.
+
+    ``referencer`` is the xref of the Form XObject whose resources name the font (``0``:
+    the page's own resources); ``exact`` tells an exact name match from a normalised one.
+    """
+
+    xref: int
+    resource_name: str
+    referencer: int
+    exact: bool
+
+
+def font_candidates(name: str, fonts: Sequence[Sequence[Any]]) -> list[FontCandidate]:
+    """Every ``get_fonts(full=True)`` entry whose base font matches the span font ``name``.
 
     The span name is the base font without its "ABCDEF+" subset prefix, ``#xx`` decoded.
-    Exact match first; else a normalised comparison (case-insensitive; spaces, ``-``,
-    ``,`` and ``_`` dropped; "Regular"/"MT"/"PS" suffixes stripped), because embedded
-    TrueType fonts report their PostScript name ("ArialMT") while ``/BaseFont`` may say
-    "Arial Regular"; it must single out one font object.
+    A match is exact, or normalised (case-insensitive; spaces, ``-``, ``,`` and ``_``
+    dropped; "Regular"/"MT"/"PS" suffixes stripped), because embedded TrueType fonts
+    report their PostScript name ("ArialMT") while ``/BaseFont`` may say "Arial Regular".
     """
     if not name:
-        return 0, ""
-    exact: list[tuple[int, str]] = []
-    loose: list[tuple[int, str]] = []
+        return []
+    out: list[FontCandidate] = []
     key = _normalise(name)
     for f in fonts:
         if len(f) < 5:
             continue
         xref, basefont, resource = int(f[0]), str(f[3]), str(f[4])
+        referencer = int(f[6] or 0) if len(f) > 6 else 0
         base = _decode_name(_SUBSET_RE.sub("", basefont))
         if base == name:
-            exact.append((xref, resource))
+            out.append(FontCandidate(xref, resource, referencer, True))
         elif _normalise(base) == key:
-            loose.append((xref, resource))
-    if exact:
-        return exact[0]
-    if len({x for x, _ in loose}) == 1:
-        return loose[0]
-    return 0, ""
+            out.append(FontCandidate(xref, resource, referencer, False))
+    return out
+
+
+def match_font(
+    name: str, fonts: Sequence[Sequence[Any]], *, in_xobject: bool = False
+) -> tuple[int, str]:
+    """``(xref, resource_name)`` of the ``get_fonts(full=True)`` entry used by a span
+    whose font is ``name``, ``(0, "")`` when unknown or ambiguous.
+
+    Only entries of the page's own resources (referencer ``0``) are considered, or, with
+    ``in_xobject``, only those of Form XObjects (the resource name is then always ``""``:
+    it is not a name of the page's resources). Exact name matches win and must single out
+    one font object (by xref): two exact matches (e.g. two "Helvetica" objects with
+    different encodings) are ambiguous. Without an exact match, the normalised matches must
+    single out one font object. See :func:`font_candidates` for the whole list.
+    """
+    cands = [c for c in font_candidates(name, fonts) if (c.referencer != 0) == in_xobject]
+    pool = [c for c in cands if c.exact] or cands
+    if len({c.xref for c in pool}) != 1:
+        return 0, ""
+    return pool[0].xref, "" if in_xobject else pool[0].resource_name
+
+
+def _mark_xobject_spans(page: pymupdf.Page, rawdict: dict[str, Any]) -> None:
+    """Set ``"in_xobject": True`` on the rawdict spans drawn by a Form XObject of ``page``.
+
+    Only on a page that draws Form XObjects: its own content is run once more into a text
+    page with the ``/XObject`` resources left out (a direct copy of the resource dictionary;
+    the document is not modified). A span with a char this run does not produce at the same
+    place comes from an XObject. When that run fails every span is marked (conservative).
+    """
+    try:
+        if not page.get_xobjects():
+            return
+    except Exception:  # MuPDF raises FzError* (not RuntimeError)
+        log.warning("could not list the XObjects of page %d", page.number, exc_info=True)
+        return
+    try:
+        own: set[tuple[str, float, float]] | None = _own_content_chars(page)
+    except Exception:
+        log.warning("could not separate the XObject text of page %d", page.number, exc_info=True)
+        own = None
+    for b in rawdict.get("blocks", ()):
+        if b.get("type", _TEXT_BLOCK) != _TEXT_BLOCK:
+            continue
+        for ln in b.get("lines", ()):
+            for s in ln.get("spans", ()):
+                if own is None or any(_char_key(c) not in own for c in s.get("chars", ())):
+                    s["in_xobject"] = True
+
+
+def _char_key(c: dict[str, Any]) -> tuple[str, float, float]:
+    o = c.get("origin") or c["bbox"][:2]
+    return str(c.get("c", "")), round(float(o[0]), 1), round(float(o[1]), 1)
+
+
+def _own_content_chars(page: pymupdf.Page) -> set[tuple[str, float, float]]:
+    """:func:`_char_key` of every char the page's content draws outside Form XObjects."""
+    mupdf = pymupdf.mupdf
+    ppage = mupdf.pdf_page_from_fz_page(page.this)
+    pdoc = ppage.doc()
+    resources = mupdf.pdf_copy_dict(mupdf.pdf_page_resources(ppage))
+    mupdf.pdf_dict_del(resources, mupdf.PDF_ENUM_NAME_XObject)
+    mediabox = mupdf.FzRect()
+    ctm = mupdf.FzMatrix()
+    mupdf.pdf_page_transform(ppage, mediabox, ctm)
+    stext = mupdf.FzStextPage(mupdf.fz_transform_rect(mediabox, ctm))
+    opts = mupdf.FzStextOptions()
+    opts.flags = pymupdf.TEXTFLAGS_RAWDICT
+    dev = mupdf.fz_new_stext_device(stext, opts)
+    shown = pymupdf.TOOLS.mupdf_display_errors()
+    pymupdf.TOOLS.mupdf_display_errors(False)  # "cannot find XObject resource" is expected
+    try:
+        proc = mupdf.pdf_new_run_processor(
+            pdoc,
+            dev,
+            ctm,
+            -1,
+            "View",
+            mupdf.PdfGstate(),
+            mupdf.FzDefaultColorspaces(),
+            mupdf.FzCookie(),
+            mupdf.PdfGstate(),
+            mupdf.PdfGstate(),
+        )
+        try:
+            contents = mupdf.pdf_page_contents(ppage)
+            mupdf.pdf_process_contents(proc, pdoc, resources, contents, mupdf.FzCookie())
+            mupdf.pdf_close_processor(proc)
+        finally:
+            mupdf.fz_close_device(dev)
+    finally:
+        pymupdf.TOOLS.mupdf_display_errors(shown)
+    raw = pymupdf.TextPage(stext).extractRAWDICT(sort=False)
+    return {
+        _char_key(c)
+        for b in raw.get("blocks", ())
+        for ln in b.get("lines", ())
+        for s in ln.get("spans", ())
+        for c in s.get("chars", ())
+    }
 
 
 # -- helpers ------------------------------------------------------------------------------
@@ -522,7 +638,9 @@ def _normalise(name: str) -> str:
 
 
 def _span(
-    s: dict[str, Any], fonts: Sequence[Sequence[Any]], memo: dict[str, tuple[int, str]]
+    s: dict[str, Any],
+    fonts: Sequence[Sequence[Any]],
+    memo: dict[tuple[str, bool], tuple[int, str]],
 ) -> Span:
     chars_list: list[Char] = []
     for c in s.get("chars", ()):
@@ -534,9 +652,11 @@ def _span(
     chars = tuple(chars_list)
     bbox = _qrect(s["bbox"]) if "bbox" in s else _union(ch.bbox for ch in chars)
     font = str(s.get("font", ""))
-    if font not in memo:
-        memo[font] = match_font(font, fonts)
-    xref, resource = memo[font]
+    in_xobject = bool(s.get("in_xobject", False))
+    key = (font, in_xobject)
+    if key not in memo:
+        memo[key] = match_font(font, fonts, in_xobject=in_xobject)
+    xref, resource = memo[key]
     return Span(
         font=font,
         size=float(s.get("size", bbox.height())),
@@ -550,6 +670,7 @@ def _span(
         font_xref=xref,
         resource_name=resource,
         invisible=int(s.get("alpha", 255)) == 0,
+        in_xobject=in_xobject,
     )
 
 

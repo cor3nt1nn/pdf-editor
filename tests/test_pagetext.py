@@ -9,6 +9,7 @@ import threading
 import fixtures
 import pymupdf
 import pytest
+import textedit_fixtures
 from fixtures import TEXT_DIAGONAL, TEXT_FREETEXT, TEXT_LINES, TEXT_RIGHT_COLUMN, TEXT_WIDGET_VALUE
 from PySide6.QtCore import QPointF, QRectF
 from timing import best_time
@@ -21,6 +22,7 @@ from pdfeditor.core.pagetext import (
     CharRef,
     PageText,
     Quad,
+    font_candidates,
     match_font,
 )
 
@@ -351,10 +353,104 @@ def test_match_font_rules():
     assert match_font("Helvetica", fonts) == (11, "helv")
     assert match_font("Arial Regular", fonts) == (10, "F1")  # subset prefix, #20 decoded
     assert match_font("ArialMT", fonts) == (10, "F1")  # PostScript name vs BaseFont
-    assert match_font("Times-Bold", fonts) == (12, "F3")  # exact: first entry
+    assert match_font("Times-Bold", fonts) == (0, "")  # two exact objects: ambiguous
     assert match_font("TimesBold", fonts) == (0, "")  # loose and ambiguous
     assert match_font("Courier", fonts) == (0, "")
     assert match_font("", fonts) == (0, "")
+    assert [c.xref for c in font_candidates("Times-Bold", fonts)] == [12, 13]
+
+
+def test_match_font_prefers_page_resources():
+    fonts = [
+        (5, "ttf", "Type0", "ABCDEF+Calibri", "Calibri", "Identity-H", 0),
+        (13, "ttf", "Type0", "GHIJKL+Calibri", "Calibri", "Identity-H", 18),
+        (14, "n/a", "Type1", "Times-Roman", "tiro", "WinAnsiEncoding", 18),
+    ]
+    assert match_font("Calibri", fonts) == (5, "Calibri")
+    assert match_font("Calibri", fonts, in_xobject=True) == (13, "")
+    assert match_font("Times-Roman", fonts) == (0, "")  # only in the XObject
+    assert match_font("Times-Roman", fonts, in_xobject=True) == (14, "")
+    cands = font_candidates("Calibri", fonts)
+    assert [(c.xref, c.referencer, c.exact) for c in cands] == [(5, 0, True), (13, 18, True)]
+
+
+def test_two_exact_font_objects_not_joined():
+    doc = pymupdf.open()
+    page = doc.new_page()
+    winansi, macroman = doc.get_new_xref(), doc.get_new_xref()
+    for xref, enc in ((winansi, "WinAnsiEncoding"), (macroman, "MacRomanEncoding")):
+        doc.update_object(
+            xref, f"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /{enc} >>"
+        )
+    doc.xref_set_key(
+        page.xref, "Resources", f"<< /Font << /helv {winansi} 0 R /helv2 {macroman} 0 R >> >>"
+    )
+    contents = doc.get_new_xref()
+    doc.update_object(contents, "<< >>")
+    doc.update_stream(
+        contents,
+        b"BT /helv 12 Tf 72 100 Td (Hello) Tj ET BT /helv2 12 Tf 72 140 Td (World) Tj ET",
+    )
+    doc.xref_set_key(page.xref, "Contents", f"{contents} 0 R")
+    spans = [ln.spans[0] for ln in pagetext.extract_page_text(doc[0]).lines]
+    assert [s.text for s in spans] == ["Hello", "World"]
+    for s in spans:
+        assert (s.font_xref, s.resource_name, s.in_xobject) == (0, "", False)
+        assert {c.xref for c in font_candidates(s.font, doc[0].get_fonts(full=True))} == {
+            winansi,
+            macroman,
+        }
+    doc.close()
+
+
+@textedit_fixtures.needs_text_fonts
+def test_xobject_spans_flagged(tmp_path):
+    path = textedit_fixtures.make_xobject_text_pdf(tmp_path / "xo.pdf")
+    doc = pymupdf.open(path)
+    page = doc[0]
+    fonts = page.get_fonts(full=True)
+    xrefs = doc.xref_length()
+    pagetext.extract_page_text(page)
+    assert not doc.is_dirty and doc.xref_length() == xrefs  # the document is untouched
+    own = {f[0]: f[4] for f in fonts if f[6] == 0}
+    for rotation in ROTATIONS:
+        page.set_rotation(rotation)
+        lines = pagetext.extract_page_text(page).lines
+        by_text = {ln.text.replace(" ", " "): ln.spans for ln in lines}
+        assert set(by_text) == {textedit_fixtures.LINE1, textedit_fixtures.XOBJECT_TEXT}
+        (direct,) = by_text[textedit_fixtures.LINE1]
+        assert not direct.in_xobject
+        assert direct.font_xref in own and direct.resource_name == own[direct.font_xref]
+        (inner,) = by_text[textedit_fixtures.XOBJECT_TEXT]
+        assert inner.in_xobject and inner.resource_name == ""
+        assert inner.font_xref not in own and inner.font_xref > 0
+    doc.close()
+
+
+def test_no_xobject_run_without_forms(monkeypatch):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Plain", fontsize=12)
+    monkeypatch.setattr(pagetext, "_own_content_chars", lambda p: pytest.fail("ran"))
+    (line,) = pagetext.extract_page_text(page).lines
+    assert not line.spans[0].in_xobject and line.spans[0].resource_name
+    doc.close()
+
+
+@textedit_fixtures.needs_text_fonts
+def test_xobject_run_failure_is_conservative(tmp_path, monkeypatch, caplog):
+    path = textedit_fixtures.make_xobject_text_pdf(tmp_path / "xo.pdf")
+    doc = pymupdf.open(path)
+
+    def boom(page):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pagetext, "_own_content_chars", boom)
+    with caplog.at_level(logging.WARNING, logger="pdfeditor.core.pagetext"):
+        spans = [s for ln in pagetext.extract_page_text(doc[0]).lines for s in ln.spans]
+    assert spans and all(s.in_xobject and s.resource_name == "" for s in spans)
+    assert "XObject text" in caplog.text
+    doc.close()
 
 
 @pytest.mark.skipif(not fixtures.ARIAL_PATH.exists(), reason="Arial not installed")
