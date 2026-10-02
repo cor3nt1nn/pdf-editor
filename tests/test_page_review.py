@@ -431,3 +431,47 @@ def test_insert_into_large_form_is_fast(tmp_path, lo_form_pdf) -> None:
             assert len(pages.field_names(doc.fitz)) == 2000
     finally:
         doc.close()
+
+
+# -- fuzzer minor: no dangling radio /V after deleting the selected button's page ----------
+def _radio_value(doc: PdfDocument) -> tuple[str, str]:
+    with doc.lock:
+        field = next(w.field_xref for w in doc.all_widgets())
+        return doc.fitz.xref_get_key(field, "V")
+
+
+def test_deleting_the_selected_radio_button_turns_the_field_off(tmp_path) -> None:
+    path = fixtures.make_multipage_radio_pdf(tmp_path / "radio.pdf")
+    doc = PdfDocument.open(path)
+    try:
+        assert _radio_value(doc) == ("name", "/C")  # the button on page 2
+        stack = QUndoStack()
+        delete = DeletePagesCommand(doc, [1])
+        delete.apply_now()
+        stack.push(delete)
+        assert _radio_value(doc) == ("name", "/Off")
+        first = doc.widgets(0)[0]
+        assert doc.field_button_state(first) == "Off"
+        select = SetFieldValueCommand(doc, first, True)
+        select.apply_now()
+        stack.push(select)
+        stack.undo()
+        assert select.error is None
+        assert _radio_value(doc) == ("name", "/Off")
+        stack.undo()
+        assert _radio_value(doc) == ("name", "/C")
+    finally:
+        doc.close()
+
+
+def test_deleting_an_unselected_radio_button_keeps_the_value(tmp_path) -> None:
+    path = fixtures.make_multipage_radio_pdf(tmp_path / "radio.pdf")
+    doc = PdfDocument.open(path)
+    try:
+        select = SetFieldValueCommand(doc, doc.widgets(0)[0], True)
+        select.apply_now()
+        on = _radio_value(doc)
+        DeletePagesCommand(doc, [1]).apply_now()
+        assert _radio_value(doc) == on != ("name", "/Off")
+    finally:
+        doc.close()

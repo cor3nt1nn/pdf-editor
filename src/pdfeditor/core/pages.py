@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 import pymupdf
 
-from pdfeditor.core.forms import acroform_xref, strip_xfa
+from pdfeditor.core.forms import acroform_xref, drop_dangling_button_value, strip_xfa
 
 if TYPE_CHECKING:
     from pdfeditor.core.document import PasswordCallback
@@ -146,6 +146,8 @@ def prune_fields(doc: pymupdf.Document, roots: Iterable[int] | None = None) -> i
             kept = survivors(old)
             if kept and kept != old:
                 doc.xref_set_key(xref, "Kids", _array(kept))
+                # A radio group whose selected button was deleted: no dangling /V.
+                drop_dangling_button_value(doc, xref)
             result = bool(kept)
         elif _is_widget(doc, xref):
             result = xref in live

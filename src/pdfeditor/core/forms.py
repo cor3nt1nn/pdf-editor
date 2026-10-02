@@ -541,6 +541,23 @@ def _state_tokens(doc: pymupdf.Document, widget_xref: int) -> list[str]:
     return tokens
 
 
+def drop_dangling_button_value(doc: pymupdf.Document, field_xref: int) -> bool:
+    """Set the /V of checkbox/radio field ``field_xref`` to /Off when none of its
+    widgets has that state any more (the page holding the selected radio button was
+    deleted); True if it was changed. Other fields are left alone."""
+    if _key(doc, field_xref, "FT") != ("name", "/Btn"):
+        return False
+    token = _name(doc, field_xref, "V")
+    if not token or token == "Off":
+        return False
+    widgets = _field_widget_xrefs(doc, field_xref)
+    if any(token in _state_tokens(doc, x) for x in widgets):
+        return False
+    doc.xref_set_key(field_xref, "V", "/Off")
+    log.debug("field xref %s: /V /%s has no widget left, set to /Off", field_xref, token)
+    return True
+
+
 def set_button_state(
     fitz_doc: pymupdf.Document, page: pymupdf.Page, widget: pymupdf.Widget, on: bool | str
 ) -> list[int]:
