@@ -1253,6 +1253,8 @@ class PdfDocument(QObject):
                 raise
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise textedit.TextEditError(str(exc)) from exc
+            # The removed glyphs must not survive in an earlier revision of the file.
+            self._needs_full_save = True
         log.info("page %d: replaced %r by %r", page + 1, result.old_text, result.new_text)
         self.page_changed.emit(page)
         return result
@@ -1276,6 +1278,9 @@ class PdfDocument(QObject):
                 raise
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
                 raise textedit.TextEditError(str(exc)) from exc
+            # Undo/redo of a text edit: an incremental save would keep the other
+            # version's bytes (e.g. removed text) in an earlier revision of the file.
+            self._needs_full_save = True
         self.page_changed.emit(page)
 
     def _on_reloaded(self) -> None:

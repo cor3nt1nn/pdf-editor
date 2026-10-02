@@ -395,7 +395,7 @@ def test_undo_redo_pixel_identical_also_after_full_save(tmp_path: Path, fonts: S
     doc.set_page_content(0, r1.after, expect=r1.before)
     doc.set_page_content(0, r2.after, expect=r2.before)
     assert render(doc).samples == pix_after.samples
-    assert doc.can_save_incrementally()
+    assert not doc.can_save_incrementally()  # undo/redo of page text: full save
     doc.save()
     strict_read(tmp_path / "saved.pdf")
     doc.close()
@@ -441,13 +441,13 @@ def test_aes256_edit_full_save_then_incremental(tmp_path: Path, fonts: SystemFon
     strict_read(path, password=PASSWORD)
     assert doc.encryption_method is not None and "AES" in doc.encryption_method
     assert line_text(doc, 0, y) == _norm(LINE1).replace("Dupont", "Durand")
-    # undo after the reload, then an incremental save
-    size = path.stat().st_size
+    # undo after the reload, then a full save again (the edited revision must not
+    # survive in the file), after which the document saves incrementally
     doc.set_page_content(0, result.before, expect=result.after)
-    assert doc.can_save_incrementally()
+    assert not doc.can_save_incrementally()
     doc.save()
-    assert path.stat().st_size > size
     strict_read(path, password=PASSWORD)
+    assert doc.can_save_incrementally()
     assert render(doc).samples == pix0.samples
     doc.close()
     check = pymupdf.open(path)
