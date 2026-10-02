@@ -225,3 +225,41 @@ def test_drag_near_the_bottom_scrolls(qtbot, window, tmp_path) -> None:
     qtbot.waitUntil(lambda: bar.value() > 0, timeout=2000)
     QApplication.sendEvent(sidebar.viewport(), QDragLeaveEvent())
     assert sidebar.drop_target is None
+
+
+# -- M4: the Pages actions work on what the sidebar highlights --------------------------
+def _click(qtbot, sidebar, row: int, modifier=None) -> None:
+    from PySide6.QtCore import Qt
+
+    sidebar.scrollTo(sidebar.model().index(row, 0))
+    rect = sidebar.visualRect(sidebar.model().index(row, 0))
+    qtbot.mouseClick(
+        sidebar.viewport(),
+        Qt.MouseButton.LeftButton,
+        modifier or Qt.KeyboardModifier.NoModifier,
+        rect.center(),
+    )
+
+
+def test_target_pages_follow_a_single_remaining_selection(qtbot, window, six_pdf) -> None:
+    from PySide6.QtCore import Qt
+
+    ctrl = Qt.KeyboardModifier.ControlModifier
+    assert window.open_file(str(six_pdf))
+    sidebar = window.thumbnails
+    _click(qtbot, sidebar, 2)
+    assert window.target_pages() == [2]
+    _click(qtbot, sidebar, 4, ctrl)
+    assert window.target_pages() == [2, 4]
+    _click(qtbot, sidebar, 2, ctrl)  # Ctrl+click removes the current page from it
+    assert sidebar.selected_pages() == [4]
+    assert window.page_view.current_page == 2
+    assert window.target_pages() == [4]
+    window.act_delete_pages.trigger()
+    doc = window.document_view.document
+    with doc.lock:
+        texts = [doc.fitz[i].get_text().strip() for i in range(doc.page_count)]
+    assert texts == ["Page 1", "Page 2", "Page 3", "Page 4", "Page 6"]
+    # Nothing selected: the current page.
+    sidebar.clearSelection()
+    assert window.target_pages() == [window.page_view.current_page]

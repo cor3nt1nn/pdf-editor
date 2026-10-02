@@ -1021,12 +1021,13 @@ class MainWindow(QMainWindow):
         return doc is not None and doc.can_extract and doc.xfa_kind is not XfaKind.DYNAMIC
 
     def target_pages(self) -> list[int]:
-        """Pages a Pages menu action works on: the thumbnail selection when it holds two
-        or more pages, else the current page."""
+        """Pages a Pages menu action works on: the thumbnail selection whenever it is not
+        empty (what the sidebar highlights, e.g. after a Ctrl+click removed the current
+        page from it), else the current page (docs/ARCHITECTURE.md Deviation 100)."""
         if self.document_view.document is None:
             return []
         selected = self.thumbnails.selected_pages()
-        if len(selected) >= 2:
+        if selected:
             return selected
         current = self.page_view.current_page
         return [current] if current >= 0 else []
