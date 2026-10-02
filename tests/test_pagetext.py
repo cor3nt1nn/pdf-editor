@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 import math
 import threading
-import time
 
 import fixtures
 import pymupdf
 import pytest
 from fixtures import TEXT_DIAGONAL, TEXT_FREETEXT, TEXT_LINES, TEXT_RIGHT_COLUMN, TEXT_WIDGET_VALUE
 from PySide6.QtCore import QPointF, QRectF
+from timing import best_time
 
 from pdfeditor.core import pagetext
 from pdfeditor.core.document import PdfDocument
@@ -26,6 +26,8 @@ from pdfeditor.core.pagetext import (
 
 #: Cold extraction of a 60 × 95 chars page (best of three runs, see the plan's budget).
 EXTRACT_BUDGET_S = 0.050
+#: 500 hits with an infinite tolerance on the dense page.
+HITS_BUDGET_S = 1.0
 ROTATIONS = (0, 90, 180, 270)
 SCALE = 2.0
 
@@ -452,16 +454,17 @@ def test_dense_page_extraction_budget(tmp_path):
     raw.save(path)
     raw.close()
     doc = PdfDocument.open(str(path))
-    runs = []
-    for _ in range(3):
-        doc.page_changed.emit(0)  # drop the cache
-        start = time.perf_counter()
-        pt = doc.page_text(0)
-        runs.append(time.perf_counter() - start)
+    best, runs = best_time(
+        lambda: doc.page_text(0), EXTRACT_BUDGET_S, setup=lambda: doc.page_changed.emit(0)
+    )
+    assert best < EXTRACT_BUDGET_S, runs
+    pt = doc.page_text(0)
     assert len(pt.chars) == 60 * 95
-    assert min(runs) < EXTRACT_BUDGET_S, runs
-    start = time.perf_counter()
-    for i in range(500):
-        pt.hit(QPointF(40 + i, 40 + i % 700), tolerance=math.inf)
-    assert time.perf_counter() - start < 1.0
+
+    def hits() -> None:
+        for i in range(500):
+            pt.hit(QPointF(40 + i, 40 + i % 700), tolerance=math.inf)
+
+    best, runs = best_time(hits, HITS_BUDGET_S)
+    assert best < HITS_BUDGET_S, runs
     doc.close()

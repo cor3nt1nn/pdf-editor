@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import fixtures
 import pymupdf
 import pytest
@@ -19,6 +17,7 @@ from fixtures import (
     WORD_TABLE_Y,
 )
 from PySide6.QtCore import QPointF, QRectF
+from timing import best_time
 
 from pdfeditor.core import snapping
 from pdfeditor.core.annotations import BASELINE_RATIO, AnnotKind, AnnotSpec
@@ -441,21 +440,20 @@ def test_page_shapes_scan_failure_gives_no_shapes(word_doc, monkeypatch, caplog)
 def test_scan_and_snap_performance(tmp_path):
     path = fixtures.make_busy_drawings_pdf(tmp_path / "busy.pdf", n=3000)
     doc = PdfDocument.open(str(path))
-    scans = []
-    for _ in range(3):
-        doc.structure_changed.emit()  # drop the cache
-        start = time.perf_counter()
-        shapes = doc.page_shapes(0)
-        scans.append(time.perf_counter() - start)
+    best, scans = best_time(
+        lambda: doc.page_shapes(0), SCAN_BUDGET, setup=doc.structure_changed.emit
+    )
+    assert best < SCAN_BUDGET, scans
+    shapes = doc.page_shapes(0)
     assert len(shapes.boxes) == 3000
-    assert min(scans) < SCAN_BUDGET, scans
     points = [QPointF(10 + (k * 7) % 570, 10 + (k * 13) % 800) for k in range(1000)]
-    snaps = []
-    for _ in range(3):
+    results: list = []
+
+    def snaps() -> None:
         fresh = PageShapes(shapes.boxes, shapes.h_segments, shapes.v_segments)  # cold index
-        start = time.perf_counter()
-        results = [snap(fresh, p) for p in points]
-        snaps.append(time.perf_counter() - start)
-    assert min(snaps) < SNAP_BUDGET, snaps
+        results[:] = [snap(fresh, p) for p in points]
+
+    best, times = best_time(snaps, SNAP_BUDGET)
+    assert best < SNAP_BUDGET, times
     assert sum(r.kind is SnapKind.BOX for r in results) > 100
     doc.close()

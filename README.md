@@ -6,12 +6,13 @@ Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stam
 image of a handwritten signature. Milestone 1 is a fast, crisp PDF viewer with page rotation,
 undo/redo and saving; Milestone 2 adds filling of standard PDF forms (AcroForm); Milestone 3
 adds free text and ✓ ✗ ● stamps on flat forms (Word exports, printed PDFs); Milestone 4
-adds signing with an image of a handwritten signature; Milestone 5 (current) adds File ▸
+adds signing with an image of a handwritten signature; Milestone 5 adds File ▸
 Export Copy… (flattened or clean copies), Open Recent, "Open with" registration and a
-portable Windows release.
+portable Windows release; Milestone 6 (current) adds page tools (reorder, delete, insert,
+extract, split) and text selection, copy and highlight/underline/strike-through markups.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
-[docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md) and
-[docs/M5_PLAN.md](docs/M5_PLAN.md).
+[docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md),
+[docs/M5_PLAN.md](docs/M5_PLAN.md) and [docs/M6_PLAN.md](docs/M6_PLAN.md).
 
 ## Install & use (end users)
 
@@ -530,6 +531,77 @@ Run it on copies of real documents (a scanned Cerfa, a form with fields); keep t
 8. **Protected files**: a file with a user password: extracted files ask for the same password;
    an owner-locked file without the assembling permission: the Pages menu is disabled and the
    status bar explains why; a dynamic XFA form: idem.
+
+## Text markup (Milestone 6b)
+
+Select the text of a page, copy it, and highlight, underline or strike it through. The tools
+are in the **Edit** menu and the toolbar:
+
+| Key | Tool / action |
+|---|---|
+| **Shift+T** | Select Text: drag over text to select it (in reading order), double-click a word, triple-click a line, Shift+click or Shift+drag to extend, Esc to clear |
+| **Shift+H** / **Shift+U** / **Shift+S** | Highlight / Underline / Strike Through: drag over text (or double-click a word, triple-click a line) and release: the text is marked |
+| **Ctrl+C** | Edit ▸ Copy Text: copies the selected text, or the text under the selected markup, as plain text |
+| **Delete** | Deletes the selected markup |
+
+- **Markups** are standard PDF highlight, underline and strike-out annotations: Adobe Reader,
+  Edge and Chrome show them, list them in their comments panel and can edit them. Each one
+  is one Undo step.
+- **Colours**: with a markup tool active, the toolbar colour button sets the colour of new
+  markups of that kind (yellow highlight, red underline and strike-through by default; kept
+  between sessions). Click an existing markup (with any markup, text or stamp tool) to select
+  it: its quads are outlined, the colour button recolours it (one Undo step, "Change markup
+  color") and Delete removes it. Markups are never moved or resized; dragging from a markup
+  selects the text under it. The font size box does not apply to markups.
+- **What text is selectable**: the text drawn by the page itself, including the invisible text
+  layer of OCR'd scans. Text boxes, stamps and form field values are not page text. A scanned
+  page without OCR has no text: the status bar says "No selectable text here (scanned
+  page?)."
+- Copying follows the document's security settings: a file whose author forbids copying keeps
+  Copy Text disabled. Highlighting needs the annotation permission, like text boxes.
+- Squiggly underlines made by other programs are shown, selectable, recolourable and deletable,
+  but PDF Editor does not create them.
+
+Known limitations:
+
+- Selection follows the order in which the page draws its text: on some multi-column or
+  generated PDFs a drag may jump between columns. Text cannot be selected across pages.
+- A markup made by another program that is edited (recoloured) keeps its author and comment;
+  deleting it and undoing the deletion re-creates it with PDF Editor's appearance and without
+  its other details (author, creation date, reply popup).
+- Copy Text copies plain text only (no formatting); right-to-left and vertical text are
+  selected in content order.
+- Scanned pages need OCR first (planned for a later milestone).
+
+### Manual text markup checklist (Milestone 6b)
+
+Run it on copies of real documents (a Word export, a scanned and OCR'd PDF); keep the
+originals.
+
+1. **Select and copy**: Shift+T, drag over two lines of a Word-exported PDF, Ctrl+C, paste in
+   Notepad: the text and the line break are right. Double-click a word, triple-click a line,
+   Shift+click further down: the blue selection follows.
+2. **Highlight**: Shift+H, drag over a sentence: it turns yellow when the mouse is released and
+   the title shows `*`; Ctrl+Z removes it, Ctrl+Y brings it back. Double-click a word: it is
+   highlighted after a short moment; a triple-click highlights the whole line once.
+3. **Underline and strike-through**: Shift+U and Shift+S over another sentence spanning two
+   lines: one markup each, red, one line part per line.
+4. **Colours**: with the highlight tool, pick green in the colour button and highlight a word:
+   it is green; restart PDF Editor: the highlight colour is still green. Click an existing
+   underline and pick blue: it turns blue (one Undo step).
+5. **Delete and copy a markup**: click a highlight, Ctrl+C (its text is copied), Delete (it
+   disappears), Ctrl+Z (it is back).
+6. **Rotated and cropped pages**: rotate a page (Ctrl+R) and highlight text on it: the
+   highlight sits on the text; rotate back: it still does.
+7. **Scanned pages**: on a scan without OCR, dragging with the highlight tool shows "No
+   selectable text here (scanned page?)."; on an OCR'd scan, the invisible text can be selected,
+   copied and highlighted (the highlight covers the printed words).
+8. **Other viewers**: save, open the file in Adobe Acrobat Reader, Edge and Chrome: the
+   markups are where they were, in their colours, listed as comments; no repair prompt when
+   closing Adobe Reader. A highlight made in Adobe Reader can be selected, recoloured and
+   deleted in PDF Editor and keeps its author after recolouring.
+9. **Permissions**: an owner-locked file without the annotation or copy permission: the markup
+   tools and Copy Text are disabled, Select Text still works.
 
 ## License
 

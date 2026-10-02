@@ -1609,3 +1609,88 @@ def make_marked_pdf(path: Path) -> Path:
     doc.save(path)
     doc.close()
     return path
+
+
+# -- M6b hardening ------------------------------------------------------------------------
+LONG_TEXT_LINES = 40
+LONG_TEXT_LINE = "Lorem ipsum dolor sit amet, consectetur adipiscing elit sed."  # 60 chars
+
+
+def make_long_text_pdf(path: Path) -> Path:
+    """One Letter page of ``LONG_TEXT_LINES`` lines of ``LONG_TEXT_LINE`` (10 pt, 2 400
+    characters)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=TEXT_PAGE_SIZE[0], height=TEXT_PAGE_SIZE[1])
+    for i in range(LONG_TEXT_LINES):
+        page.insert_text((60, 60 + i * 16), LONG_TEXT_LINE, fontsize=10, fontname="helv")
+    doc.save(path)
+    doc.close()
+    return path
+
+
+MANY_MARKUPS = 200
+
+
+def many_markups_name(n: int) -> str:
+    return f"markup-{n:03d}"
+
+
+def many_markups_rect(n: int) -> Rect4:
+    """Page-space rect of highlight ``n``: 10 columns x 20 rows of 50 x 30 pt cells."""
+    col, row = n % 10, n // 10
+    x0, y0 = 40 + col * 55, 40 + row * 36
+    return (x0, y0, x0 + 50, y0 + 30)
+
+
+def make_many_markups_pdf(path: Path, n: int = MANY_MARKUPS) -> Path:
+    """One Letter page of ``n`` highlights (/NM ``many_markups_name``) on
+    ``many_markups_rect`` cells, each over a word of text."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=TEXT_PAGE_SIZE[0], height=TEXT_PAGE_SIZE[1])
+    for k in range(n):
+        x0, y0, _x1, y1 = many_markups_rect(k)
+        page.insert_text((x0 + 2, y1 - 10), f"w{k:03d}", fontsize=12, fontname="helv")
+    for k in range(n):
+        a = page.add_highlight_annot(quads=[pymupdf.Rect(many_markups_rect(k)).quad])
+        doc.xref_set_key(a.xref, "NM", pymupdf.get_pdf_str(many_markups_name(k)))
+    doc.save(path)
+    doc.close()
+    return path
+
+
+#: /NM -> raw annotation dictionary (PDF user space, Letter page) of the odd markups.
+ODD_MARKUPS: dict[str, str] = {
+    "no_quads": "/Subtype/Highlight/Rect[72 690 200 704]/C[1 1 0]",
+    "partial_quad": "/Subtype/Highlight/Rect[72 690 200 704]/QuadPoints[72 704 200 704 72 690]",
+    "degenerate": "/Subtype/Underline/Rect[72 690 200 704]"
+    "/QuadPoints[100 700 100 700 100 700 100 700]/C[1 0 0]",
+    "huge": "/Subtype/StrikeOut/Rect[0 0 1 1]"
+    "/QuadPoints[-1000000 1000000 1000000 1000000 -1000000 -1000000 1000000 -1000000]",
+    "far": "/Subtype/Squiggly/Rect[0 0 1 1]/QuadPoints[1e30 1e30 2e30 1e30 1e30 0 2e30 0]",
+}
+
+
+def make_odd_markups_pdf(path: Path) -> Path:
+    """One Letter page of ``TEXT_LINES`` text and the ``ODD_MARKUPS`` (no /QuadPoints,
+    an incomplete quad, a zero-size quad, a quad covering ±1e6 pt, a quad at 1e30 pt)
+    plus a normal highlight "ok" over "quick"."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=TEXT_PAGE_SIZE[0], height=TEXT_PAGE_SIZE[1])
+    for text, origin in TEXT_LINES:
+        page.insert_text(origin, text, fontsize=TEXT_FONT_SIZE, fontname="helv")
+    ok = page.add_highlight_annot(quads=[pymupdf.Rect(94, 89, 125, 103).quad])
+    doc.xref_set_key(ok.xref, "NM", pymupdf.get_pdf_str("ok"))
+    del page
+    page_ref = doc.page_xref(0)
+    xrefs = []
+    for name, body in ODD_MARKUPS.items():
+        xref = doc.get_new_xref()
+        doc.update_object(
+            xref, f"<</Type/Annot{body}/F 4/NM{pymupdf.get_pdf_str(name)}/P {page_ref} 0 R>>"
+        )
+        xrefs.append(xref)
+    annots = doc.xref_get_key(page_ref, "Annots")[1].strip()
+    doc.xref_set_key(page_ref, "Annots", annots[:-1] + "".join(f" {x} 0 R" for x in xrefs) + "]")
+    doc.save(path)
+    doc.close()
+    return path

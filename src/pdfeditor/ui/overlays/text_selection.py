@@ -49,9 +49,10 @@ class TextSelection(QObject):
         self._page_id: PageId | None = None
         self._anchor: int | None = None
         self._focus: int | None = None
-        # Text of the range when it was set: a page whose text changed under the range
-        # (M7 edits, a reload of another revision) clears it.
-        self._text = ""
+        # The page text the range was made on: when the page's text is extracted again
+        # (page_changed, reloaded, structure_changed) the range must still cover the
+        # same characters (M7 edits, a reload of another revision), else it is cleared.
+        self._made_on: PageText | None = None
         self.changed.connect(self._repaint)
 
     # -- state -------------------------------------------------------------------------
@@ -130,7 +131,7 @@ class TextSelection(QObject):
         self._page = page
         self._page_id = doc.page_id(page)
         self._anchor, self._focus = a, f
-        self._text = self.text()
+        self._made_on = doc.page_text(page)
         self.changed.emit()
 
     def clear(self) -> None:
@@ -138,7 +139,7 @@ class TextSelection(QObject):
         if self._page is None:
             return
         self._page = self._page_id = self._anchor = self._focus = None
-        self._text = ""
+        self._made_on = None
         self.changed.emit()
 
     # -- document binding --------------------------------------------------------------
@@ -196,19 +197,23 @@ class TextSelection(QObject):
         self.changed.emit()
 
     def _check(self) -> None:
-        """Clear the range if it no longer matches the page's characters."""
+        """Clear the range if it no longer covers the same characters of the page."""
         if self._page is None:
             return
-        doc = self._document
-        pt = self.page_text()
-        count = len(pt.chars) if pt is not None else 0
-        if (
-            doc is None
-            or pt is None
-            or not (0 <= (self._anchor or 0) < count and 0 <= (self._focus or 0) < count)
-            or self.text() != self._text
-        ):
+        pt, old = self.page_text(), self._made_on
+        a, f = self._anchor, self._focus
+        if pt is None or old is None or a is None or f is None:
             self.clear()
+            return
+        if pt is old:
+            return
+        count = len(pt.chars)
+        if not (0 <= a < count and 0 <= f < count) or pt.text_of(
+            pt.chars_between(a, f)
+        ) != old.text_of(old.chars_between(a, f)):
+            self.clear()
+            return
+        self._made_on = pt
 
     # -- painting ----------------------------------------------------------------------
     def paint(self, painter: QPainter) -> None:

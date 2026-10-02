@@ -38,6 +38,7 @@ deleted; LockedContents keeps the text.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import uuid
 from collections.abc import Iterable, Sequence
@@ -80,6 +81,8 @@ MARKUP_SUBTYPES = {
     AnnotKind.SQUIGGLY: pymupdf.PDF_ANNOT_SQUIGGLY,
 }
 _MARKUP_BY_SUBTYPE = {subtype: kind for kind, subtype in MARKUP_SUBTYPES.items()}
+#: Largest coordinate (points) of a usable markup quad (``forms.MAX_COORD`` for widgets).
+MAX_QUAD_COORD = 1e6
 #: Colour of a markup without /C (what MuPDF writes when creating one, T3).
 MARKUP_DEFAULT_COLORS: dict[AnnotKind, tuple[float, float, float]] = {
     AnnotKind.HIGHLIGHT: (1.0, 1.0, 0.0),
@@ -410,12 +413,17 @@ def _stroke_color(annot: pymupdf.Annot, kind: AnnotKind) -> Color:
 
 
 def _page_quads(annot: pymupdf.Annot, page: pymupdf.Page) -> tuple[Quad, ...]:
-    """/QuadPoints of ``annot`` in page space (``vertices`` are unrotated)."""
+    """/QuadPoints of ``annot`` in page space (``vertices`` are unrotated). A quad with a
+    coordinate that is not finite or reaches ``MAX_QUAD_COORD`` is dropped (it would
+    cover every page and catch every click)."""
     matrix = page.rotation_matrix
     points = [pymupdf.Point(v) * matrix for v in (annot.vertices or ())]
     out = []
     for i in range(0, len(points) - 3, 4):
-        ul, ur, ll, lr = (QPointF(p.x, p.y) for p in points[i : i + 4])
+        group = points[i : i + 4]
+        if not all(math.isfinite(v) and abs(v) < MAX_QUAD_COORD for p in group for v in p):
+            continue
+        ul, ur, ll, lr = (QPointF(p.x, p.y) for p in group)
         out.append(Quad(ul, ur, ll, lr))
     return tuple(out)
 
