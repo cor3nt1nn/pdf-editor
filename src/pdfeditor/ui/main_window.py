@@ -646,6 +646,8 @@ class MainWindow(QMainWindow):
         can_assemble = self._can_assemble()
         for act in self._assemble_actions():
             act.setEnabled(can_assemble)
+        # Dragging thumbnails moves pages: only where page operations are allowed.
+        self.thumbnails.setDragEnabled(can_assemble)
         can_extract = self._can_extract()
         self.act_extract_pages.setEnabled(can_extract)
         self.act_split.setEnabled(can_extract)

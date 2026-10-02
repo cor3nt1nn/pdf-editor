@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable, Sequence
 
 from PySide6.QtCore import (
@@ -16,9 +17,10 @@ from PySide6.QtCore import (
     QPoint,
     QSize,
     Qt,
+    QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import QAbstractItemView, QListView, QWidget
 
 from pdfeditor.constants import THUMB_WIDTH_PX
@@ -30,6 +32,13 @@ from pdfeditor.render.service import RenderService
 ModelIndex = QModelIndex | QPersistentModelIndex
 
 PAGES_MIME = "application/x-pdfeditor-pages"
+#: Second format of a page drag: the token of the model it comes from, so that a drop
+#: whose ``source()`` is unknown (synthetic events) is accepted only from this sidebar,
+#: never from another window or process whose rows mean other pages.
+PAGES_SOURCE_MIME = "application/x-pdfeditor-pages-source"
+#: Interval (ms) and step (px) of the scrolling while a drag hovers near an edge.
+AUTOSCROLL_MS = 40
+AUTOSCROLL_STEP = 24
 
 
 def encode_rows(rows: Iterable[int]) -> QByteArray:
@@ -61,6 +70,8 @@ class ThumbnailModel(QAbstractListModel):
         # old_to_new row mapping of the pending structural change (pages_remapped arrives
         # right before structure_changed); the sidebar uses it to keep its selection.
         self.pending_mapping: list[int | None] | None = None
+        #: Identifies the drags of this model (:data:`PAGES_SOURCE_MIME`).
+        self.drag_token = QByteArray(uuid.uuid4().hex.encode("ascii"))
         service.pixmap_ready.connect(self._on_pixmap_ready)
 
     def set_document(self, document: PdfDocument | None) -> None:
@@ -148,6 +159,7 @@ class ThumbnailModel(QAbstractListModel):
     def mimeData(self, indexes: Sequence[ModelIndex]) -> QMimeData:
         data = QMimeData()
         data.setData(PAGES_MIME, encode_rows(i.row() for i in indexes if i.isValid()))
+        data.setData(PAGES_SOURCE_MIME, self.drag_token)
         return data
 
     def dropMimeData(self, *_args) -> bool:
@@ -193,7 +205,14 @@ class ThumbnailSidebar(QListView):
     """Single-column icon list; the current item follows the current page and clicks
     navigate. Ctrl/Shift+click build a multi-selection that survives navigation and
     structural changes; dragging thumbnails, the Delete key and the context menu are
-    reported as requests (the model never moves rows itself)."""
+    reported as requests (the model never moves rows itself).
+
+    Drag and drop is handled here, not by ``QAbstractItemView``: in IconMode Qt 6.11
+    ignores a drag over an item that is not drop-enabled, so a page could never be dropped
+    onto another one, and draws no insertion mark. :meth:`dragMoveEvent` accepts any of
+    our page drags, remembers the insertion row (:meth:`drop_row`), paints a line there
+    and scrolls near the edges (docs/ARCHITECTURE.md Deviation 99).
+    """
 
     page_requested = Signal(int)
     pages_move_requested = Signal(list, int)  # sorted rows, row they go before
@@ -214,8 +233,11 @@ class ThumbnailSidebar(QListView):
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
+        self.setDropIndicatorShown(False)  # painted by paintEvent (IconMode draws none)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        # setMovement(Static) made the viewport refuse drops: drag events then never
+        # reach the view's handlers (they go to the window).
+        self.viewport().setAcceptDrops(True)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumWidth(THUMB_WIDTH_PX + 40)
@@ -229,6 +251,12 @@ class ThumbnailSidebar(QListView):
         self._deferred_current: int | None = None
         model.remap_pending.connect(self._remember_selection)
         model.modelReset.connect(self._restore_selection)
+        # Insertion row of the drag in progress (None: no drag over us).
+        self._drop_target: int | None = None
+        self._drag_pos = QPoint()
+        self._autoscroll = QTimer(self)
+        self._autoscroll.setInterval(AUTOSCROLL_MS)
+        self._autoscroll.timeout.connect(self._autoscroll_step)
 
     @property
     def thumbnail_model(self) -> ThumbnailModel:
@@ -292,20 +320,84 @@ class ThumbnailSidebar(QListView):
             self._syncing = False
 
     def drop_row(self, pos: QPoint) -> int:
-        """Row the dragged pages go before for a drop at viewport position ``pos``."""
+        """Row the dragged pages go before for a drop at viewport position ``pos``: the
+        first row whose centre lies below ``pos`` (only y counts, so a drop in a gap or
+        beside a thumbnail lands between its neighbours), else the end."""
         model = self.model()
-        idx = self.indexAt(pos)
-        if not idx.isValid():
-            count = model.rowCount()
-            if count and pos.y() < self.visualRect(model.index(0, 0)).top():
-                return 0
-            return count
-        rect = self.visualRect(idx)
-        return idx.row() + (1 if pos.y() > rect.center().y() else 0)
+        low, high = 0, model.rowCount()
+        while low < high:  # rows are laid out top to bottom
+            mid = (low + high) // 2
+            if self.visualRect(model.index(mid, 0)).center().y() > pos.y():
+                high = mid
+            else:
+                low = mid + 1
+        return low
+
+    @property
+    def drop_target(self) -> int | None:
+        """Insertion row of the drag hovering over the sidebar (None without one)."""
+        return self._drop_target
+
+    def _accepts(self, event) -> bool:
+        """``event`` carries pages dragged from this sidebar, and dragging is allowed."""
+        mime = event.mimeData()
+        if not self.dragEnabled() or mime is None or not mime.hasFormat(PAGES_MIME):
+            return False
+        if event.source() is self:
+            return True
+        token = mime.data(PAGES_SOURCE_MIME)
+        return event.source() is None and token == self.thumbnail_model.drag_token
+
+    def _set_drop_target(self, row: int | None) -> None:
+        if row != self._drop_target:
+            self._drop_target = row
+            self.viewport().update()
+
+    def _end_drag(self) -> None:
+        self._autoscroll.stop()
+        self._set_drop_target(None)
+
+    def dragEnterEvent(self, event) -> None:
+        self.dragMoveEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if not self._accepts(event):
+            self._end_drag()
+            event.ignore()
+            return
+        self._drag_pos = event.position().toPoint()
+        self._set_drop_target(self.drop_row(self._drag_pos))
+        margin = self.autoScrollMargin()
+        y, height = self._drag_pos.y(), self.viewport().height()
+        if y < margin or y > height - margin:
+            if not self._autoscroll.isActive():
+                self._autoscroll.start()
+        else:
+            self._autoscroll.stop()
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._end_drag()
+        event.accept()
+
+    def _autoscroll_step(self) -> None:
+        bar = self.verticalScrollBar()
+        margin = self.autoScrollMargin()
+        y = self._drag_pos.y()
+        if y < margin:
+            bar.setValue(bar.value() - AUTOSCROLL_STEP)
+        elif y > self.viewport().height() - margin:
+            bar.setValue(bar.value() + AUTOSCROLL_STEP)
+        else:
+            self._autoscroll.stop()
+            return
+        self._set_drop_target(self.drop_row(self._drag_pos))
 
     def dropEvent(self, event) -> None:
+        self._end_drag()
         rows = decode_rows(event.mimeData().data(PAGES_MIME))
-        if not rows or event.source() not in (self, None):
+        if not rows or not self._accepts(event):
             event.ignore()
             return
         target = self.drop_row(event.position().toPoint())
@@ -313,6 +405,33 @@ class ThumbnailSidebar(QListView):
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
         self.pages_move_requested.emit(rows, target)
+
+    def drop_indicator_y(self, row: int) -> int:
+        """Viewport y of the insertion line before ``row`` (``rowCount`` = after the last)."""
+        model = self.model()
+        count = model.rowCount()
+        if count == 0:
+            return 0
+        half = max(1, self.spacing() // 2)
+        if row <= 0:
+            return self.visualRect(model.index(0, 0)).top() - half
+        if row >= count:
+            return self.visualRect(model.index(count - 1, 0)).bottom() + half
+        above = self.visualRect(model.index(row - 1, 0)).bottom()
+        below = self.visualRect(model.index(row, 0)).top()
+        return (above + below) // 2
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._drop_target is None:
+            return
+        y = self.drop_indicator_y(self._drop_target)
+        painter = QPainter(self.viewport())
+        try:
+            painter.setPen(QPen(self.palette().color(QPalette.ColorRole.Highlight), 3))
+            painter.drawLine(4, y, self.viewport().width() - 5, y)
+        finally:
+            painter.end()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Delete and event.modifiers() in (
