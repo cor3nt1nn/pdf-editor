@@ -28,9 +28,11 @@ from pdfeditor.core.document import (
     PageId,
     PdfDocument,
 )
+from pdfeditor.core.fontmatch import SystemFonts
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapshots import SnapshotStore
+from pdfeditor.core.textedit import EditReason, Run, TextEditError, TextEditResult
 
 log = logging.getLogger(__name__)
 
@@ -691,3 +693,67 @@ class DeleteAnnotCommand(_AnnotCommand):
 
     def _undo(self) -> None:
         self.doc.add_annot(spec_from(replace(self.info, page=self.page), image=self.image))
+
+
+# -- page text (M7) ---------------------------------------------------------------
+class ReplaceTextCommand(_ImmediateCommand):
+    """Replace the run ``run`` of page ``page``'s text by ``new_text`` ("Edit page
+    text", one undo step; docs/M7_PLAN.md 1.3).
+
+    The first redo (normally :meth:`apply_now`) runs
+    :meth:`PdfDocument.replace_text_run` and keeps its :class:`TextEditResult` in
+    :attr:`result` (notices for the UI: substitution, extended run, narrowing...). Undo
+    puts the page content of before the edit back
+    (``set_page_content(before, expect=after)``), later redos the content after it
+    (``set_page_content(after, expect=before)``): byte snapshots, so they survive saves
+    that renumber objects. The page is kept by id. When something else changed the
+    page content in between, undo/redo record a :class:`TextEditError` (``STALE``, with a
+    translated message) in :attr:`error` and change nothing. ``fonts`` overrides the
+    installed fonts (tests). The document emits ``page_changed`` itself.
+    """
+
+    def __init__(
+        self,
+        doc: PdfDocument,
+        page: int,
+        run: Run,
+        new_text: str,
+        *,
+        fonts: SystemFonts | None = None,
+    ) -> None:
+        super().__init__(doc, QCoreApplication.translate("Commands", "Edit page text"))
+        self.page_id: PageId = doc.page_id(page)
+        self.run = run
+        self.new_text = new_text
+        self.fonts = fonts
+        # The edit's outcome (None before the first redo).
+        self.result: TextEditResult | None = None
+
+    @property
+    def page(self) -> int:
+        """The edited page's current index."""
+        return self._index(self.page_id, TextEditError)
+
+    def _set(self, data: bytes, expect: bytes) -> None:
+        try:
+            self.doc.set_page_content(self.page, data, expect=expect)
+        except TextEditError as exc:
+            if exc.reason is not EditReason.STALE:
+                raise
+            message = QCoreApplication.translate(
+                "Commands", "The page changed since this edit; it cannot be undone."
+            )
+            raise TextEditError(message, EditReason.STALE) from exc
+
+    def _redo(self) -> None:
+        if self.result is None:
+            self.result = self.doc.replace_text_run(
+                self.page, self.run, self.new_text, fonts=self.fonts
+            )
+        else:
+            self._set(self.result.after, self.result.before)
+
+    def _undo(self) -> None:
+        if self.result is None:
+            raise TextEditError("nothing to undo")
+        self._set(self.result.before, self.result.after)

@@ -22,106 +22,116 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../core/commands.py" line="137"/>
+        <location filename="../core/commands.py" line="139"/>
         <source>Rotate page</source>
         <extracomment>The exception raised by the last ``redo()``/``undo()``, None if it succeeded.</extracomment>
         <translation>la rotation de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="139"/>
+        <location filename="../core/commands.py" line="141"/>
         <source>Rotate pages</source>
         <translation>la rotation des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="231"/>
+        <location filename="../core/commands.py" line="233"/>
         <source>Delete page</source>
         <translation>la suppression de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="233"/>
+        <location filename="../core/commands.py" line="235"/>
         <source>Delete pages</source>
         <translation>la suppression des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="287"/>
+        <location filename="../core/commands.py" line="289"/>
         <source>Move pages</source>
         <translation>le déplacement des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="346"/>
+        <location filename="../core/commands.py" line="348"/>
         <source>Insert blank page</source>
         <translation>l’insertion d’une page vierge</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="368"/>
+        <location filename="../core/commands.py" line="370"/>
         <source>Insert pages</source>
         <translation>l’insertion des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="434"/>
+        <location filename="../core/commands.py" line="436"/>
         <source>Edit form field</source>
         <translation>la modification du champ</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="525"/>
+        <location filename="../core/commands.py" line="527"/>
         <source>Add signature</source>
         <extracomment>The snapshot under its synthetic name, before this command claimed a /NM for it.</extracomment>
         <translation>l’ajout de la signature</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="527"/>
+        <location filename="../core/commands.py" line="529"/>
         <source>Add stamp</source>
         <translation>l’ajout du tampon</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="529"/>
+        <location filename="../core/commands.py" line="531"/>
         <source>Add highlight</source>
         <translation>l’ajout du surlignage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="531"/>
+        <location filename="../core/commands.py" line="533"/>
         <source>Add underline</source>
         <translation>l’ajout du soulignement</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="533"/>
+        <location filename="../core/commands.py" line="535"/>
         <source>Add strike-through</source>
         <translation>l’ajout du texte barré</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="534"/>
+        <location filename="../core/commands.py" line="536"/>
         <source>Add text</source>
         <translation>l’ajout du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="610"/>
+        <location filename="../core/commands.py" line="612"/>
         <source>Change markup color</source>
         <translation>le changement de couleur du marquage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="612"/>
+        <location filename="../core/commands.py" line="614"/>
         <source>Edit text</source>
         <translation>la modification du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="619"/>
+        <location filename="../core/commands.py" line="621"/>
         <source>Move annotation</source>
         <translation>le déplacement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="620"/>
+        <location filename="../core/commands.py" line="622"/>
         <source>Resize annotation</source>
         <translation>le redimensionnement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="621"/>
+        <location filename="../core/commands.py" line="623"/>
         <source>Change text style</source>
         <translation>le changement de style du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="674"/>
+        <location filename="../core/commands.py" line="676"/>
         <source>Delete annotation</source>
         <translation>la suppression de l’annotation</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="724"/>
+        <source>Edit page text</source>
+        <translation>la modification du texte de la page</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="743"/>
+        <source>The page changed since this edit; it cannot be undone.</source>
+        <translation>La page a changé depuis cette modification ; elle ne peut pas être annulée.</translation>
     </message>
 </context>
 <context>
