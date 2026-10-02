@@ -4,17 +4,17 @@
 <context>
     <name>AnnotTools</name>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="88"/>
+        <location filename="../ui/tools/annot_tools.py" line="89"/>
         <source>The annotation could not be updated.</source>
         <translation>L’annotation n’a pas pu être mise à jour.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="92"/>
+        <location filename="../ui/tools/annot_tools.py" line="93"/>
         <source>This is a form field: use the Form tool (F) to fill it. Hold Alt to place text over it anyway.</source>
         <translation>Ceci est un champ de formulaire : utilisez l’outil formulaire (F) pour le remplir. Maintenez Alt pour placer du texte par-dessus malgré tout.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/annot_tools.py" line="99"/>
+        <location filename="../ui/tools/annot_tools.py" line="100"/>
         <source>The image could not be read.</source>
         <translation>L’image n’a pas pu être lue.</translation>
     </message>
@@ -428,18 +428,18 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>DocumentView</name>
     <message>
-        <location filename="../ui/document_view.py" line="199"/>
+        <location filename="../ui/document_view.py" line="203"/>
         <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
         <extracomment>A command failed while the stack ran it: (``&quot;undo&quot;``, ``&quot;redo&quot;`` or ``&quot;push&quot;``, the exception). The undo history is already cleared and the document marked modified (docs/ARCHITECTURE.md Deviation 90).</extracomment>
         <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="207"/>
+        <location filename="../ui/document_view.py" line="211"/>
         <source>Form filling is not permitted by this document’s security settings.</source>
         <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="213"/>
+        <location filename="../ui/document_view.py" line="217"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
     </message>
@@ -1196,6 +1196,15 @@ Redémarrer maintenant ?</translation>
         <location filename="../ui/main_window.py" line="1568"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
+    </message>
+</context>
+<context>
+    <name>MarkupTools</name>
+    <message>
+        <location filename="../ui/tools/markup_tools.py" line="57"/>
+        <source>No selectable text here (scanned page?).</source>
+        <extracomment>Markup kinds the tools create (Squiggly is only read, recoloured and deleted).</extracomment>
+        <translation>Aucun texte sélectionnable ici (page numérisée ?).</translation>
     </message>
 </context>
 <context>

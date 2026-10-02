@@ -40,6 +40,7 @@ from pdfeditor.core.annotations import (
 )
 from pdfeditor.core.commands import AddAnnotCommand, DeleteAnnotCommand, EditAnnotCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
+from pdfeditor.core.settings import MARKUP_COLOR_DEFAULTS
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import Snap, SnapKind
 from pdfeditor.ui.overlays.annot_items import Handle, annot_hit
@@ -619,11 +620,17 @@ class AnnotToolBase(Tool):
         return self.delete(current)
 
     def apply_style(self, font_size: float | None = None, color: Color | None = None) -> None:
-        """New default style; also applied to the open editor or the selection."""
-        if font_size is not None:
-            self.settings.annot_font_size = float(font_size)
-        if color is not None:
-            self.settings.annot_color = QColor.fromRgbF(*color).name()
+        """New default style; also applied to the open editor or the selection.
+
+        A selected text markup only takes the colour, which also becomes the default
+        colour of its kind (``Settings.markup_color``); the font size never applies to it
+        and the text box defaults are left alone (docs/M6_PLAN.md D10)."""
+        current = self.selection.current
+        if self.editor.anchor is None and current is not None and current.is_markup:
+            if color is not None:
+                self.recolor_markup(current, color)
+            return
+        self.store_defaults(font_size, color)
         fs, col = self.style()
         anchor = self.editor.anchor
         if anchor is not None:
@@ -647,6 +654,22 @@ class AnnotToolBase(Tool):
             changes["fit_height"] = True
         if changes:
             self.edit(current, **changes)
+
+    def store_defaults(self, font_size: float | None, color: Color | None) -> None:
+        """Remember the style chosen in the toolbar for new annotations."""
+        if font_size is not None:
+            self.settings.annot_font_size = float(font_size)
+        if color is not None:
+            self.settings.annot_color = QColor.fromRgbF(*color).name()
+
+    def recolor_markup(self, info: AnnotInfo, color: Color) -> bool:
+        """Make ``color`` the default of ``info``'s markup kind (highlight, underline,
+        strike-out) and push a "Change markup color" edit when it differs."""
+        if info.kind.value in MARKUP_COLOR_DEFAULTS:
+            self.settings.set_markup_color(info.kind.value, QColor.fromRgbF(*color).name())
+        if same_color(color, info.color):
+            return False
+        return self.edit(info, color=tuple(color))
 
     def _select(self, info: AnnotInfo) -> None:
         try:
@@ -1033,6 +1056,11 @@ def _aspect(info: AnnotInfo) -> float | None:
     return info.rect.width() / info.rect.height()
 
 
+def same_color(a: Color, b: Color) -> bool:
+    """Equal as 8-bit colours (what the colour dialog and /C round-trips keep)."""
+    return all(round(x * 255) == round(y * 255) for x, y in zip(a, b, strict=True))
+
+
 def _same_rect(a: QRectF, b: QRectF) -> bool:
     return all(abs(x - y) < 1e-6 for x, y in zip(a.getCoords(), b.getCoords(), strict=True))
 
@@ -1044,4 +1072,5 @@ __all__ = [
     "TextTool",
     "form_field_message",
     "resized_rect",
+    "same_color",
 ]

@@ -16,6 +16,7 @@ from pdfeditor.ui.overlays.annot_editor import AnnotTextEditor
 from pdfeditor.ui.overlays.annot_items import AnnotSelection
 from pdfeditor.ui.overlays.field_editor import FieldEditorOverlay
 from pdfeditor.ui.overlays.field_items import FieldLayer
+from pdfeditor.ui.overlays.text_selection import TextSelection
 from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class DocumentView(QWidget):
         # tools, which push the commands).
         self.annot_selection = AnnotSelection(self.page_view, self)
         self.annot_editor = AnnotTextEditor(self.page_view, parent=self)
+        # The selected page text (Select Text and markup tools, Edit > Copy Text).
+        self.text_selection = TextSelection(self.page_view, self)
         self._document: PdfDocument | None = None
 
     @property
@@ -161,6 +164,7 @@ class DocumentView(QWidget):
         self.field_editor.set_document(document)
         self.annot_editor.set_document(document)
         self.annot_selection.set_document(document)  # after the view (PageItems)
+        self.text_selection.set_document(document)
         if old is not None:
             old.close()
         self.undo_stack.setClean()
@@ -244,6 +248,7 @@ class DocumentView(QWidget):
         self.field_editor.close()  # pending edits were resolved by the window
         self.annot_editor.close()
         self.annot_selection.clear()
+        self.text_selection.clear()
         service = self.page_view.service
         service.stop()  # asks the worker to stop; waits up to 1 s
         if self._document is not None:

@@ -6,11 +6,18 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths
+from PySide6.QtGui import QColor
 
 from pdfeditor.constants import APP_ID, ORG_NAME, ZoomMode
 from pdfeditor.core.recent import RECENT_MAX
 
 LANGUAGES = ("en", "fr")
+#: Default colour ("#rrggbb") of new text markups, by markup kind (``AnnotKind`` value).
+MARKUP_COLOR_DEFAULTS = {
+    "highlight": "#ffff00",
+    "underline": "#ff0000",
+    "strikeout": "#ff0000",
+}
 #: Environment variable naming a directory that holds the INI file instead of the
 #: per-user location (``%APPDATA%\PDFEditor\PDFEditor.ini``). Used by the frozen tests.
 SETTINGS_DIR_ENV = "PDFEDITOR_SETTINGS_DIR"
@@ -245,3 +252,40 @@ class Settings:
     @signature_width.setter
     def signature_width(self, value: float) -> None:
         self._s.setValue("annots/signature_width", float(value))
+
+    # -- text markups (M6b) ------------------------------------------------------------
+    def markup_color(self, kind: str) -> str:
+        """Colour ("#rrggbb") of new markups of ``kind`` ("highlight", "underline" or
+        "strikeout"; ``KeyError`` for any other kind)."""
+        default = MARKUP_COLOR_DEFAULTS[str(kind)]
+        value = self._str(f"markup/{kind}_color", default) or default
+        return value if QColor(value).isValid() else default
+
+    def set_markup_color(self, kind: str, value: str) -> None:
+        if str(kind) not in MARKUP_COLOR_DEFAULTS:
+            raise KeyError(kind)
+        self._s.setValue(f"markup/{kind}_color", str(value))
+
+    @property
+    def markup_highlight_color(self) -> str:
+        return self.markup_color("highlight")
+
+    @markup_highlight_color.setter
+    def markup_highlight_color(self, value: str) -> None:
+        self.set_markup_color("highlight", value)
+
+    @property
+    def markup_underline_color(self) -> str:
+        return self.markup_color("underline")
+
+    @markup_underline_color.setter
+    def markup_underline_color(self, value: str) -> None:
+        self.set_markup_color("underline", value)
+
+    @property
+    def markup_strikeout_color(self) -> str:
+        return self.markup_color("strikeout")
+
+    @markup_strikeout_color.setter
+    def markup_strikeout_color(self, value: str) -> None:
+        self.set_markup_color("strikeout", value)
