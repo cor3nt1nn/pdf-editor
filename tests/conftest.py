@@ -25,6 +25,15 @@ def _english_after_test():
 
 
 @pytest.fixture(autouse=True)
+def _no_temp_sweep(monkeypatch):
+    """``app.main()`` sweeps orphaned undo copies from the real temp directory: not in
+    tests (tests of the sweep call ``snapshots.sweep_orphans`` on their own directory)."""
+    from pdfeditor import app
+
+    monkeypatch.setattr(app, "sweep_orphans", lambda *_a, **_k: 0)
+
+
+@pytest.fixture(autouse=True)
 def _private_default_signature_store(tmp_path_factory, monkeypatch):
     """A ``SignatureStore()`` built without a directory (e.g. ``MainWindow(settings)``)
     lives in a fresh temporary directory, never in the user's real store."""

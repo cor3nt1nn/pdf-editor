@@ -1038,6 +1038,8 @@ class MainWindow(QMainWindow):
             )
         if reason == "snapshot":
             return self.tr("The page could not be deleted: no room for the undo copy.")
+        if reason == "insert_copy":
+            return self.tr("The pages could not be inserted: no room for their undo copy.")
         return self.tr("The page operation failed.")
 
     def _run_page_command(self, make) -> _ImmediateCommand | None:
@@ -1055,7 +1057,7 @@ class MainWindow(QMainWindow):
         except PageError as exc:
             log.warning("page operation refused: %s (%s)", exc, exc.reason)
             text = self._page_error_text(exc.reason)
-            if exc.reason in ("snapshot", "failed"):
+            if exc.reason in ("snapshot", "insert_copy", "failed"):
                 dialogs.warn(self, self.tr("Pages"), text, details=str(exc))
             else:
                 self._show_message(text)

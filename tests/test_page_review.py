@@ -507,3 +507,77 @@ def test_open_source_refuses_sources_without_copy_permission(tmp_path, owner_loc
         assert used == "o" and src.page_count == 1
     finally:
         src.close()
+
+
+# -- m6: orphaned undo directories; inserted pages kept in the snapshot store -----------
+def test_sweep_removes_only_orphaned_spill_directories(tmp_path) -> None:
+    import os
+    import time
+
+    from pdfeditor.core import snapshots
+
+    old_unlocked = tmp_path / f"{snapshots.SPILL_PREFIX}old"
+    old_unlocked.mkdir()
+    (old_unlocked / "1.bin").write_bytes(b"x")
+    two_days_ago = time.time() - 2 * 24 * 3600
+    os.utime(old_unlocked, (two_days_ago, two_days_ago))
+    recent_unlocked = tmp_path / f"{snapshots.SPILL_PREFIX}recent"
+    recent_unlocked.mkdir()
+    stale = tmp_path / f"{snapshots.SPILL_PREFIX}crashed"
+    stale.mkdir()
+    (stale / "2.bin").write_bytes(b"y")
+    (tmp_path / f"{stale.name}{snapshots.LOCK_SUFFIX}").write_text("999999999", "ascii")
+    other = tmp_path / "unrelated"
+    other.mkdir()
+    live = SnapshotStore(memory_limit=0, directory=tmp_path)
+    live.put(b"live")
+    spill = live.spill_directory
+    lock = tmp_path / f"{spill.name}{snapshots.LOCK_SUFFIX}"
+    assert lock.read_text("ascii") == str(os.getpid())
+
+    assert snapshots.sweep_orphans(tmp_path) == 2
+    assert not old_unlocked.exists() and not stale.exists()
+    assert not (tmp_path / f"{stale.name}{snapshots.LOCK_SUFFIX}").exists()
+    assert recent_unlocked.exists() and other.exists()
+    assert spill.exists() and lock.exists() and live.get(1) == b"live"
+    live.clear()
+    assert not spill.exists() and not lock.exists()
+    assert snapshots.sweep_orphans(tmp_path / "missing") == 0
+
+
+def test_inserted_pages_live_in_the_snapshot_store(simple_pdf, lo_form_pdf, tmp_path) -> None:
+    import gc
+
+    with pymupdf.open(lo_form_pdf) as src:
+        data = pages.subdocument_bytes(src, [0])
+    doc = PdfDocument.open(simple_pdf)
+    try:
+        doc.snapshots = SnapshotStore(memory_limit=0, directory=tmp_path)
+        stack = QUndoStack()
+        cmd = InsertPagesCommand(doc, data, 1, 1)
+        assert doc.snapshots.on_disk_count == 1 and cmd.data == data
+        cmd.apply_now()
+        stack.push(cmd)
+        stack.undo()
+        stack.redo()
+        assert cmd.error is None and doc.page_count == 4
+        del cmd
+        stack.clear()
+        gc.collect()
+        assert len(doc.snapshots) == 0
+    finally:
+        doc.close()
+
+
+def test_insert_without_room_for_its_copy_is_refused(simple_pdf, lo_form_pdf, tmp_path) -> None:
+    with pymupdf.open(lo_form_pdf) as src:
+        data = pages.subdocument_bytes(src, [0])
+    doc = PdfDocument.open(simple_pdf)
+    try:
+        doc.snapshots = SnapshotStore(memory_limit=0, directory=tmp_path / "missing" / "dir")
+        with pytest.raises(PageError) as info:
+            InsertPagesCommand(doc, data, 1, 1)
+        assert info.value.reason == "insert_copy"
+        assert doc.page_count == 3
+    finally:
+        doc.close()

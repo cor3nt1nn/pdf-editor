@@ -484,9 +484,10 @@ fields included).
 Known limitations:
 
 - Undoing a deletion relies on a complete copy of the document taken when the pages were
-  deleted: copies stay in memory up to 32 MB in all, then in temporary files
-  (`%TEMP%\pdfeditor-undo-…`, removed when the document is closed). A copy that cannot be
-  stored (disk full) cancels the deletion with a message.
+  deleted (inserted pages are kept the same way for redo): copies stay in memory up to 32 MB
+  in all, then in temporary files (`%TEMP%\pdfeditor-undo-…`, removed when the document is
+  closed, or at the next start after a crash). A copy that cannot be stored (disk full)
+  cancels the operation with a message.
 - **Page labels** (`/PageLabels`: "i, ii, iii, 1, 2…") are not adjusted: labels are positional,
   so after deleting, inserting or moving pages they name other pages than before; inserting at
   the start of a document without labels adds none.

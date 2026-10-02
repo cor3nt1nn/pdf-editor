@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from pdfeditor import __version__
 from pdfeditor.constants import APP_ID, ORG_NAME
 from pdfeditor.core.settings import Settings
+from pdfeditor.core.snapshots import sweep_orphans
 from pdfeditor.i18n import LANGUAGES, install_translators, system_lang
 from pdfeditor.paths import LOG_DIR_ENV, LOG_NAME, is_frozen, log_path
 
@@ -127,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(frozen)
     if frozen:
         sys.excepthook = _log_uncaught
+    sweep_orphans()  # undo copies left in %TEMP% by a crashed session
 
     settings = Settings()
     install_translators(app, args.lang or settings.language or system_lang())

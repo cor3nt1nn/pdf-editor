@@ -366,7 +366,13 @@ class InsertPagesCommand(_InsertCommand):
         password: str | None = None,
     ) -> None:
         super().__init__(doc, QCoreApplication.translate("Commands", "Insert pages"), index)
-        self.data = bytes(data)
+        # The pages live in the document's snapshot store (memory budget, then a temp
+        # file) for as long as the command does.
+        self._store = doc.snapshots
+        try:
+            self._data_id, _copy = _keep(self, self._store, bytes(data))
+        except OSError as exc:
+            raise PageError(f"no room for the pages to insert: {exc}", "insert_copy") from exc
         # Undo removes the /AcroForm the inserted fields brought into a form-less document.
         self.had_form = doc.has_acroform
         # ... and the /CO the inserted calculated fields brought into a form without one.
@@ -376,6 +382,15 @@ class InsertPagesCommand(_InsertCommand):
         # New names of the inserted fields that collided (set by the first redo, reused
         # by later ones so that commands pushed after this one find their fields).
         self.field_names: list[str] | None = None
+
+    @property
+    def data(self) -> bytes:
+        """The sub-document to insert (read back from the snapshot store). Raises
+        :class:`PageError` ("snapshot") when it is gone."""
+        try:
+            return self._store.get(self._data_id)
+        except (KeyError, OSError) as exc:
+            raise PageError(f"the pages to insert are gone: {exc}", "snapshot") from exc
 
     def _redo(self) -> None:
         self.page_ids = self.doc.insert_pages(
