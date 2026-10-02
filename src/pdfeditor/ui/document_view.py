@@ -17,6 +17,8 @@ from pdfeditor.ui.overlays.annot_items import AnnotSelection
 from pdfeditor.ui.overlays.field_editor import FieldEditorOverlay
 from pdfeditor.ui.overlays.field_items import FieldLayer
 from pdfeditor.ui.overlays.text_selection import TextSelection
+from pdfeditor.ui.overlays.textedit_editor import TextRunEditor
+from pdfeditor.ui.overlays.textedit_items import TextHover
 from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
@@ -54,6 +56,10 @@ class DocumentView(QWidget):
         self.annot_editor = AnnotTextEditor(self.page_view, parent=self)
         # The selected page text (Select Text and markup tools, Edit > Copy Text).
         self.text_selection = TextSelection(self.page_view, self)
+        # The Edit Page Text tool's hover frames and run editor (M7; the tool pushes a
+        # ReplaceTextCommand for each ``run_committed``).
+        self.text_hover = TextHover(self.page_view, self)
+        self.textedit_editor = TextRunEditor(self.page_view, parent=self)
         self._document: PdfDocument | None = None
 
     @property
@@ -82,7 +88,7 @@ class DocumentView(QWidget):
         self._replace(None)
 
     def commit_pending_edits(self) -> None:
-        """Commit an open field or text box editor, so that ``is_dirty`` and saves
+        """Commit an open field, text box or page text editor, so that ``is_dirty`` and saves
         include its value.
 
         Called before saving, closing or replacing the document (and by ``MainWindow``
@@ -90,6 +96,7 @@ class DocumentView(QWidget):
         """
         self.field_editor.commit()
         self.annot_editor.commit()
+        self.textedit_editor.commit()
 
     def push(self, command: QUndoCommand) -> None:
         """Push ``command`` on the undo stack; **every** command push goes through here.
@@ -147,6 +154,7 @@ class DocumentView(QWidget):
         # document and is dropped (its undo stack is being cleared).
         self.field_editor.close()
         self.annot_editor.close()
+        self.textedit_editor.close()
         self.undo_stack.clear()
         if old is not None:
             # The cleared commands' undo copies of deleted pages (memory, temp files).
@@ -163,8 +171,10 @@ class DocumentView(QWidget):
         self.field_layer.set_document(document)  # after the view: its items need PageItems
         self.field_editor.set_document(document)
         self.annot_editor.set_document(document)
+        self.textedit_editor.set_document(document)
         self.annot_selection.set_document(document)  # after the view (PageItems)
         self.text_selection.set_document(document)
+        self.text_hover.set_document(document)  # after the view (PageItems)
         if old is not None:
             old.close()
         self.undo_stack.setClean()
@@ -247,8 +257,10 @@ class DocumentView(QWidget):
         """Stop background rendering and close the document (application exit)."""
         self.field_editor.close()  # pending edits were resolved by the window
         self.annot_editor.close()
+        self.textedit_editor.close()
         self.annot_selection.clear()
         self.text_selection.clear()
+        self.text_hover.clear()
         service = self.page_view.service
         service.stop()  # asks the worker to stop; waits up to 1 s
         if self._document is not None:
