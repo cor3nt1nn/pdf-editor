@@ -25,7 +25,7 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations, orphans, signature, snapping
+from pdfeditor.core import annotations, orphans, pagetext, signature, snapping
 from pdfeditor.core import pages as page_ops
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.files import same_file
@@ -43,6 +43,7 @@ from pdfeditor.core.forms import (
     widget_kind,
 )
 from pdfeditor.core.geometry import fitz_from_qrect
+from pdfeditor.core.pagetext import PageText
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import PageShapes
 from pdfeditor.core.snapshots import SnapshotStore
@@ -205,6 +206,8 @@ class PdfDocument(QObject):
         self._image_xrefs: dict[str, int] = {}
         # Snapping shapes by page (read without the lock, written under it).
         self._shapes_cache: dict[int, PageShapes] = {}
+        # Selectable text by page (read without the lock, written under it).
+        self._text_cache: dict[int, PageText] = {}
         # Scope of synthetic annotation names: bumped whenever xrefs may change.
         self._load_generation = 0
         self._is_form = False
@@ -1107,6 +1110,32 @@ class PdfDocument(QObject):
 
     def _clear_shapes_cache(self) -> None:
         self._shapes_cache.clear()
+        self._text_cache.clear()
+
+    # -- text ----------------------------------------------------------------
+    def page_text(self, i: int) -> PageText:
+        """Selectable text of page ``i`` in page space; see :mod:`pdfeditor.core.pagetext`.
+
+        Cached per page like :meth:`page_shapes` and dropped with it: on
+        ``page_changed(i)``, ``structure_changed`` (undo of a deletion included),
+        ``reloaded`` and ``close()``. A cache hit never takes the lock; a miss extracts
+        under it. A page whose text cannot be read logs a warning and has
+        ``EMPTY_PAGE_TEXT``.
+        """
+        cached = self._text_cache.get(i)
+        if cached is not None:
+            return cached
+        self._check_index(i)
+        with self.lock:
+            cached = self._text_cache.get(i)
+            if cached is None:
+                try:
+                    cached = pagetext.extract_page_text(self.fitz[i])
+                except Exception:  # MuPDF raises FzError* (not RuntimeError)
+                    log.warning("could not extract the text of page %d", i, exc_info=True)
+                    cached = pagetext.EMPTY_PAGE_TEXT
+                self._text_cache[i] = cached
+        return cached
 
     def _on_reloaded(self) -> None:
         self._widget_cache.clear()
@@ -1336,6 +1365,7 @@ class PdfDocument(QObject):
         self._widget_cache.pop(i, None)
         self._annot_cache.pop(i, None)
         self._shapes_cache.pop(i, None)
+        self._text_cache.pop(i, None)
 
     def _on_structure_changed(self) -> None:
         with self.lock:

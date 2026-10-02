@@ -1435,3 +1435,72 @@ def make_many_images_pdf(
     doc.save(path, garbage=3, deflate=True)
     doc.close()
     return path
+
+
+# -- M6b text layer -------------------------------------------------------------------
+TEXT_PAGE_SIZE = (612.0, 792.0)
+TEXT_CROPBOX: Rect4 = (50.0, 40.0, 562.0, 742.0)
+TEXT_FONT_SIZE = 12.0
+#: (text, baseline origin in unrotated mediabox coordinates) of the horizontal lines.
+TEXT_LINES: tuple[tuple[str, tuple[float, float]], ...] = (
+    ("The quick brown fox jumps over the lazy dog.", (72.0, 100.0)),
+    ("Second line with accents: éàç.", (72.0, 118.0)),
+    ("Paragraph two starts here.", (72.0, 160.0)),
+)
+#: Right column of ``two_columns`` (inserted *before* the left column: content order).
+TEXT_RIGHT_COLUMN = ("Right column first", (330.0, 100.0))
+TEXT_DIAGONAL = "Diagonal"
+TEXT_DIAGONAL_ORIGIN = (150.0, 400.0)
+TEXT_DIAGONAL_ANGLE = 30.0
+TEXT_DIAGONAL_SIZE = 24.0
+TEXT_FREETEXT = "ANNOTATION TEXT"
+TEXT_WIDGET_VALUE = "WIDGET VALUE"
+
+
+def make_text_pdf(
+    path: Path, *, rotate: int = 0, cropbox: bool = False, two_columns: bool = False
+) -> Path:
+    """One Letter page of Helvetica text (``TEXT_LINES``, 12 pt), a 30° ``TEXT_DIAGONAL``
+    line, a FreeText annotation (``TEXT_FREETEXT``) and a text field showing
+    ``TEXT_WIDGET_VALUE`` (neither is page text). ``rotate`` sets /Rotate, ``cropbox``
+    sets ``TEXT_CROPBOX``, ``two_columns`` adds ``TEXT_RIGHT_COLUMN`` first in content
+    order."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=TEXT_PAGE_SIZE[0], height=TEXT_PAGE_SIZE[1])
+    if two_columns:
+        page.insert_text(TEXT_RIGHT_COLUMN[1], TEXT_RIGHT_COLUMN[0], fontsize=TEXT_FONT_SIZE)
+    for text, origin in TEXT_LINES:
+        page.insert_text(origin, text, fontsize=TEXT_FONT_SIZE, fontname="helv")
+    pivot = pymupdf.Point(TEXT_DIAGONAL_ORIGIN)
+    page.insert_text(
+        pivot,
+        TEXT_DIAGONAL,
+        fontsize=TEXT_DIAGONAL_SIZE,
+        morph=(pivot, pymupdf.Matrix(TEXT_DIAGONAL_ANGLE)),
+    )
+    page.add_freetext_annot(pymupdf.Rect(72, 600, 300, 620), TEXT_FREETEXT, fontsize=11)
+    w = pymupdf.Widget()
+    w.field_type = pymupdf.PDF_WIDGET_TYPE_TEXT
+    w.field_name = "value"
+    w.rect = pymupdf.Rect(72, 650, 300, 670)
+    w.field_value = TEXT_WIDGET_VALUE
+    page.add_widget(w)
+    if cropbox:
+        page.set_cropbox(pymupdf.Rect(TEXT_CROPBOX))
+    if rotate:
+        page.set_rotation(rotate)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def make_scanned_pdf(path: Path) -> Path:
+    """One A4 page holding only a grey image (a scan without OCR): no text at all."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4[0], height=A4[1])
+    pix = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, 40, 56), 0)
+    pix.clear_with(200)
+    page.insert_image(page.rect, pixmap=pix, keep_proportion=False)
+    doc.save(path)
+    doc.close()
+    return path
