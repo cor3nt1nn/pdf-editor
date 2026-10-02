@@ -307,6 +307,11 @@ def _set_name(doc: pymupdf.Document, xref: int, name: str) -> None:
     doc.xref_set_key(xref, "NM", pymupdf.get_pdf_str(name))
 
 
+def assign_name(fitz_doc: pymupdf.Document, xref: int, name: str) -> None:
+    """Write ``name`` as the /NM of annotation ``xref``."""
+    _set_name(fitz_doc, xref, name)
+
+
 def _kind(font: str, text: str) -> AnnotKind:
     if font == "ZaDb" and text in STAMP_CENTRE:
         return AnnotKind.STAMP

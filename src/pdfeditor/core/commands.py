@@ -30,6 +30,7 @@ from pdfeditor.core.document import (
 )
 from pdfeditor.core.forms import FieldKind, WidgetInfo
 from pdfeditor.core.signature import ImageData
+from pdfeditor.core.snapshots import SnapshotStore
 
 log = logging.getLogger(__name__)
 
@@ -195,15 +196,26 @@ class RotatePageCommand(RotatePagesCommand):
         return self.new_rotations[self.page_ids[0]]
 
 
+def _keep(command: object, store: SnapshotStore, data: bytes) -> tuple[int, weakref.finalize]:
+    """Put ``data`` in ``store`` for as long as ``command`` lives: (snapshot id, finalizer;
+    call it to discard the copy earlier). Raises OSError (nothing stored)."""
+    sid = store.put(data)
+    finalizer = weakref.finalize(command, store.discard, sid)
+    finalizer.atexit = False
+    return sid, finalizer
+
+
 class DeletePagesCommand(_ImmediateCommand):
     """Delete the pages ``indexes`` (one undo step).
 
-    The first redo stores a whole-document :meth:`PdfDocument.snapshot` in
-    ``doc.snapshots`` before deleting; undo reopens it (:meth:`PdfDocument.restore_snapshot`
-    with the page ids of that moment), so annotations, links, outline and form fields
-    come back exactly. Later redos delete again (the document is then in the same state
-    as at the first redo). Raises :class:`PageError`: "last_page" when every page would
-    go, "snapshot" when the undo copy cannot be stored or read back (nothing deleted).
+    Every redo stores a whole-document :meth:`PdfDocument.snapshot` in ``doc.snapshots``
+    before deleting (replacing the copy of the previous redo); undo reopens it
+    (:meth:`PdfDocument.restore_snapshot` with the page ids of that moment), so
+    annotations, links, outline and form fields come back exactly. A fresh copy per redo
+    keeps what later commands wrote in between (a lazily claimed annotation /NM, a field
+    value) instead of rolling it back on the next undo (docs/ARCHITECTURE.md Deviation
+    91). Raises :class:`PageError`: "last_page" when every page would go, "snapshot" when
+    the undo copy cannot be stored or read back (nothing deleted).
 
     The undo copy lives exactly as long as the command: ``QUndoStack`` deletes commands
     without undoing them (the redo branch dropped by a push after undo, ``clear()``),
@@ -221,9 +233,10 @@ class DeletePagesCommand(_ImmediateCommand):
             text = QCoreApplication.translate("Commands", "Delete pages")
         super().__init__(doc, text)
         self.page_ids: list[PageId] = [doc.page_id(i) for i in pages]
-        # Page ids of the whole document before deleting (set by the first redo).
+        # Page ids of the whole document before deleting (set by each redo).
         self.saved_ids: list[PageId] | None = None
         self.snapshot_id: int | None = None
+        self._copy: weakref.finalize | None = None
 
     def _redo(self) -> None:
         doc = self.doc
@@ -232,31 +245,20 @@ class DeletePagesCommand(_ImmediateCommand):
             raise PageError("page operations are not permitted by this document", "permission")
         if doc.page_count - len(indexes) < 1:
             raise PageError("a document must keep at least one page", "last_page")
-        fresh = self.snapshot_id is None
-        if fresh:
-            ids = doc.page_ids()
-            data = doc.snapshot()
-            try:
-                self.snapshot_id = self._store(data)
-            except OSError as exc:
-                raise PageError(f"no room for the undo copy: {exc}", "snapshot") from exc
-            self.saved_ids = ids
+        ids = doc.page_ids()
+        data = doc.snapshot()
+        try:
+            sid, copy = _keep(self, doc.snapshots, data)
+        except OSError as exc:
+            raise PageError(f"no room for the undo copy: {exc}", "snapshot") from exc
         try:
             doc.delete_pages(indexes)
         except Exception:
-            if fresh and self.snapshot_id is not None:
-                doc.snapshots.discard(self.snapshot_id)
-                self.snapshot_id = self.saved_ids = None
+            copy()  # the previous copy (if any) still matches the document
             raise
-
-    def _store(self, data: bytes) -> int:
-        """Put ``data`` in the document's snapshot store; the copy is discarded when this
-        command is garbage-collected (deleted by the undo stack). Raises OSError."""
-        store = self.doc.snapshots
-        sid = store.put(data)
-        finalizer = weakref.finalize(self, store.discard, sid)
-        finalizer.atexit = False
-        return sid
+        if self._copy is not None:
+            self._copy()
+        self._copy, self.snapshot_id, self.saved_ids = copy, sid, ids
 
     def _undo(self) -> None:
         if self.snapshot_id is None or self.saved_ids is None:
@@ -443,23 +445,33 @@ class SetFieldValueCommand(_ImmediateCommand):
 
 
 # -- annotations -----------------------------------------------------------------
-def _claimed(doc: PdfDocument, info: AnnotInfo) -> AnnotInfo:
-    """``info`` under its lasting /NM (a synthetic name is claimed: the /NM is written
-    now, so undo/redo keep working across saves)."""
-    if not is_synthetic(info.name):
-        return info
-    return replace(info, name=doc.claim_annot_name(info.page, info.name))
-
-
 class _AnnotCommand(_ImmediateCommand):
     """An annotation command: the annotation's page is kept by id (:attr:`page_id`)."""
 
     page_id: PageId
+    #: The snapshot under its synthetic name, before this command claimed a /NM for it.
+    _origin: AnnotInfo | None = None
 
     @property
     def page(self) -> int:
         """The annotation's current page index."""
         return self._index(self.page_id, AnnotError)
+
+    def _claimed(self, info: AnnotInfo) -> AnnotInfo:
+        """``info`` on its current page under its lasting /NM.
+
+        A synthetic name is claimed (the /NM is written now, so undo/redo keep working
+        across saves). If a later redo finds the claimed /NM gone (an undo copy taken
+        before the claim was restored, docs/ARCHITECTURE.md Deviation 91), it is written
+        again on the annotation the pre-claim snapshot describes.
+        """
+        info = replace(info, page=self.page)
+        if is_synthetic(info.name):
+            self._origin = info
+            return replace(info, name=self.doc.claim_annot_name(info.page, info.name))
+        if self._origin is not None:
+            self.doc.reclaim_annot_name(info.page, self._origin, info.name)
+        return info
 
 
 class AddAnnotCommand(_AnnotCommand):
@@ -583,7 +595,7 @@ class EditAnnotCommand(_AnnotCommand):
         return self.info.name
 
     def _redo(self) -> None:
-        self.info = _claimed(self.doc, replace(self.info, page=self.page))
+        self.info = self._claimed(self.info)
         if self.info.kind in MARKUP_KINDS:
             self.doc.update_annot(
                 self.info.page, self.info.name, color=self.new_color, opacity=self.new_opacity
@@ -640,7 +652,7 @@ class DeleteAnnotCommand(_AnnotCommand):
         return self.info.name
 
     def _redo(self) -> None:
-        self.info = _claimed(self.doc, replace(self.info, page=self.page))
+        self.info = self._claimed(self.info)
         image = self.image
         if self.info.kind is AnnotKind.SIGNATURE and image is None:
             image = self.doc.annot_image(self.info.page, self.info.name)

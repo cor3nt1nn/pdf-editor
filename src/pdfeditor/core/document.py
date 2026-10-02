@@ -934,6 +934,35 @@ class PdfDocument(QObject):
         self._annot_cache.pop(page, None)
         return real
 
+    def reclaim_annot_name(self, page: int, origin: AnnotInfo, name: str) -> bool:
+        """Make ``name`` the /NM of the annotation ``origin`` describes again; True if
+        ``name`` is (now) on ``page``.
+
+        ``origin`` is a snapshot under a synthetic name taken before a command claimed
+        ``name`` for it; restoring an undo copy taken before that claim brings the
+        annotation back without the /NM. It is found among the page's annotations still
+        without a lasting name by kind, text and raw /Rect. No signal (the caller's
+        change that follows emits ``page_changed``).
+        """
+        if self.annot(page, name) is not None:
+            return True
+        for info in self.annots(page):
+            if (
+                annotations.is_synthetic(info.name)
+                and info.kind is origin.kind
+                and info.text == origin.text
+                and all(
+                    abs(a - b) <= 0.01
+                    for a, b in zip(info.unrotated_rect, origin.unrotated_rect, strict=True)
+                )
+            ):
+                with self.lock:
+                    annotations.assign_name(self.fitz, info.xref, name)
+                self._annot_cache.pop(page, None)
+                log.info("re-assigned /NM %s to annotation xref %s", name, info.xref)
+                return True
+        return False
+
     def _check_annotate(self) -> None:
         if not self._can_annotate:
             raise AnnotError("annotations are not permitted by this document")
