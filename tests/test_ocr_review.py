@@ -183,3 +183,73 @@ def test_layer_splits_ligatures() -> None:
     assert data[0].search_for("effort")
     data.close()
     doc.close()
+
+
+# -- m1: a closed scan notice stays closed -----------------------------------------------------
+@pytest.fixture
+def window(qtbot, settings, monkeypatch):
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    from pdfeditor.ui import dialogs
+    from pdfeditor.ui.main_window import MainWindow
+
+    monkeypatch.setattr(dialogs, "warn", lambda *a, **k: None)
+    monkeypatch.setattr(
+        dialogs, "confirm_save_changes", lambda p, n: QMessageBox.StandardButton.Discard
+    )
+
+    def this_page_only(dialog):
+        dialog.page_radio.setChecked(True)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(OcrDialog, "exec", this_page_only)
+    w = MainWindow(settings)
+    qtbot.addWidget(w)
+    w.resize(900, 700)
+    w.show()
+    qtbot.waitExposed(w)
+    yield w
+    w.undo_stack.setClean()
+    w.close()
+
+
+def _three_scans(scan_clean, tmp_path):
+    path = tmp_path / "three.pdf"
+    with pymupdf.open(str(scan_clean.path)) as src:
+        out = pymupdf.open()
+        for _ in range(3):
+            out.insert_pdf(src)
+        out.save(str(path))
+    return path
+
+
+def _recognise_one_page(qtbot, window) -> None:
+    service = window.document_view.ocr_service
+    with qtbot.waitSignal(service.finished, timeout=60_000):
+        assert window.recognise_text()
+        assert not window.document_view.banner.isVisible()
+
+
+def test_dismissed_scan_notice_stays_closed(qtbot, window, scan_clean, tmp_path) -> None:
+    window.open_file(str(_three_scans(scan_clean, tmp_path)))
+    banner = window.document_view.banner
+    assert banner.isVisible() and banner.text.startswith("This document looks scanned: 3 of 3")
+    banner.close_button.click()
+    assert not banner.isVisible()
+    _recognise_one_page(qtbot, window)  # 2 pages still without text: a new count
+    assert window.document_view.document.has_ocr_layer(0)
+    assert not banner.isVisible()
+    window.document_view.refresh_banner()
+    assert not banner.isVisible()
+    # Another document: the notice is back.
+    window.open_file(str(copy_to(scan_clean, tmp_path)))
+    assert banner.isVisible()
+
+
+def test_scan_notice_hidden_during_a_run(qtbot, window, scan_clean, tmp_path) -> None:
+    window.open_file(str(_three_scans(scan_clean, tmp_path)))
+    banner = window.document_view.banner
+    assert banner.isVisible()
+    _recognise_one_page(qtbot, window)
+    assert banner.isVisible()
+    assert banner.text == "This document looks scanned: 2 of 3 pages have no selectable text."

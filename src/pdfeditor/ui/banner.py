@@ -42,6 +42,8 @@ class InfoBanner(QFrame):
 
     #: The message's action button was clicked.
     action_triggered = Signal()
+    #: The user closed the banner (its close button).
+    dismissed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -62,7 +64,7 @@ class InfoBanner(QFrame):
         )
         self.close_button.setToolTip(self.tr("Close"))
         self.close_button.setAccessibleName(self.tr("Close"))
-        self.close_button.clicked.connect(self.hide)
+        self.close_button.clicked.connect(self._on_close)
 
         self.action_button = QPushButton(self)
         self.action_button.hide()
@@ -102,6 +104,10 @@ class InfoBanner(QFrame):
         self.action_button.setVisible(bool(action_text))
         self._apply_style()
         self.show()
+
+    def _on_close(self) -> None:
+        self.hide()
+        self.dismissed.emit()
 
     def clear(self) -> None:
         """Hide the banner and forget its message."""

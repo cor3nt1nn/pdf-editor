@@ -72,7 +72,14 @@ class DocumentView(QWidget):
         self.ocr_service.finished.connect(self._refresh_banner)
         self.ocr_service.failed.connect(self._refresh_banner)
         self.banner.action_triggered.connect(self.recognise_requested)
+        self.banner.dismissed.connect(self._on_banner_dismissed)
         self._document: PdfDocument | None = None
+        # The scan notice (M8): its last value, whether the user closed it for this
+        # document (it then never comes back, whatever its page count becomes) and
+        # whether it is only hidden while a recognition runs.
+        self._scan_notice: tuple[str, str, str] | None = None
+        self._scan_dismissed = False
+        self._scan_hidden = False
 
     @property
     def document(self) -> PdfDocument | None:
@@ -199,6 +206,9 @@ class DocumentView(QWidget):
             old.close()
         self.undo_stack.setClean()
         self.banner.clear()  # a closed banner reappears for the next document
+        self._scan_notice = None
+        self._scan_dismissed = False
+        self._scan_hidden = False
         self._refresh_banner()
         self.document_changed.emit()
 
@@ -253,8 +263,9 @@ class DocumentView(QWidget):
     def _scan_message(self, doc: PdfDocument) -> tuple[str, str, str] | None:
         """The "looks scanned" notice with its "Recognise text…" button (M8): some of the
         first :data:`SCAN_BANNER_PAGES` pages are scans without text that were not
-        recognised yet (not while a recognition runs)."""
-        if self.ocr_service.is_running:
+        recognised yet, and the user did not close the notice for this document (it is
+        hidden, not dropped, while a recognition runs: see :meth:`_refresh_banner`)."""
+        if self._scan_dismissed:
             return None
         examined = min(doc.page_count, SCAN_BANNER_PAGES)
         pending = [i for i in doc.scanned_pages(limit=examined) if not doc.has_page_ocr(i)]
@@ -263,7 +274,8 @@ class DocumentView(QWidget):
         text = self.tr(
             "This document looks scanned: {n} of {m} pages have no selectable text."
         ).format(n=len(pending), m=examined)
-        return (text, "info", self.tr("Recognise text…"))
+        self._scan_notice = (text, "info", self.tr("Recognise text…"))
+        return self._scan_notice
 
     def refresh_banner(self) -> None:
         """Re-evaluate the banner (after a text recognition, for instance)."""
@@ -275,8 +287,24 @@ class DocumentView(QWidget):
         message = self.banner_message()
         if message is None:
             self.banner.clear()
-        elif tuple(message[:2]) != self.banner.message:
+            self._scan_hidden = False
+            return
+        if message == self._scan_notice and self.ocr_service.is_running:
+            # Not while recognising (the progress dialog says it all), but not forgotten.
+            if tuple(message[:2]) != self.banner.message:
+                self.banner.show_message(*message)
+            self.banner.hide()
+            self._scan_hidden = True
+            return
+        if tuple(message[:2]) != self.banner.message or self._scan_hidden:
             self.banner.show_message(*message)
+        self._scan_hidden = False
+
+    def _on_banner_dismissed(self) -> None:
+        """The user closed the banner: the scan notice stays closed for this document."""
+        notice = self._scan_notice
+        if notice is not None and self.banner.message == notice[:2]:
+            self._scan_dismissed = True
 
     @staticmethod
     def _prepare_save(document: PdfDocument) -> None:
