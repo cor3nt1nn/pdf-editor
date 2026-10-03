@@ -330,7 +330,10 @@ def test_refusal_reason_notices(qtbot, edit_window, monkeypatch) -> None:
     assert textedit_tool.reason_notice(EditReason.TOO_COMPLEX) == (
         "This page is too complex to edit (content larger than 20 MB)."
     )
-    assert textedit_tool.reason_notice(EditReason.DIRECTION) == "The text could not be changed."
+    assert textedit_tool.reason_notice(EditReason.DIRECTION) == (
+        "Right-to-left and vertical text cannot be edited."
+    )
+    assert textedit_tool.reason_notice(EditReason.FAILED) == "The text could not be changed."
     assert textedit_tool.reason_notice(EditReason.INVISIBLE).startswith("This text is an")
 
     def refuse(*_a, **_k):

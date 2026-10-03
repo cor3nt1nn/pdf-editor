@@ -33,6 +33,7 @@ from pdfeditor.core.commands import ReplaceTextCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
 from pdfeditor.core.pagetext import CharRef, PageText
 from pdfeditor.core.textedit import MAX_CONTENT_MB, EditReason, Run, TextEditError, TextEditResult
+from pdfeditor.ui.overlays.textedit_editor import TextRunAnchor
 from pdfeditor.ui.overlays.textedit_items import clamp_to_span, editable, selection_run, span_run
 from pdfeditor.ui.tools.base import Tool, ToolEvent, event_button, viewport_pos
 from pdfeditor.ui.tools.markup_tools import _TextDrag, _TextSelecting
@@ -83,6 +84,44 @@ def one_style_notice() -> str:
     )
 
 
+def xobject_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool",
+        "This text belongs to an embedded graphic (form XObject); it cannot be edited here.",
+    )
+
+
+def direction_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool", "Right-to-left and vertical text cannot be edited."
+    )
+
+
+def duplicate_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool",
+        "Part of this text is drawn twice (simulated bold); select the whole doubled text.",
+    )
+
+
+def no_font_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool", "No installed font can show these characters."
+    )
+
+
+def stale_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool", "The text changed while it was being edited; the edit was not applied."
+    )
+
+
+def invalid_text_notice() -> str:
+    return QCoreApplication.translate(
+        "TextEditTool", "Control and invisible formatting characters cannot be used in page text."
+    )
+
+
 def full_save_notice() -> str:
     return QCoreApplication.translate(
         "TextEditTool", "After editing page text, the next save rewrites the whole file."
@@ -101,7 +140,23 @@ def reason_notice(reason: EditReason) -> str:
         return too_complex_notice()
     if reason is EditReason.MULTI_SPAN:
         return one_style_notice()
+    if reason is EditReason.XOBJECT:
+        return xobject_notice()
+    if reason is EditReason.DIRECTION:
+        return direction_notice()
+    if reason is EditReason.DUPLICATE:
+        return duplicate_notice()
+    if reason is EditReason.NO_FONT:
+        return no_font_notice()
+    if reason is EditReason.STALE:
+        return stale_notice()
+    if reason is EditReason.INVALID_TEXT:
+        return invalid_text_notice()
     return failed_notice()
+
+
+#: Refusals after which the editor is not reopened with the typed text.
+_NO_REOPEN = (EditReason.PERMISSION, EditReason.STALE)
 
 
 def result_notices(result: TextEditResult) -> list[str]:
@@ -156,9 +211,11 @@ class TextEditTool(_TextSelecting, Tool):
         self._had_tracking = False
         # The document already told that the next save rewrites the whole file.
         self._full_save_noticed: PdfDocument | None = None
+        # The editor is being committed by deactivate() (no reopening after a refusal).
+        self._leaving = False
         document_view.document_changed.connect(self._reset)
         document_view.document_changed.connect(self._forget_document)
-        document_view.textedit_editor.run_committed.connect(self.apply_edit)
+        document_view.textedit_editor.committed.connect(self._on_committed)
 
     @property
     def cursor(self) -> QCursor:
@@ -178,7 +235,11 @@ class TextEditTool(_TextSelecting, Tool):
         self.document_view.annot_selection.clear()
 
     def deactivate(self) -> None:
-        self.document_view.textedit_editor.commit()
+        self._leaving = True
+        try:
+            self.document_view.textedit_editor.commit()
+        finally:
+            self._leaving = False
         self._reset()
         self.text_selection.clear()
         self.document_view.text_hover.clear()
@@ -390,9 +451,21 @@ class TextEditTool(_TextSelecting, Tool):
             return False
         return True
 
-    def apply_edit(self, page: int, run: Run, text: str) -> ReplaceTextCommand | None:
-        """Replace ``run`` of ``page`` by ``text`` (the editor's ``run_committed``): one
-        :class:`ReplaceTextCommand` pushed, notices emitted. None when refused."""
+    def _on_committed(self, anchor: object, text: object) -> None:
+        """The run editor's ``committed``: apply the edit checked against the anchor."""
+        if isinstance(anchor, TextRunAnchor):
+            self.apply_edit(anchor.page, anchor.run, str(text), anchor=anchor)
+
+    def apply_edit(
+        self, page: int, run: Run, text: str, *, anchor: TextRunAnchor | None = None
+    ) -> ReplaceTextCommand | None:
+        """Replace ``run`` of ``page`` by ``text`` (the editor's commit): one
+        :class:`ReplaceTextCommand` pushed, notices emitted. None when refused.
+
+        With the editor's ``anchor``, the run must still hold the text the editor was
+        opened on (``anchor.old_text``; else the stale notice and nothing changes), and a
+        refused edit reopens the editor with the typed text (not after a permission or
+        stale refusal, nor while the tool is being left)."""
         dv = self.document_view
         doc = self._doc()
         if doc is None:
@@ -400,16 +473,21 @@ class TextEditTool(_TextSelecting, Tool):
         if not doc.can_modify:
             self._notify(permission_notice())
             return None
+        expect = anchor.old_text if anchor is not None else None
         try:
-            cmd = ReplaceTextCommand(doc, page, run, text, fonts=self.fonts)
+            cmd = ReplaceTextCommand(doc, page, run, text, fonts=self.fonts, expect_text=expect)
             cmd.apply_now()
         except TextEditError as exc:
             log.info("page text edit refused (%s): %s", exc.reason, exc)
             self._notify(reason_notice(exc.reason))
+            if anchor is not None and exc.reason not in _NO_REOPEN:
+                self._reopen(anchor, text)
             return None
         except (DocumentError, ValueError, IndexError) as exc:
             log.warning("page text edit failed: %s", exc)
             self._notify(failed_notice())
+            if anchor is not None and isinstance(exc, ValueError):
+                self._reopen(anchor, text)
             return None
         dv.push(cmd)
         self.text_selection.clear()
@@ -420,16 +498,36 @@ class TextEditTool(_TextSelecting, Tool):
         self._notify(*notices)
         return cmd
 
+    def _reopen(self, anchor: TextRunAnchor, typed: str) -> None:
+        """Open the editor again over ``anchor``'s run with ``typed`` (after a refusal),
+        when the tool is still active on that document and page."""
+        editor = self.document_view.textedit_editor
+        doc = self._doc()
+        if self._leaving or self.view is None or editor.is_open or doc is None:
+            return
+        if doc.page_index(anchor.page_id) != anchor.page:
+            return
+        try:
+            editor.open(anchor.page, anchor.run, typed=typed)
+        except ValueError as exc:
+            log.info("cannot reopen the page text editor: %s", exc)
+
 
 __all__ = [
     "TextEditTool",
+    "direction_notice",
+    "duplicate_notice",
     "failed_notice",
     "full_save_notice",
+    "invalid_text_notice",
+    "no_font_notice",
     "no_text_notice",
     "ocr_notice",
     "one_style_notice",
     "permission_notice",
     "reason_notice",
     "result_notices",
+    "stale_notice",
     "too_complex_notice",
+    "xobject_notice",
 ]

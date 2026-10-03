@@ -1228,11 +1228,18 @@ class PdfDocument(QObject):
 
     # -- page text editing (M7) ----------------------------------------------
     def replace_text_run(
-        self, page: int, run: Run, text: str, *, fonts: SystemFonts | None = None
+        self,
+        page: int,
+        run: Run,
+        text: str,
+        *,
+        fonts: SystemFonts | None = None,
+        expect_text: str | None = None,
     ) -> TextEditResult:
         """Replace ``run`` (chars of :meth:`page_text` ``page``) by ``text`` in the page
         content; see :func:`pdfeditor.core.textedit.replace_run`. ``fonts`` overrides the
-        installed fonts (tests). Emits ``page_changed`` (text, shapes and annotation
+        installed fonts (tests); ``expect_text`` guards against a stale run (``STALE``
+        when the run's text differs). Emits ``page_changed`` (text, shapes and annotation
         caches dropped). The next save is a full one (MuPDF's redaction flag).
 
         Raises :class:`~pdfeditor.core.textedit.TextEditError` with a reason
@@ -1249,7 +1256,9 @@ class PdfDocument(QObject):
         with self.lock:
             page_text = self.page_text(page)
             try:
-                result = textedit.replace_run(self.fitz, page, page_text, run, text, fonts=fonts)
+                result = textedit.replace_run(
+                    self.fitz, page, page_text, run, text, fonts=fonts, expect_text=expect_text
+                )
             except (textedit.TextEditError, ValueError):
                 raise
             except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)

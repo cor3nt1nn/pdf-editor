@@ -709,7 +709,9 @@ class ReplaceTextCommand(_ImmediateCommand):
     that renumber objects. The page is kept by id. When something else changed the
     page content in between, undo/redo record a :class:`TextEditError` (``STALE``, with a
     translated message) in :attr:`error` and change nothing. ``fonts`` overrides the
-    installed fonts (tests). The document emits ``page_changed`` itself.
+    installed fonts (tests). ``expect_text`` is the run's text the editor was opened on:
+    the first redo raises ``STALE`` when the run holds another text. The document emits
+    ``page_changed`` itself.
     """
 
     def __init__(
@@ -720,12 +722,14 @@ class ReplaceTextCommand(_ImmediateCommand):
         new_text: str,
         *,
         fonts: SystemFonts | None = None,
+        expect_text: str | None = None,
     ) -> None:
         super().__init__(doc, QCoreApplication.translate("Commands", "Edit page text"))
         self.page_id: PageId = doc.page_id(page)
         self.run = run
         self.new_text = new_text
         self.fonts = fonts
+        self.expect_text = expect_text
         # The edit's outcome (None before the first redo).
         self.result: TextEditResult | None = None
 
@@ -748,7 +752,7 @@ class ReplaceTextCommand(_ImmediateCommand):
     def _redo(self) -> None:
         if self.result is None:
             self.result = self.doc.replace_text_run(
-                self.page, self.run, self.new_text, fonts=self.fonts
+                self.page, self.run, self.new_text, fonts=self.fonts, expect_text=self.expect_text
             )
         else:
             self._set(self.result.after, self.result.before)

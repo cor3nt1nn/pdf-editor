@@ -95,6 +95,9 @@ _REDACT_KW = {
 #: pagetext span flags (PyMuPDF TEXT_FONT_*).
 _FLAG_ITALIC, _FLAG_SERIF, _FLAG_MONO, _FLAG_BOLD = 2, 4, 8, 16
 _RTL_CLASSES = ("R", "AL")
+#: Unicode categories refused in a new text (control, format, surrogate, line and
+#: paragraph separators).
+_INVALID_CATEGORIES = ("Cc", "Cf", "Cs", "Zl", "Zp")
 
 
 class EditReason(enum.StrEnum):
@@ -121,6 +124,8 @@ class EditReason(enum.StrEnum):
     #: The page content changed since the snapshot (undo guard), or the run does not
     #: match the page's text any more.
     STALE = "stale"
+    #: The new text holds control or format characters (NUL, U+200B, U+FEFF...).
+    INVALID_TEXT = "invalid_text"
     #: Anything else (MuPDF error, glyphs that could not be removed...).
     FAILED = "failed"
 
@@ -836,13 +841,25 @@ def replace_run(
     new_text: str,
     *,
     fonts: SystemFonts | None = None,
+    expect_text: str | None = None,
 ) -> TextEditResult:
     """Replace ``run`` of page ``page_index`` (whose current text is ``page_text``) by
     ``new_text`` ("" removes it). Caller holds the lock. Raises :class:`TextEditError`
-    (the page is left as it was) or ``ValueError`` for a multi-line ``new_text``."""
+    (the page is left as it was) or ``ValueError`` for a multi-line ``new_text``.
+
+    ``expect_text`` is the run's text the caller saw (the run editor's): when the run
+    holds another text now, ``EditReason.STALE``. Control, format and surrogate
+    characters in ``new_text`` are refused (``EditReason.INVALID_TEXT``)."""
     if "\n" in new_text or "\r" in new_text:
         raise ValueError("the new text must be a single line")
+    invalid = [ch for ch in new_text if unicodedata.category(ch) in _INVALID_CATEGORIES]
+    if invalid:
+        raise TextEditError(
+            f"control or format characters {''.join(invalid)!r}", EditReason.INVALID_TEXT
+        )
     target = _resolve(page_text, run)
+    if expect_text is not None and run.text(page_text) != expect_text:
+        raise TextEditError("the run's text changed", EditReason.STALE)
     _check_editable(page_text, target, new_text)
     copies, twins = _twins(page_text, target.indexes)
     page = doc[page_index]

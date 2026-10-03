@@ -335,3 +335,35 @@ def test_overflowing_word_can_be_edited_again(tmp_path: Path, fonts: SystemFonts
     stack.redo()
     assert cmd.error is None and "Paul" in _norm(doc.page_text(0).text)
     doc.close()
+
+
+# -- 11. control and format characters are refused ------------------------------------------
+@pytest.mark.parametrize("bad", ["Pa\x00ul", "a\x07b", "​", "﻿", "Pa ul", "\tx"])
+def test_control_and_format_characters_refused(
+    tmp_path: Path, fonts: SystemFonts, qapp, bad: str
+) -> None:
+    from pdfeditor.core.textedit import EditReason, TextEditError
+
+    doc = PdfDocument.open(make_text_edit_pdf(tmp_path / "w.pdf"))
+    with doc.lock:
+        before = doc.fitz[0].read_contents()
+    with pytest.raises((TextEditError, ValueError)) as info:
+        doc.replace_text_run(0, find_run(doc.page_text(0), "Jean"), bad, fonts=fonts)
+    if isinstance(info.value, TextEditError):
+        assert info.value.reason is EditReason.INVALID_TEXT
+    with doc.lock:
+        assert doc.fitz[0].read_contents() == before
+    doc.close()
+
+
+def test_stale_expect_text(tmp_path: Path, fonts: SystemFonts, qapp) -> None:
+    from pdfeditor.core.textedit import EditReason, TextEditError
+
+    doc = PdfDocument.open(make_text_edit_pdf(tmp_path / "w.pdf"))
+    run = find_run(doc.page_text(0), "Jean")
+    with pytest.raises(TextEditError) as info:
+        doc.replace_text_run(0, run, "Paul", fonts=fonts, expect_text="Jeanne")
+    assert info.value.reason is EditReason.STALE
+    doc.replace_text_run(0, run, "Paul", fonts=fonts, expect_text="Jean")
+    assert "Paul" in _norm(doc.page_text(0).text)
+    doc.close()

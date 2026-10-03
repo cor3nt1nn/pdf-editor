@@ -124,12 +124,12 @@
         <translation>la suppression de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="724"/>
+        <location filename="../core/commands.py" line="727"/>
         <source>Edit page text</source>
         <translation>la modification du texte de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="743"/>
+        <location filename="../core/commands.py" line="747"/>
         <source>The page changed since this edit; it cannot be undone.</source>
         <translation>La page a changé depuis cette modification ; elle ne peut pas être annulée.</translation>
     </message>
@@ -468,18 +468,18 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>DocumentView</name>
     <message>
-        <location filename="../ui/document_view.py" line="213"/>
+        <location filename="../ui/document_view.py" line="218"/>
         <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
         <extracomment>A command failed while the stack ran it: (``&quot;undo&quot;``, ``&quot;redo&quot;`` or ``&quot;push&quot;``, the exception). The undo history is already cleared and the document marked modified (docs/ARCHITECTURE.md Deviation 90).</extracomment>
         <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="221"/>
+        <location filename="../ui/document_view.py" line="226"/>
         <source>Form filling is not permitted by this document’s security settings.</source>
         <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="227"/>
+        <location filename="../ui/document_view.py" line="232"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
     </message>
@@ -1327,9 +1327,9 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>MarkupTools</name>
     <message>
-        <location filename="../ui/tools/markup_tools.py" line="57"/>
+        <location filename="../ui/tools/markup_tools.py" line="75"/>
         <source>No selectable text here (scanned page?).</source>
-        <extracomment>Markup kinds the tools create (Squiggly is only read, recoloured and deleted).</extracomment>
+        <extracomment>Markup kinds the tools create (Squiggly is only read, recoloured and deleted). Reach of a click on text (viewport pixels; ≈ ``pagetext.HIT_TOLERANCE`` = 6 pt at 100 %): divided by the view scale, like ``annot_tools.HIT_TOLERANCE_PX``. Latin ligature code points (U+FB00–U+FB06) → their letters, for copied text only (the page text model keeps one char per glyph: M7 needs it).</extracomment>
         <translation>Aucun texte sélectionnable ici (page numérisée ?).</translation>
     </message>
 </context>
@@ -1532,57 +1532,88 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>TextEditTool</name>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="50"/>
+        <location filename="../ui/tools/textedit_tool.py" line="51"/>
         <source>No editable text here (scanned image or outlined text).</source>
         <translation>Aucun texte modifiable ici (image numérisée ou texte vectorisé).</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="56"/>
+        <location filename="../ui/tools/textedit_tool.py" line="57"/>
         <source>This text is an invisible OCR layer over an image; it cannot be edited here.</source>
         <translation>Ce texte est une couche OCR invisible sur une image ; il ne peut pas être modifié ici.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="63"/>
+        <location filename="../ui/tools/textedit_tool.py" line="64"/>
         <source>The text could not be changed.</source>
         <translation>Le texte n’a pas pu être modifié.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="67"/>
+        <location filename="../ui/tools/textedit_tool.py" line="68"/>
         <source>Editing page text is not permitted by this document’s security settings.</source>
         <translation>La modification du texte n’est pas autorisée par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="74"/>
+        <location filename="../ui/tools/textedit_tool.py" line="75"/>
         <source>This page is too complex to edit (content larger than {size} MB).</source>
         <translation>Cette page est trop complexe pour être modifiée (contenu supérieur à {size} Mo).</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="80"/>
+        <location filename="../ui/tools/textedit_tool.py" line="81"/>
         <source>Only text in a single style can be edited at once; the selection was reduced.</source>
         <translation>Seul un texte d’un même style peut être modifié à la fois ; la sélection a été réduite.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="87"/>
+        <location filename="../ui/tools/textedit_tool.py" line="88"/>
+        <source>This text belongs to an embedded graphic (form XObject); it cannot be edited here.</source>
+        <translation>Ce texte fait partie d’un graphisme incorporé (XObject de formulaire) ; il ne peut pas être modifié ici.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="95"/>
+        <source>Right-to-left and vertical text cannot be edited.</source>
+        <translation>Le texte de droite à gauche et le texte vertical ne peuvent pas être modifiés.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="101"/>
+        <source>Part of this text is drawn twice (simulated bold); select the whole doubled text.</source>
+        <translation>Une partie de ce texte est dessinée deux fois (gras simulé) ; sélectionnez tout le texte doublé.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="108"/>
+        <source>No installed font can show these characters.</source>
+        <translation>Aucune police installée ne peut afficher ces caractères.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="114"/>
+        <source>The text changed while it was being edited; the edit was not applied.</source>
+        <translation>Le texte a changé pendant sa modification ; la modification n’a pas été appliquée.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="120"/>
+        <source>Control and invisible formatting characters cannot be used in page text.</source>
+        <translation>Les caractères de contrôle et de mise en forme invisibles ne peuvent pas être utilisés dans le texte de la page.</translation>
+    </message>
+    <message>
+        <location filename="../ui/tools/textedit_tool.py" line="126"/>
         <source>After editing page text, the next save rewrites the whole file.</source>
         <translation>Après une modification du texte, le prochain enregistrement réécrit tout le fichier.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="112"/>
+        <location filename="../ui/tools/textedit_tool.py" line="167"/>
         <source>Replaced with {family}: the document’s font lacks some of these characters.</source>
+        <extracomment>Refusals after which the editor is not reopened with the typed text.</extracomment>
         <translation>Remplacé par {family} : la police du document ne contient pas certains de ces caractères.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="119"/>
+        <location filename="../ui/tools/textedit_tool.py" line="174"/>
         <source>Neighbouring characters were included in the edit: “{text}”</source>
         <translation>Des caractères voisins ont été inclus dans la modification : « {text} »</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="125"/>
+        <location filename="../ui/tools/textedit_tool.py" line="180"/>
         <source>The new text is wider than the original and overflows.</source>
         <translation>Le nouveau texte, plus large que l’original, déborde.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="131"/>
+        <location filename="../ui/tools/textedit_tool.py" line="186"/>
         <source>The new text is wider than the original and was narrowed to fit.</source>
         <translation>Le nouveau texte, plus large que l’original, a été resserré.</translation>
     </message>
