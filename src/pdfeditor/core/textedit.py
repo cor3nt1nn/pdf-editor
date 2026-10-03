@@ -379,7 +379,7 @@ def _remove(
     r = (r * page.derotation_matrix).normalize()
     doc.xref_set_key(page_xref, "Annots", "[]")
     try:
-        page = doc.reload_page(page)
+        page = _reload(doc, page)
         page.add_redact_annot(r, fill=False)
         page.apply_redactions(**_REDACT_KW)
         _merge_resources(doc, page_xref, resources)
@@ -390,7 +390,7 @@ def _remove(
             mupdf.pdf_dict_dels(mupdf.pdf_new_indirect(pdf, page_xref, 0), "Annots")
         else:
             doc.xref_set_key(page_xref, "Annots", annots[1])
-    return doc.reload_page(page)
+    return _reload(doc, page)
 
 
 def _merge_resources(doc: pymupdf.Document, page_xref: int, original: str) -> None:
@@ -471,14 +471,20 @@ def set_page_content(
 
 
 def _reload(doc: pymupdf.Document, page: pymupdf.Page) -> pymupdf.Page:
-    """``doc.reload_page(page)``; when another ``Page`` object of the caller still holds
-    the same MuPDF page (PyMuPDF then asserts), the page is simply fetched again: the
-    content is read from the xref on every run, so no reload is needed for it."""
+    """``doc.reload_page(page)``; when another ``Page`` object still holds the same MuPDF
+    page (a caller's, or the render thread's — PyMuPDF then asserts), the page is fetched
+    again and its annotation and link lists are re-read from the page dictionary
+    (``pdf_sync_page``): the content is read from the xref on every run, but the
+    ``/Annots`` swap of :func:`_remove` must reach the in-memory annotation list."""
     pno = page.number
     try:
         return doc.reload_page(page)
     except AssertionError:
-        return doc[pno]
+        log.info("page %d is held elsewhere; syncing it instead of reloading", pno)
+        page = doc[pno]
+        mupdf = pymupdf.mupdf
+        mupdf.pdf_sync_page(mupdf.pdf_page_from_fz_page(page.this))
+        return page
 
 
 # -- fonts and widths ---------------------------------------------------------------------

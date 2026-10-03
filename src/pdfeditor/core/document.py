@@ -473,6 +473,7 @@ class PdfDocument(QObject):
             if page.rotation == degrees:
                 return
             page.set_rotation(degrees)
+            del page
         self.page_changed.emit(i)
 
     # -- page identity and structure (M6a) -----------------------------------
@@ -1307,6 +1308,9 @@ class PdfDocument(QObject):
             image = QImage(
                 pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888
             ).copy()
+            # Drop the Page inside the lock: a Page alive on this (render) thread makes a
+            # concurrent ``reload_page`` of the GUI thread's text edit fail (M7 review).
+            del page, pix
         return image
 
     # -- saving ------------------------------------------------------------
