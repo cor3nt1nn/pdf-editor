@@ -295,3 +295,43 @@ def test_unextendable_tounicode_falls_back_to_an_installed_font(
     assert result.plan is not None and result.plan.kind.value == "system"
     assert _search(doc, "ete")
     doc.close()
+
+
+# -- 5. an overflowing edit can be edited again ----------------------------------------------
+def _pix(doc: PdfDocument) -> pymupdf.Pixmap:
+    with doc.lock:
+        page = doc.fitz[0]
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))
+        del page
+    return pix
+
+
+def test_overflowing_word_can_be_edited_again(tmp_path: Path, fonts: SystemFonts, qapp) -> None:
+    path = make_text_edit_pdf(tmp_path / "w.pdf")
+    direct = PdfDocument.open(path)
+    direct.replace_text_run(0, find_run(direct.page_text(0), "Jean"), "Paul", fonts=fonts)
+    expected = _pix(direct)
+    direct.close()
+
+    doc = PdfDocument.open(path)
+    first = doc.replace_text_run(0, find_run(doc.page_text(0), "Jean"), "Pierre", fonts=fonts)
+    assert first.overflow  # its last glyphs overlap the next word's space and "D"
+    stack = QUndoStack()
+    cmd = ReplaceTextCommand(doc, 0, find_run(doc.page_text(0), "Pierre"), "Paul", fonts=fonts)
+    cmd.apply_now()
+    stack.push(cmd)
+    result = cmd.result
+    assert result is not None and result.redrawn > 0 and not result.extended
+    flat = _norm(doc.page_text(0).text)
+    assert "Paul" in flat and "Pierre" not in flat and "Dupont" in flat
+    # the neighbours drawn again are where they were: the page looks like Jean -> Paul
+    assert _pix(doc).samples == expected.samples
+    with doc.lock:
+        page = doc.fitz[0]
+        assert page.search_for("Dupont") and page.search_for("Paul")
+        del page
+    stack.undo()
+    assert "Pierre" in _norm(doc.page_text(0).text)
+    stack.redo()
+    assert cmd.error is None and "Paul" in _norm(doc.page_text(0).text)
+    doc.close()

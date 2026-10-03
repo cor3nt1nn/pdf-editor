@@ -181,7 +181,8 @@ class TextEditResult:
     surrounded by the extension's outer chars). ``plan`` is the font used (``None`` for a
     pure removal); ``scaling`` the ``Tz`` percent (100 = natural width) and ``overflow``
     whether the text is still wider than the original at :data:`MAX_TZ_SQUEEZE`;
-    ``copies`` the number of coincident copies rewritten (fake bold).
+    ``copies`` the number of coincident copies rewritten (fake bold); ``redrawn`` the
+    chars of other spans drawn again at their place (collateral of the removal).
     """
 
     page: int
@@ -198,6 +199,8 @@ class TextEditResult:
     natural_width: float = 0.0
     target_width: float = 0.0
     copies: int = 1
+    #: Chars of other spans the removal caught and that were drawn again unchanged.
+    redrawn: int = 0
 
     @property
     def extended(self) -> bool:
@@ -612,10 +615,10 @@ def _natural_width(
     return total * size / 1000.0
 
 
-def _run_width(target: _Target, embedded: EmbeddedFont | None) -> float:
+def _run_width(target: _Target, embedded: EmbeddedFont | None, size: float) -> float:
     """Extent (points, along the line) of the run: from the first char's origin to the end
-    of the last char's advance (its width in the document's font when known, else the far
-    edge of its box)."""
+    of the last char's advance (its width in the document's font at ``size`` when known,
+    else the far edge of its box)."""
     d = _unit(target.line.dir)
     chars = target.chars
     start = _project(chars[0].origin, d)
@@ -628,8 +631,44 @@ def _run_width(target: _Target, embedded: EmbeddedFont | None) -> float:
             if width is None and embedded.kind is FontKind.TYPE0:
                 width = embedded.default_width
             if width:
-                end = max(end, _project(last.origin, d) + width * target.span.size / 1000.0)
+                end = max(end, _project(last.origin, d) + width * size / 1000.0)
     return max(0.0, end - start)
+
+
+def _metrics(
+    ch: Char, line: Line, font: EmbeddedFont, code: int, reported: float
+) -> tuple[float, float]:
+    """``(font size, Tz percent)`` a char was drawn with. MuPDF reports the size of a
+    horizontally scaled glyph as ``size × √(Tz)`` (the square root of the text matrix's
+    determinant), so with the char's box extent ``w`` along the line and its advance
+    ``a`` (1/1000 em): ``√Tz = w / (a × reported)``, ``size = reported / √Tz``.
+    ``(reported, 100)`` when unknown or within half a percent."""
+    advance = _advance(font, ch.c, code) * reported / 1000.0
+    d = _unit(line.dir)
+    extent = [_project(p, d) for p in _corners(ch.bbox)]
+    width = max(extent) - min(extent)
+    if advance <= 0 or width <= 0:
+        return reported, 100.0
+    root = width / advance
+    tz = 100.0 * root * root
+    if abs(tz - 100.0) < 0.5 or not 1.0 <= tz <= 1000.0:
+        return reported, 100.0
+    return reported / root, tz
+
+
+def _span_size(target: _Target, font: EmbeddedFont | None) -> float:
+    """The run's real font size: the span's reported size corrected for a horizontal
+    scaling (an earlier narrowed edit, condensed text) through :func:`_metrics` of its
+    first measurable char."""
+    size = target.span.size
+    if font is None or not font.xref:
+        return size
+    for ch in target.chars:
+        code = font.code_for(ch.c)
+        if code is None or ch.c.isspace():
+            continue
+        return _metrics(ch, target.line, font, code, size)[0]
+    return size
 
 
 def _num(v: float) -> str:
@@ -643,26 +682,107 @@ def _ops(
     resource: str,
     hexstr: bytes,
     scaling: float,
+    size: float,
 ) -> bytes:
-    """``q BT … Tj ET Q`` writing ``hexstr`` with the span's size, colour, direction and
-    first char origin (content space)."""
-    span = target.span
-    to_pdf = page_to_pdf_matrix(page)
-    o = pymupdf.Point(target.chars[0].origin.x(), target.chars[0].origin.y()) * to_pdf
-    dx, dy = _unit(target.line.dir)
+    """``q BT … Tj ET Q`` writing ``hexstr`` at ``size`` with the span's colour, direction
+    and first char origin (content space)."""
+    show = _show(
+        page_to_pdf_matrix(page),
+        target.chars[0].origin,
+        target.line.dir,
+        size,
+        target.span.color,
+        resource,
+        hexstr,
+        scaling,
+        always_tz=False,
+    )
+    return b"q BT " + show + b" ET Q"
+
+
+def _show(
+    to_pdf: pymupdf.Matrix,
+    origin: QPointF,
+    direction: tuple[float, float],
+    size: float,
+    color: int,
+    resource: str,
+    hexstr: bytes,
+    scaling: float,
+    *,
+    always_tz: bool = True,
+) -> bytes:
+    """``Tf rg [Tz] Tm <hex> Tj`` (inside a ``BT``) showing ``hexstr`` at ``origin``
+    (page space) along ``direction`` at ``size`` in ``color`` (0xRRGGBB); ``Tz`` is
+    written for a scaling other than 100, or always with ``always_tz`` (several shows in
+    one ``BT``: the text state carries over)."""
+    o = pymupdf.Point(origin.x(), origin.y()) * to_pdf
+    dx, dy = _unit(direction)
     ux, uy = _unit((dx * to_pdf.a + dy * to_pdf.c, dx * to_pdf.b + dy * to_pdf.d))
-    r = ((span.color >> 16) & 0xFF) / 255.0
-    g = ((span.color >> 8) & 0xFF) / 255.0
-    b = (span.color & 0xFF) / 255.0
+    r = ((color >> 16) & 0xFF) / 255.0
+    g = ((color >> 8) & 0xFF) / 255.0
+    b = (color & 0xFF) / 255.0
     parts = [
-        "q BT",
-        f"/{resource} {_num(span.size)} Tf",
+        f"/{resource} {_num(size)} Tf",
         f"{_num(r)} {_num(g)} {_num(b)} rg",
     ]
-    if scaling < 100.0:
+    if always_tz or scaling < 100.0:
         parts.append(f"{_num(scaling)} Tz")
     parts.append(f"{_num(ux)} {_num(uy)} {_num(-uy)} {_num(ux)} {_num(o.x)} {_num(o.y)} Tm")
-    return " ".join(parts).encode("ascii") + b" " + hexstr + b" Tj ET Q"
+    return " ".join(parts).encode("ascii") + b" " + hexstr + b" Tj"
+
+
+def _reemit_ops(
+    doc: pymupdf.Document, page: pymupdf.Page, text: PageText, indexes: Sequence[int]
+) -> bytes:
+    """``q BT … ET Q`` drawing again, unchanged, the chars ``indexes`` of other spans
+    that the redaction caught (glyph boxes overlapping the run, e.g. an overflowing
+    earlier edit): each one at its own origin and direction, with its span's font (its
+    own code), colour, size and horizontal scaling (:func:`_metrics`).
+    ``TextEditError`` when one cannot be reproduced (font unknown or not embedded, no
+    code, invisible, vertical or Form XObject text); a lost space without a code is left
+    out (it has no ink)."""
+    to_pdf = page_to_pdf_matrix(page)
+    fonts: dict[int, EmbeddedFont] = {}
+    shows: list[bytes] = []
+    for i in sorted(indexes):
+        ch = text.chars[i]
+        span = text.span_of(i)
+        line = text.lines[text.ref(i).line]
+        lost = TextEditError("neighbouring text could not be preserved")
+        if span.in_xobject or text.is_invisible(i) or line.wmode != 0:
+            raise lost
+        if not (span.font_xref and span.resource_name):
+            raise lost
+        font = fonts.get(span.font_xref)
+        if font is None:
+            font = fontread.read_embedded_font(doc, span.font_xref, span.resource_name)
+            fonts[span.font_xref] = font
+        code = font.code_for(ch.c) if font.editable else None
+        if code is None:
+            if ch.c.isspace():
+                continue
+            raise lost
+        try:
+            hexstr = fontembed.encode(font, ch.c, (code,))
+        except KeyError as exc:
+            raise lost from exc
+        size, scaling = _metrics(ch, line, font, code, span.size)
+        shows.append(
+            _show(
+                to_pdf,
+                ch.origin,
+                line.dir,
+                size,
+                span.color,
+                span.resource_name,
+                hexstr,
+                scaling,
+            )
+        )
+    if not shows:
+        return b""
+    return b"q BT " + b" ".join(shows) + b" ET Q"
 
 
 def _balanced(page: pymupdf.Page, content: bytes) -> bytes:
@@ -786,6 +906,7 @@ def _edit(
     current = target
     expected_gone = set(target.indexes) | set(twins)
     rounds = 0
+    collateral: list[int] = []  # chars of other spans caught by the redaction
     while True:
         rect = _union(ch.bbox for ch in current.chars)
         page = _remove(doc, page, rect, resources, annots)
@@ -793,10 +914,12 @@ def _edit(
         vanished, survived = _diff(text, after_text, expected_gone)
         if survived:
             raise TextEditError("some glyphs of the run could not be removed")
-        if not vanished:
+        same = [i for i in vanished if text.span_of(i) is current.span]
+        if not same:
+            collateral = vanished  # drawn again unchanged after the new text
             break
         rounds += 1
-        grown = _extend(text, current, vanished)
+        grown = _extend(text, current, same)
         if grown is None or rounds > MAX_COLLATERAL_ROUNDS:
             raise TextEditError("neighbouring text could not be preserved")
         log.info("page %d: edit grows to chars %d..%d", page_index, grown.first, grown.last)
@@ -820,12 +943,23 @@ def _edit(
         except KeyError as exc:
             raise TextEditError(f"no glyph for {exc.args[0]!r}", EditReason.NO_FONT) from exc
         codes = _codes(font, write_text, plan)
-        natural = _natural_width(font, write_text, codes, current.span.size)
-        width = _run_width(current, own if own.xref else None)
+        doc_font = own if own.xref else None
+        size = _span_size(current, doc_font)
+        natural = _natural_width(font, write_text, codes, size)
+        width = _run_width(current, doc_font, size)
         scaling, overflow = fit_scaling(natural, width)
-        ops = _ops(page, current, resource, hexstr, scaling)
+        ops = _ops(page, current, resource, hexstr, scaling, size)
         content = content + b"\n" + b"\n".join([ops] * copies)
+    if collateral:
+        log.info("page %d: %d neighbouring chars drawn again", page_index, len(collateral))
+        reemit = _reemit_ops(doc, page, text, collateral)
+        if reemit:
+            content = content + b"\n" + reemit
     page = set_page_content(doc, page, content)
+    if collateral:
+        lost, _ = _diff(text, pagetext.extract_page_text(page), expected_gone)
+        if lost:
+            raise TextEditError("neighbouring text could not be preserved")
     after = page.read_contents()
     return TextEditResult(
         page=page_index,
@@ -842,4 +976,5 @@ def _edit(
         natural_width=natural,
         target_width=width,
         copies=copies,
+        redrawn=len(collateral),
     )
