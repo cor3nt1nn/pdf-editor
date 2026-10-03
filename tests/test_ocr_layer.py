@@ -375,3 +375,98 @@ def test_invisible_layer_is_not_editable(scan_clean, clean_ocr, tmp_path) -> Non
         doc.replace_text_run(0, Run(0, 9), "Formulair")
     assert info.value.reason is EditReason.INVISIBLE
     doc.close()
+
+
+# -- M8 review M1: strict layer detection ---------------------------------------------------
+def _coalesce(doc: PdfDocument, i: int = 0) -> bytes:
+    """Merge page ``i``'s content streams into one, as ``qpdf --coalesce-contents`` or
+    pikepdf do; returns the merged bytes."""
+    with doc.lock:
+        fitz = doc.fitz
+        page = fitz[i]
+        merged = b"\n".join(fitz.xref_stream(x) for x in page.get_contents())
+        xref = fitz.get_new_xref()
+        fitz.update_object(xref, "<<>>")
+        fitz.update_stream(xref, merged, compress=True)
+        fitz.xref_set_key(page.xref, "Contents", f"{xref} 0 R")
+    doc.page_changed.emit(i)
+    return merged
+
+
+def _contents(doc: PdfDocument, i: int = 0) -> list[bytes]:
+    with doc.lock:
+        return [doc.fitz.xref_stream(x) for x in doc.fitz[i].get_contents()]
+
+
+def test_coalesced_layer_is_kept(scan_clean, clean_ocr, tmp_path) -> None:
+    """Another program merged the streams: the layer is still found (never added twice)
+    and undo refuses instead of dropping the merged stream (which blanked the page)."""
+    doc = PdfDocument.open(copy_to(scan_clean, tmp_path))
+    stack = QUndoStack()
+    command = AddOcrLayerCommand(doc, 0, clean_ocr)
+    command.apply_now()
+    stack.push(command)
+    pixels = _pixels(doc)
+    merged = _coalesce(doc)
+    assert merged.startswith(PREFIX_MARKER)
+    assert doc.has_ocr_layer(0)
+    with pytest.raises(OcrError) as info:
+        doc.add_ocr_layer(0, clean_ocr)
+    assert info.value.reason == "exists"
+    assert not doc.remove_ocr_layer(0)
+    assert _contents(doc) == [merged]
+    assert _pixels(doc) == pixels
+    stack.undo()
+    assert isinstance(command.error, OcrError)
+    assert "page 1 cannot be removed" in str(command.error)
+    assert _contents(doc) == [merged] and _pixels(doc) == pixels
+    doc.close()
+
+
+def test_layer_stream_changed_by_another_program(scan_clean, clean_ocr, tmp_path) -> None:
+    """A layer stream with anything but our word operators (here a stroke appended by a
+    stamping tool) is not ours: nothing is removed."""
+    doc = PdfDocument.open(copy_to(scan_clean, tmp_path))
+    doc.add_ocr_layer(0, clean_ocr)
+    with doc.lock:
+        fitz = doc.fitz
+        layer = fitz[0].get_contents()[-1]
+        data = fitz.xref_stream(layer)
+        fitz.update_stream(layer, data.replace(b"ET\nQ\n", b"ET\n0 0 m 50 50 l S\nQ\n"))
+    before = _contents(doc)
+    assert doc.has_ocr_layer(0)
+    assert not doc.remove_ocr_layer(0)
+    assert _contents(doc) == before
+    doc.close()
+
+
+def test_layer_alone_is_not_removed(scan_clean, clean_ocr, tmp_path) -> None:
+    """Removing the streams would leave the page without content: refused."""
+    doc = PdfDocument.open(copy_to(scan_clean, tmp_path))
+    doc.add_ocr_layer(0, clean_ocr)
+    with doc.lock:
+        fitz = doc.fitz
+        page = fitz[0]
+        streams = page.get_contents()
+        fitz.xref_set_key(page.xref, "Contents", f"[{streams[0]} 0 R {streams[-1]} 0 R]")
+    assert doc.has_ocr_layer(0)
+    assert not doc.remove_ocr_layer(0)
+    assert len(_contents(doc)) == 2
+    doc.close()
+
+
+def test_strict_stream_checks(scan_clean, clean_ocr, tmp_path) -> None:
+    from pdfeditor.core import ocr_layer
+
+    doc = PdfDocument.open(copy_to(scan_clean, tmp_path))
+    with doc.lock:
+        data = ocr_layer.layer_stream(doc.fitz[0], clean_ocr)
+    assert ocr_layer.is_layer_stream(data)
+    assert ocr_layer.is_prefix_stream(PREFIX_MARKER + b"\nq\n")
+    assert not ocr_layer.is_prefix_stream(PREFIX_MARKER + b"\nq\n0 0 m\n")
+    assert not ocr_layer.is_layer_stream(data + b"q\n")
+    assert not ocr_layer.is_layer_stream(data.replace(b" Tj\n", b" Tj\n0 0 10 10 re f\n", 1))
+    assert not ocr_layer.is_layer_stream(data.replace(b"3 Tr", b"0 Tr"))
+    empty = ocr_layer.LAYER_HEAD + ocr_layer.LAYER_TAIL
+    assert ocr_layer.is_layer_stream(empty)
+    doc.close()

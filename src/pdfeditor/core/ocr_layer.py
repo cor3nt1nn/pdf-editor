@@ -15,10 +15,15 @@ verdict 5 and O12–O14). The page gets two new content streams around its own:
 The font is a direct dictionary ``<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica
 /Encoding /WinAnsiEncoding >>`` named ``/PdfEdOcr`` in the page's ``/Resources /Font``
 (an inherited dictionary is copied to the page first, as M7 does; a shared indirect one is
-extended). :func:`remove_layer` (undo) drops the two streams by their first line — so it
-survives the object renumbering of a full save — and leaves the unused font entry (a
-shared resource dictionary may serve other pages' layers). Objects of a removed layer
-created since the load are freed by ``core/orphans.py`` before an incremental save.
+extended). :func:`remove_layer` (undo) drops the two streams found by their exact bytes
+(:func:`is_prefix_stream`, :func:`is_layer_stream`: never by object number, so it survives
+the renumbering of a full save) and leaves the unused font entry (a shared resource
+dictionary may serve other pages' layers). When another program merged the streams
+(qpdf ``--coalesce-contents``, pikepdf), a marker sits inside a stream that is not ours:
+:func:`has_layer` still reports the layer (it is never written twice) but
+:func:`remove_layer` refuses, as it does when removal would leave the page without content.
+Objects of a removed layer created since the load are freed by ``core/orphans.py`` before
+an incremental save.
 
 Callers hold ``PdfDocument.lock``. Text matrices come from the inverse of MuPDF's
 ``pdf_page_transform`` (page space → content space; exact for every /Rotate with or
@@ -31,6 +36,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from functools import cache
 
 import pymupdf
@@ -144,23 +150,66 @@ def layer_stream(page: pymupdf.Page, ocr: PageOcr) -> bytes:
     return out.getvalue()
 
 
-def _first_line(doc: pymupdf.Document, xref: int) -> bytes:
+#: First bytes of a layer stream and its last ones (:func:`layer_stream`).
+LAYER_HEAD = LAYER_MARKER + b"\nQ\nq\nBT\n3 Tr\n"
+LAYER_TAIL = b"ET\nQ\n"
+#: The whole prefix stream.
+PREFIX_STREAM = PREFIX_MARKER + b"\nq\n"
+_NUM = rb"-?\d+(?:\.\d+)?"
+#: One word of a layer stream: ``/PdfEdOcr <size> Tf <Tz> Tz <a b c d e f> Tm (text) Tj``
+#: — text showing only, nothing that paints. The string's bytes are those of
+#: :func:`encode` (``( ) \`` escaped, control bytes as octal).
+_WORD_OP = re.compile(
+    rb"/%s (?:%s) Tf (?:%s) Tz (?:(?:%s) ){6}Tm "
+    rb"\((?:[^\\()\x00-\x1f\x7f]|\\[()\\]|\\[0-7]{3})*\) Tj"
+    % (FONT_NAME.encode(), _NUM, _NUM, _NUM)
+)
+
+
+def _stream(doc: pymupdf.Document, xref: int) -> bytes:
     try:
-        data = doc.xref_stream(xref) or b""
+        return doc.xref_stream(xref) or b""
     except Exception:  # MuPDF raises FzError* on broken streams
         return b""
-    return data[:64].split(b"\n", 1)[0].strip()
+
+
+def is_prefix_stream(data: bytes) -> bool:
+    """``data`` is exactly a prefix stream written by :func:`add_layer`."""
+    return data == PREFIX_STREAM
+
+
+def is_layer_stream(data: bytes) -> bool:
+    """``data`` is exactly a layer stream written by :func:`add_layer`: its head, word
+    operators only (no painting operator), its tail."""
+    if not (data.startswith(LAYER_HEAD) and data.endswith(LAYER_TAIL)):
+        return False
+    body = data[len(LAYER_HEAD) : len(data) - len(LAYER_TAIL)]
+    if body and not body.endswith(b"\n"):
+        return False
+    return all(_WORD_OP.fullmatch(line) for line in body.split(b"\n")[:-1])
 
 
 def layer_streams(doc: pymupdf.Document, page: pymupdf.Page) -> list[int]:
-    """Xrefs of the page's content streams that belong to an OCR layer (prefix and
-    layer streams)."""
-    return [x for x in page.get_contents() if _first_line(doc, x) in (LAYER_MARKER, PREFIX_MARKER)]
+    """Xrefs of the page's content streams that are exactly an OCR layer's prefix or
+    layer stream (a stream that merely starts with a marker, e.g. after another program
+    coalesced the page's streams into one, is not)."""
+    out = []
+    for xref in page.get_contents():
+        data = _stream(doc, xref)
+        if is_prefix_stream(data) or is_layer_stream(data):
+            out.append(xref)
+    return out
 
 
 def has_layer(doc: pymupdf.Document, page: pymupdf.Page) -> bool:
-    """The page has an OCR layer written by :func:`add_layer`."""
-    return any(_first_line(doc, x) == LAYER_MARKER for x in page.get_contents())
+    """The page's content holds an OCR layer written by :func:`add_layer` — either marker
+    anywhere in any of its streams, so a layer whose streams another program merged with
+    the page's own is still found (and never written twice)."""
+    for xref in page.get_contents():
+        data = _stream(doc, xref)
+        if LAYER_MARKER in data or PREFIX_MARKER in data:
+            return True
+    return False
 
 
 def _new_stream(doc: pymupdf.Document, data: bytes) -> int:
@@ -218,10 +267,28 @@ def add_layer(doc: pymupdf.Document, page: pymupdf.Page, ocr: PageOcr) -> int:
 
 def remove_layer(doc: pymupdf.Document, page: pymupdf.Page) -> bool:
     """Remove the page's OCR layer streams (undo of :func:`add_layer`); False when it has
-    none. The ``/PdfEdOcr`` font entry stays (unused, a few bytes)."""
-    ours = set(layer_streams(doc, page))
+    none, or when it cannot be removed safely: a marker sits inside a stream that is not
+    exactly ours (another program merged the streams), or removing the streams would
+    leave the page without content. The page is then unchanged. The ``/PdfEdOcr`` font
+    entry stays (unused, a few bytes)."""
+    contents = list(page.get_contents())
+    ours: set[int] = set()
+    for xref in contents:
+        data = _stream(doc, xref)
+        if is_prefix_stream(data) or is_layer_stream(data):
+            ours.add(xref)
+        elif LAYER_MARKER in data or PREFIX_MARKER in data:
+            log.warning(
+                "page %d: the OCR layer is merged into stream %d; not removed",
+                page.number + 1,
+                xref,
+            )
+            return False
     if not ours:
         return False
-    keep = [x for x in page.get_contents() if x not in ours]
+    keep = [x for x in contents if x not in ours]
+    if not keep:
+        log.warning("page %d: removing the OCR layer would empty the page", page.number + 1)
+        return False
     _set_contents(doc, page.xref, keep)
     return True

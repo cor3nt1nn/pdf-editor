@@ -824,5 +824,12 @@ class AddOcrLayerCommand(_ImmediateCommand):
 
     def _undo(self) -> None:
         for pid, _ocr in reversed(self.pages):
-            if not self.doc.remove_ocr_layer(self._index(pid, OcrError)):
-                raise OcrError("the OCR text layer is no longer on the page")
+            index = self._index(pid, OcrError)
+            if not self.doc.remove_ocr_layer(index):
+                # Gone, or merged with the page's own content by another program (the
+                # page is left as it is: removing more could blank it).
+                message = QCoreApplication.translate(
+                    "Commands",
+                    "The searchable text of page {n} cannot be removed: the page content was changed outside this undo history.",  # noqa: E501
+                ).format(n=index + 1)
+                raise OcrError(message)

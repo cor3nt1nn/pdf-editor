@@ -143,6 +143,12 @@
         <source>Recognise text</source>
         <translation>la reconnaissance du texte</translation>
     </message>
+    <message>
+        <location filename="../core/commands.py" line="831"/>
+        <source>The searchable text of page {n} cannot be removed: the page content was changed outside this undo history.</source>
+        <extracomment>(page id, recognised text) of every page written by this command.</extracomment>
+        <translation>Le texte cherchable de la page {n} ne peut pas être retiré : le contenu de la page a été modifié en dehors de cet historique d’annulation.</translation>
+    </message>
 </context>
 <context>
     <name>Dialogs</name>
