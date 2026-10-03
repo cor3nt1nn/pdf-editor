@@ -183,6 +183,16 @@ def test_missing_language_data(tmp_path) -> None:
     assert info.value.reason == "tessdata"
 
 
+def test_ocr_error_is_a_document_error() -> None:
+    """M8 review m5: callers catching DocumentError catch OCR failures too."""
+    from pdfeditor.core import document, errors
+
+    assert document.DocumentError is errors.DocumentError
+    assert issubclass(OcrError, document.DocumentError)
+    error = OcrError("no data", "tessdata")
+    assert isinstance(error, document.DocumentError) and error.reason == "tessdata"
+
+
 def test_blank_page_has_no_words() -> None:
     result = ocr.ocr_samples(b"\xff" * (200 * 300 * 3), 200, 300, page_size=(200, 300))
     assert result.is_empty

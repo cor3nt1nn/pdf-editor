@@ -29,6 +29,7 @@ from PySide6.QtGui import QImage
 from pdfeditor.core import annotations, ocr, orphans, pagetext, scan_shapes, signature, snapping
 from pdfeditor.core import pages as page_ops
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
+from pdfeditor.core.errors import DocumentError
 from pdfeditor.core.files import same_file
 from pdfeditor.core.forms import (
     FieldKind,
@@ -62,10 +63,6 @@ DiskStamp = tuple[int, int]
 #: Called with the attempt number (0 = first prompt, >0 = previous password was wrong).
 #: Returns the password, or ``None`` to cancel.
 PasswordCallback = Callable[[int], str | None]
-
-
-class DocumentError(Exception):
-    """Base class for document errors."""
 
 
 class OpenError(DocumentError):

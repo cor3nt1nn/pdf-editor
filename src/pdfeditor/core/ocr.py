@@ -31,6 +31,8 @@ from typing import Any
 
 import pymupdf
 
+from pdfeditor.core.errors import DocumentError
+
 log = logging.getLogger(__name__)
 
 #: Languages passed to Tesseract (French first: the app's main audience; ``eng`` alone
@@ -56,8 +58,9 @@ Rect = tuple[float, float, float, float]
 Point = tuple[float, float]
 
 
-class OcrError(Exception):
-    """Text recognition failed or was refused. ``reason``: ``"tessdata"`` (language data
+class OcrError(DocumentError):
+    """Text recognition failed or was refused (a :class:`DocumentError`, so the callers
+    catching document errors catch it too). ``reason``: ``"tessdata"`` (language data
     missing), ``"permission"`` (the document forbids changing its pages), ``"exists"``
     (the page already has an OCR layer), ``"input"`` (bad samples), ``"failed"``."""
 
