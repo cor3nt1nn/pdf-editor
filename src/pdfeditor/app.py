@@ -39,6 +39,8 @@ LOG_MAX_BYTES = 1024 * 1024
 LOG_BACKUPS = 3
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 SELF_CHECK_LOG = "self-check.log"
+#: Hidden first argument of the OCR worker process (see ``core/ocr_worker.py``).
+OCR_WORKER_FLAG = "--ocr-worker"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -111,6 +113,11 @@ def _log_uncaught(kind, value, tb) -> None:  # noqa: ANN001 - sys.excepthook sig
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    if argv[1:2] == [OCR_WORKER_FLAG]:
+        # The OCR worker process (M8): no window, no Qt application.
+        from pdfeditor.core.ocr_worker import main as ocr_worker_main
+
+        return ocr_worker_main()
     args = parse_args(argv[1:])
     if args.self_check:
         return self_check(args.self_check)
