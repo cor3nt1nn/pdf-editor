@@ -109,11 +109,11 @@ def test_ok_adds_record_named_from_file_stem(qtbot, signature_store, signature_p
 
 def test_ok_uses_edited_name_and_options(qtbot, signature_store, signature_photo):
     dialog = _import_dialog(qtbot, signature_store, signature_photo)
-    dialog.name_edit.setText("  Corentin  ")
+    dialog.name_edit.setText("  Jane Doe  ")
     dialog.color_combo.setCurrentIndex(dialog.color_combo.findData("black"))
     dialog.accept()
     record = dialog.result_record
-    assert record is not None and record.name == "Corentin"
+    assert record is not None and record.name == "Jane Doe"
     assert set(dialog.processed.rgb) == {0}
 
 

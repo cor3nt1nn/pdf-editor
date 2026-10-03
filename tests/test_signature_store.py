@@ -52,9 +52,9 @@ def test_empty_store_writes_nothing(tmp_path) -> None:
 
 def test_add_writes_png_and_index(signature_store, signature_png) -> None:
     source = QImage(str(signature_png))
-    record = signature_store.add("  Corentin  ", source)
+    record = signature_store.add("  Jane Doe  ", source)
     assert isinstance(record, SignatureRecord)
-    assert record.name == "Corentin"
+    assert record.name == "Jane Doe"
     assert record.file == f"{record.id}.png"
     assert (record.width, record.height) == (source.width(), source.height())
     assert datetime.fromisoformat(record.created).tzinfo is not None
@@ -70,7 +70,7 @@ def test_add_writes_png_and_index(signature_store, signature_png) -> None:
     assert data["signatures"] == [
         {
             "id": record.id,
-            "name": "Corentin",
+            "name": "Jane Doe",
             "file": record.file,
             "created": record.created,
             "width": record.width,
