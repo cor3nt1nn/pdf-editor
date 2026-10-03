@@ -9,12 +9,23 @@
     dist\PDFEditor into dist\PDFEditor-<version>-win64.zip and prints the sizes and the
     exe's version.
 
-    -Smoke then runs the frozen tests (tests/test_frozen.py) against the new build.
+    -Installer then compiles installer\pdfeditor.iss with Inno Setup (ISCC.exe from
+    scripts\fetch_innosetup.ps1: $env:ISCC, an installed Inno Setup 7/6, or the pinned
+    portable 7.1.0 package downloaded into build\tools) into
+    dist\PDFEditor-<version>-setup.exe, fails on any compiler warning, prints its size and
+    checks its version resource.
+
+    -Smoke then runs the frozen tests (tests/test_frozen.py) against the new build, and
+    with -Installer also the installer tests (tests/test_installer.py: a silent per-user
+    install into a temporary folder, upgrade and uninstall).
 
 .EXAMPLE
     powershell -File scripts\build_exe.ps1 -Smoke
+
+.EXAMPLE
+    powershell -File scripts\build_exe.ps1 -Installer -Smoke
 #>
-param([switch]$Smoke)
+param([switch]$Smoke, [switch]$Installer)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -30,6 +41,9 @@ function Invoke-Step([string]$Title, [scriptblock]$Command) {
 }
 
 function Format-MB([long]$Bytes) { "{0:N1} MB" -f ($Bytes / 1MB) }
+
+# Size cap of the setup program (tests/test_installer.py checks it too).
+$MaxSetupMB = 45
 
 $Init = Get-Content (Join-Path $Root "src\pdfeditor\__init__.py") -Raw
 if ($Init -notmatch '__version__ = "([^"]+)"') { throw "__version__ not found" }
@@ -75,11 +89,46 @@ Write-Host ("  zip     {0,10}  {1}" -f (Format-MB (Get-Item $Zip).Length), $Zip)
 Write-Host ("  version resource: FileVersion {0}, ProductVersion {1}" -f $Info.FileVersion, $Info.ProductVersion)
 if ($Info.ProductVersion -ne $Version) { throw "version resource $($Info.ProductVersion) != $Version" }
 
+$Setup = $null
+if ($Installer) {
+    $Iscc = @(& (Join-Path $PSScriptRoot "fetch_innosetup.ps1"))[-1]
+    $OutDir = Join-Path $Root "dist"
+    $Setup = Join-Path $OutDir "PDFEditor-$Version-setup.exe"
+    if (Test-Path $Setup) { Remove-Item $Setup -Force }
+    Write-Host "==> Inno Setup: $Iscc"
+    # Quoted: PowerShell 5.1 splits an unquoted -dName=0.1.0 at the first dot.
+    $IsccArgs = @("-q", "-dAppVersion=$Version", "-dSourceDir=$Dist", "-dOutputDir=$OutDir",
+        (Join-Path $Root "installer\pdfeditor.iss"))
+    $ErrorActionPreference = "Continue"
+    $IsccOutput = @(& $Iscc @IsccArgs 2>&1 | ForEach-Object { "$_" })
+    $IsccExit = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    $IsccOutput | ForEach-Object { Write-Host $_ }
+    if ($IsccExit -ne 0) { throw "Inno Setup failed (exit code $IsccExit)" }
+    if ($IsccOutput | Where-Object { $_ -match "Warning" }) { throw "Inno Setup reported warnings" }
+    if (-not (Test-Path $Setup)) { throw "$Setup was not built" }
+    $SetupBytes = (Get-Item $Setup).Length
+    # Inno Setup pads its version strings with spaces.
+    $SetupVersion = "$((Get-Item $Setup).VersionInfo.ProductVersion)".Trim()
+    Write-Host ("  setup   {0,10}  {1}" -f (Format-MB $SetupBytes), $Setup)
+    Write-Host ("  setup version resource: ProductVersion {0}" -f $SetupVersion)
+    if ($SetupVersion -ne $Version) { throw "setup version resource $SetupVersion != $Version" }
+    if ($SetupBytes -gt $MaxSetupMB * 1MB) { throw "setup is larger than $MaxSetupMB MB" }
+}
+
 if ($Smoke) {
     $env:PDFEDITOR_FROZEN_EXE = $Exe
     try {
         Invoke-Step "frozen tests" { uv run pytest -m frozen -v }
     } finally {
         Remove-Item Env:PDFEDITOR_FROZEN_EXE
+    }
+    if ($Setup) {
+        $env:PDFEDITOR_INSTALLER = $Setup
+        try {
+            Invoke-Step "installer tests" { uv run pytest -m installer -v }
+        } finally {
+            Remove-Item Env:PDFEDITOR_INSTALLER
+        }
     }
 }

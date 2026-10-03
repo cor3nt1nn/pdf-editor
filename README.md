@@ -72,18 +72,30 @@ journal, `%APPDATA%\PDFEditor` et `%LOCALAPPDATA%\PDFEditor`.
 ## Build the Windows release
 
 ```powershell
-powershell -File scripts\build_exe.ps1          # build + zip
-powershell -File scripts\build_exe.ps1 -Smoke   # same, then run the frozen tests
+powershell -File scripts\build_exe.ps1                     # build + zip
+powershell -File scripts\build_exe.ps1 -Smoke              # same, then run the frozen tests
+powershell -File scripts\build_exe.ps1 -Installer          # build + zip + setup program
+powershell -File scripts\build_exe.ps1 -Installer -Smoke   # same, then frozen + installer tests
 ```
 
 It produces `dist\PDFEditor\` (`PDFEditor.exe`, `_internal\`, `README.md`, `LICENSE`,
 `THIRD_PARTY_LICENSES.md`, `licenses\`) and the deliverable
-`dist\PDFEditor-<version>-win64.zip` (about 49 MB; about 110 MB extracted). To rerun the
-frozen tests against an existing build:
+`dist\PDFEditor-<version>-win64.zip` (about 49 MB; about 110 MB extracted). With
+`-Installer` it also compiles `installer\pdfeditor.iss` into
+`dist\PDFEditor-<version>-setup.exe` (about 38 MB) with Inno Setup: the compiler is
+`$env:ISCC` if set, else an installed Inno Setup 7 or 6, else the portable Inno Setup 7.1.0
+package that `scripts\fetch_innosetup.ps1` downloads once from nuget.org (SHA-256 checked)
+into `build\tools\innosetup\` — nothing is installed on the build machine. To rerun the
+frozen or installer tests against an existing build:
 
 ```powershell
 $env:PDFEDITOR_FROZEN_EXE = "$PWD\dist\PDFEditor\PDFEditor.exe"; uv run pytest -m frozen
+$env:PDFEDITOR_INSTALLER = "$PWD\dist\PDFEditor-0.1.0-setup.exe"; uv run pytest -m installer
 ```
+
+The installer tests install silently for the current user into a temporary folder (no
+shortcut, no "Open with" entry), upgrade, run `--self-check` from the installed copy and
+uninstall; they skip when PDF Editor is really installed on the machine.
 
 ## Requirements
 

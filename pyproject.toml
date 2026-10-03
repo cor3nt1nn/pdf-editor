@@ -48,4 +48,5 @@ testpaths = ["tests"]
 qt_api = "pyside6"
 markers = [
     "frozen: tests of the PyInstaller build (skipped unless PDFEDITOR_FROZEN_EXE is set)",
+    "installer: tests of the setup program (skipped unless PDFEDITOR_INSTALLER is set)",
 ]
