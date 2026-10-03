@@ -525,8 +525,14 @@ def _choose_font(
         embedded = _span_font_stub(span)
     plan = fontmatch.match(embedded, text, fonts=fonts)
     log.debug("font plan for %r: %s", text, plan)
+    if plan.kind is PlanKind.REUSE and not _map_borrowed(doc, embedded, text, plan):
+        log.info("font %d: borrowed codes cannot be mapped; not reused", embedded.xref)
+        plan = fontmatch.match(embedded, text, fonts=fonts, borrow=False)
     if plan.kind is PlanKind.REUSE:
         return plan, embedded, span.resource_name, embedded
+    own = _extend_own_font(doc, page_xref, span, text, fonts)
+    if own is not None:
+        return own[0], own[1], own[1].resource_name, embedded
     if plan.path is None:
         raise TextEditError(f"no installed font can show {text!r}", EditReason.NO_FONT)
     try:
@@ -534,6 +540,53 @@ def _choose_font(
     except FontEmbedError as exc:
         raise TextEditError(str(exc), EditReason.NO_FONT) from exc
     return plan, font, font.resource_name, embedded
+
+
+def _map_borrowed(doc: pymupdf.Document, font: EmbeddedFont, text: str, plan: FontPlan) -> bool:
+    """Give the codes a REUSE plan borrowed from the installed font's cmap (chars the
+    font's own encoding lacks) a ToUnicode entry, so that the new text is searchable and
+    copyable (:func:`fontembed.add_tounicode`). False when that is impossible."""
+    if font.kind is not FontKind.TYPE0 or not plan.codes:
+        return True
+    borrowed = {
+        code: ord(ch)
+        for ch, code in zip(text, plan.codes, strict=False)
+        if font.code_for(ch) is None
+    }
+    return not borrowed or fontembed.add_tounicode(doc, font.xref, borrowed)
+
+
+def _extend_own_font(
+    doc: pymupdf.Document,
+    page_xref: int,
+    span: Span,
+    text: str,
+    fonts: SystemFonts | None,
+) -> tuple[FontPlan, M7Font] | None:
+    """When ``span`` was written by one of our fonts (an earlier substitution) that lacks
+    some glyphs of ``text``: that font extended with them (no substitution warning, the
+    text keeps its font). None when the span is not ours or the installed face is gone or
+    lacks a character."""
+    ps_name = fontembed.own_font_ps_name(doc, span.font_xref) if span.resource_name else ""
+    if not ps_name:
+        return None
+    if fonts is None:
+        fonts = fontmatch.system_fonts()
+    for face in fonts.faces:
+        if fontembed.face_ps_name(face.postscript_name, face.family) != ps_name:
+            continue
+        if not face.embeddable or not fonts.covers(face, text):
+            continue
+        try:
+            font = fontembed.ensure_font(doc, page_xref, face.path, face.index, text)
+        except FontEmbedError as exc:
+            log.info("cannot extend font %s: %s", ps_name, exc)
+            continue
+        plan = FontPlan(
+            PlanKind.SYSTEM, face.family, face.path, face.index, reason="extends our font"
+        )
+        return plan, font
+    return None
 
 
 def _advance(font: M7Font | EmbeddedFont, ch: str, code: int) -> float:

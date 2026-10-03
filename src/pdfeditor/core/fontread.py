@@ -32,6 +32,8 @@ log = logging.getLogger(__name__)
 
 _SUBSET_RE = re.compile(r"^[A-Z]{6}\+")
 _REF_RE = re.compile(r"(\d+)\s+\d+\s+R")
+#: ``fontembed.BASE_FONT_SUFFIX`` (fontembed imports fontTools; keep this module light).
+_OWN_SUFFIX = "-PDFEditor"
 _STYLE_WORDS = ("bold", "italic", "oblique", "black", "heavy", "semibold", "demibold")
 
 
@@ -110,8 +112,11 @@ def _stream(doc: pymupdf.Document, xref: int) -> bytes:
 
 def split_base_font(base_font: str) -> tuple[str, str]:
     """``(family, style)`` from a ``/BaseFont``: subset prefix and ``#xx`` dropped, style
-    after "," or "-" ("Calibri,Bold", "Arial-BoldItalicMT" → "BoldItalic")."""
+    after "," or "-" ("Calibri,Bold", "Arial-BoldItalicMT" → "BoldItalic"). The suffix
+    of PDF Editor's own fonts ("Calibri-Bold-PDFEditor") is dropped too."""
     name = _SUBSET_RE.sub("", base_font)
+    if name.endswith(_OWN_SUFFIX):
+        name = name[: -len(_OWN_SUFFIX)]
     name = re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), name)
     for sep in (",", "-"):
         if sep in name:

@@ -171,9 +171,9 @@ def test_text_shows_and_extracts(tmp_path: Path) -> None:
     page = doc[0]
     font = fontembed.ensure_font(doc, page.xref, CALIBRI_PATH, 0, "Durand")
     page = _show(doc, page, font.resource_name, fontembed.encode(font, "Durand"))
-    assert _line_text(page) == [("Durand", "Calibri")]
+    assert _line_text(page) == [("Durand", "Calibri-PDFEditor")]
     reopened = pymupdf.open(stream=doc.tobytes(garbage=3, deflate=True))
-    assert _line_text(reopened[0]) == [("Durand", "Calibri")]
+    assert _line_text(reopened[0]) == [("Durand", "Calibri-PDFEditor")]
     assert LINE2.split()[-1] in reopened[0].get_text()  # other text untouched
 
 
@@ -224,7 +224,7 @@ def test_extend_font_keeps_glyphs_and_is_fast(tmp_path: Path) -> None:
     # nothing missing: the same font back, nothing rewritten
     assert fontembed.extend_font(doc, bigger, "Zad") is bigger
     page = _show(doc, page, bigger.resource_name, fontembed.encode(bigger, "DZurand"))
-    assert _line_text(page) == [("DZurand", "Calibri")]
+    assert _line_text(page) == [("DZurand", "Calibri-PDFEditor")]
     # an alias character (no-break space for space) needs no new glyph
     with_space = fontembed.extend_font(doc, bigger, "a b")
     assert fontembed.extend_font(doc, with_space, "a b") is with_space
@@ -299,7 +299,7 @@ def test_pypdf_strict_and_incremental(tmp_path: Path) -> None:
     doc.close()
     reader = strict_read(path).reader
     fonts = reader.pages[0]["/Resources"]["/Font"]
-    assert fonts["/PdfEd1"]["/BaseFont"] == "/PDFEDT+Calibri"
+    assert fonts["/PdfEd1"]["/BaseFont"] == "/PDFEDT+Calibri-PDFEditor"
     assert "Zidane" in reader.pages[0].extract_text()
 
 
@@ -314,7 +314,7 @@ def test_collection_face(tmp_path: Path) -> None:
     program = doc.xref_stream(font.file_xref)
     assert fontinfo.face_count(program) == 1 and fontinfo.names(program).family == "Cambria"
     page = _show(doc, page, font.resource_name, fontembed.encode(font, "Cambria"))
-    assert _line_text(page) == [("Cambria", "Cambria")]
+    assert _line_text(page) == [("Cambria", "Cambria-PDFEditor")]
 
 
 def _restricted_copy(tmp_path: Path) -> Path:

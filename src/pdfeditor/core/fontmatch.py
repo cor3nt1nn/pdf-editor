@@ -370,15 +370,20 @@ def _unicode_widths(font: EmbeddedFont) -> dict[int, float]:
     }
 
 
-def _reuse_codes(font: EmbeddedFont, text: str, fonts: SystemFonts | None) -> tuple[int, ...]:
+def _reuse_codes(
+    font: EmbeddedFont, text: str, fonts: SystemFonts | None, *, borrow: bool = True
+) -> tuple[int, ...]:
     """Codes of ``text`` in ``font``; a Type0 subset lacking an encoding for some
     characters borrows the cmap of the installed same font (same glyph count = same
-    glyph ids, plan F2). Raises ``KeyError`` when a character cannot be shown."""
+    glyph ids, plan F2; ``fonts`` defaults to :func:`system_fonts`, read only then).
+    Raises ``KeyError`` when a character cannot be shown."""
     try:
         return font.codes(text)
     except KeyError:
-        if font.kind is not FontKind.TYPE0 or fonts is None or font.code_to_gid:
+        if not borrow or font.kind is not FontKind.TYPE0 or font.code_to_gid:
             raise
+    if fonts is None:
+        fonts = system_fonts()
     for face in fonts.family_faces(font.family):
         if face.num_glyphs != font.num_glyphs or face.italic != font.italic:
             continue
@@ -400,16 +405,21 @@ def _reuse_codes(font: EmbeddedFont, text: str, fonts: SystemFonts | None) -> tu
 
 
 def match(
-    embedded: EmbeddedFont, needed_text: str, *, fonts: SystemFonts | None = None
+    embedded: EmbeddedFont,
+    needed_text: str,
+    *,
+    fonts: SystemFonts | None = None,
+    borrow: bool = True,
 ) -> FontPlan:
     """The font to write ``needed_text`` that was shown with ``embedded``.
 
     ``fonts`` defaults to :func:`system_fonts` (it is read only when the embedded font
-    cannot be reused).
+    cannot be reused). ``borrow=False`` forbids codes borrowed from the installed font's
+    cmap (used when they could not be added to the font's ToUnicode).
     """
     if embedded.editable:
         try:
-            codes = _reuse_codes(embedded, needed_text, fonts)
+            codes = _reuse_codes(embedded, needed_text, fonts, borrow=borrow)
         except KeyError:
             pass
         else:

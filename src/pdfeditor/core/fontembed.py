@@ -7,7 +7,7 @@ rewrites every font of the document, ``insert_font`` with a font file embeds the
 (1.6 MB for Calibri) with a /W and ToUnicode for every glyph (plan F6). So the objects
 are built here:
 
-* ``/Type0`` font, ``/BaseFont /PDFED+<PostScript name>``, ``/Encoding /Identity-H``,
+* ``/Type0`` font, ``/BaseFont /PDFEDT+<PostScript name>-PDFEditor``, ``/Encoding /Identity-H``,
   ``/ToUnicode`` (``bfchar`` for each used glyph), ``/DescendantFonts [CIDFontType2]``;
 * ``/CIDFontType2`` with ``/CIDToGIDMap /Identity`` (code = glyph id), ``/DW 1000`` and a
   ``/W`` for each used glyph;
@@ -58,6 +58,11 @@ log = logging.getLogger(__name__)
 RESOURCE_PREFIX = "PdfEd"
 #: ``/BaseFont`` prefix of the embedded fonts (marks them as ours, and as subsets).
 BASE_FONT_TAG = "PDFEDT+"
+#: ``/BaseFont`` suffix of the embedded fonts: MuPDF names a span after the base font
+#: without its subset prefix, so without it our "PDFEDT+Calibri" and a document's
+#: "ABCDEE+Calibri" were the same span font and neither could be matched (M7 review).
+#: Fonts embedded before it (no suffix) are still recognised.
+BASE_FONT_SUFFIX = "-PDFEditor"
 #: Tables dropped from the subset (layout is not applied when writing a run).
 DROP_TABLES = ("GSUB", "GPOS", "GDEF", "DSIG", "meta")
 _REGISTRY_ATTR = "_pdfeditor_m7_fonts"
@@ -115,7 +120,7 @@ def _load_source(path: str, index: int, mtime_ns: int, size: int) -> _Source:
         font = ttLib.TTFont(io.BytesIO(data), fontNumber=index, lazy=True)
         upem = int(font["head"].unitsPerEm) or 1000
         names = fontinfo.names(data, index)
-        ps_name = _PS_NAME_RE.sub("", names.postscript_name or names.family or "Font")
+        ps_name = face_ps_name(names.postscript_name, names.family)
         descriptor = _descriptor_values(font, upem, data, index)
         cmap = fontinfo.cmap(data, index)
         advances = fontinfo.advance_widths(data, index)
@@ -218,7 +223,7 @@ class M7Font:
 
     @property
     def base_font(self) -> str:
-        return BASE_FONT_TAG + self.ps_name
+        return base_font_name(self.ps_name)
 
     def gid_for(self, ch: str) -> int | None:
         """The glyph showing ``ch``, ``None`` when it is not in the subset yet."""
@@ -262,6 +267,27 @@ def _ref(value: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def base_font_name(ps_name: str) -> str:
+    """The ``/BaseFont`` (without "/") of our font for the face ``ps_name``."""
+    return BASE_FONT_TAG + ps_name + BASE_FONT_SUFFIX
+
+
+def strip_own_suffix(name: str) -> str:
+    """``name`` without :data:`BASE_FONT_SUFFIX` (a span font of ours → the face name)."""
+    return name[: -len(BASE_FONT_SUFFIX)] if name.endswith(BASE_FONT_SUFFIX) else name
+
+
+def face_ps_name(postscript_name: str, family: str = "") -> str:
+    """The key of an installed face in the registry (its PostScript name, sanitised)."""
+    return _PS_NAME_RE.sub("", postscript_name or family or "Font") or "Font"
+
+
+def own_font_ps_name(doc: pymupdf.Document, xref: int) -> str:
+    """The PostScript name of the installed face behind font ``xref`` when it is one of
+    ours (embedded by this module), else ""."""
+    return _is_ours(doc, xref) if xref else ""
+
+
 def _is_ours(doc: pymupdf.Document, xref: int) -> str:
     """The PostScript name of our ``/Type0`` font ``xref``, "" when it is not one."""
     kind, subtype = _key(doc, xref, "Subtype")
@@ -271,7 +297,7 @@ def _is_ours(doc: pymupdf.Document, xref: int) -> str:
     prefix = "/" + BASE_FONT_TAG
     if kind != "name" or not base.startswith(prefix):
         return ""
-    return base[len(prefix) :]
+    return strip_own_suffix(base[len(prefix) :])
 
 
 def _page_font_dict(doc: pymupdf.Document, page_xref: int) -> dict[str, int]:
@@ -396,7 +422,6 @@ def _utf16_hex(u: int) -> str:
 
 def tounicode_cmap(gid_to_unicode: Mapping[int, int]) -> bytes:
     """A ToUnicode CMap (``bfchar`` blocks of ≤ 100 entries) for 2-byte codes."""
-    items = sorted(gid_to_unicode.items())
     lines = [
         "/CIDInit /ProcSet findresource begin",
         "12 dict begin",
@@ -408,11 +433,7 @@ def tounicode_cmap(gid_to_unicode: Mapping[int, int]) -> bytes:
         "<0000> <FFFF>",
         "endcodespacerange",
     ]
-    for start in range(0, len(items), 100):
-        chunk = items[start : start + 100]
-        lines.append(f"{len(chunk)} beginbfchar")
-        lines += [f"<{gid:04X}> <{_utf16_hex(u)}>" for gid, u in chunk]
-        lines.append("endbfchar")
+    lines += _bfchar_blocks(gid_to_unicode)
     lines += [
         "endcmap",
         "CMapName currentdict /CMap defineresource pop",
@@ -420,6 +441,56 @@ def tounicode_cmap(gid_to_unicode: Mapping[int, int]) -> bytes:
         "end",
     ]
     return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def _bfchar_blocks(code_to_unicode: Mapping[int, int]) -> list[str]:
+    items = sorted(code_to_unicode.items())
+    lines: list[str] = []
+    for start in range(0, len(items), 100):
+        chunk = items[start : start + 100]
+        lines.append(f"{len(chunk)} beginbfchar")
+        lines += [f"<{code:04X}> <{_utf16_hex(u)}>" for code, u in chunk]
+        lines.append("endbfchar")
+    return lines
+
+
+def add_tounicode(
+    doc: pymupdf.Document, font_xref: int, code_to_unicode: Mapping[int, int]
+) -> bool:
+    """Map the 2-byte ``codes`` of the Type0 font ``font_xref`` to their characters in its
+    ``/ToUnicode`` CMap, so that text written with codes the CMap lacked (a document
+    subset's glyphs found through the installed font's cmap) is searchable and copyable.
+
+    Codes the CMap already maps are left alone; the others are appended as one ``bfchar``
+    block before ``endcmap`` (a stream is created when the font has no ``/ToUnicode``).
+    Idempotent, and harmless to text written before (those codes were unmapped, so they
+    extracted as garbage). False when the CMap cannot be extended (not a stream, no
+    ``endcmap``): the caller then writes with another font."""
+    kind, value = _key(doc, font_xref, "ToUnicode")
+    if kind == "null":
+        xref = _new_object(doc, "<<>>")
+        doc.update_stream(xref, tounicode_cmap(code_to_unicode), compress=True)
+        doc.xref_set_key(font_xref, "ToUnicode", f"{xref} 0 R")
+        log.info("font %d: new ToUnicode %d (%d codes)", font_xref, xref, len(code_to_unicode))
+        return True
+    xref = _ref(value) if kind == "xref" else 0
+    if not xref:
+        return False
+    try:
+        data = doc.xref_stream(xref) or b""
+    except Exception:  # noqa: BLE001 - an unreadable stream cannot be extended
+        return False
+    existing = fontinfo.tounicode_map(data)
+    new = {c: u for c, u in code_to_unicode.items() if c not in existing}
+    if not new:
+        return True
+    end = data.rfind(b"endcmap")
+    if end < 0:
+        return False
+    block = ("\n".join(_bfchar_blocks(new)) + "\n").encode("ascii")
+    doc.update_stream(xref, data[:end] + block + data[end:], compress=True)
+    log.info("font %d: %d codes added to ToUnicode %d", font_xref, len(new), xref)
+    return True
 
 
 def _new_object(doc: pymupdf.Document, source: str) -> int:
@@ -436,7 +507,7 @@ def _write_program(doc: pymupdf.Document, file_xref: int, program: bytes) -> Non
 def _create_font(doc: pymupdf.Document, src: _Source) -> int:
     """Create the five objects of a font for ``src`` (the program, /W and ToUnicode are
     written by :func:`_write_glyphs`)."""
-    base = "/" + BASE_FONT_TAG + src.ps_name
+    base = "/" + base_font_name(src.ps_name)
     d = src.descriptor
     file_xref = _new_object(doc, "<<>>")
     doc.update_stream(file_xref, b"", compress=False)
