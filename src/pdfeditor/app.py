@@ -23,7 +23,10 @@ from pdfeditor.paths import LOG_DIR_ENV, LOG_NAME, is_frozen, log_path
 __all__ = [
     "LOG_DIR_ENV",
     "LOG_NAME",
+    "REGISTER_FLAG",
+    "UNREGISTER_FLAG",
     "configure_logging",
+    "file_type_registration",
     "install_translators",
     "is_frozen",
     "log_path",
@@ -41,6 +44,10 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 SELF_CHECK_LOG = "self-check.log"
 #: Hidden first argument of the OCR worker process (see ``core/ocr_worker.py``).
 OCR_WORKER_FLAG = "--ocr-worker"
+#: Hidden first arguments run by the Windows installer (M8): add PDF Editor to, or remove
+#: it from, the "Open with" list of PDF files (``core/file_assoc.py``), then exit.
+REGISTER_FLAG = "--register-file-type"
+UNREGISTER_FLAG = "--unregister-file-type"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -107,6 +114,24 @@ def self_check(directory: str | os.PathLike[str]) -> int:
         _drop_file_handlers(logging.getLogger())
 
 
+def file_type_registration(register: bool) -> int:
+    """The hidden ``--register-file-type`` / ``--unregister-file-type`` modes (no window,
+    no Qt application, no file log: the uninstaller runs it and must not recreate the
+    user's data folder). Returns 0 on success, 1 on failure; never raises, since a
+    windowed build would show a traceback box in the middle of a silent install."""
+    from pdfeditor.core import file_assoc
+
+    try:
+        if register:
+            file_assoc.register()
+        else:
+            file_assoc.unregister()
+    except Exception:  # noqa: BLE001 - reported by the exit code
+        log.exception("could not %s the PDF file type", "register" if register else "unregister")
+        return 1
+    return 0
+
+
 def _log_uncaught(kind, value, tb) -> None:  # noqa: ANN001 - sys.excepthook signature
     log.critical("uncaught exception", exc_info=(kind, value, tb))
 
@@ -118,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         from pdfeditor.core.ocr_worker import main as ocr_worker_main
 
         return ocr_worker_main()
+    if argv[1:2] in ([REGISTER_FLAG], [UNREGISTER_FLAG]):
+        return file_type_registration(argv[1] == REGISTER_FLAG)
     args = parse_args(argv[1:])
     if args.self_check:
         return self_check(args.self_check)
