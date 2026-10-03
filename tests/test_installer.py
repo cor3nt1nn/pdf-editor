@@ -4,7 +4,7 @@ Skipped unless ``PDFEDITOR_INSTALLER`` names the built setup:
 
     powershell -File scripts\\build_exe.ps1 -Installer -Smoke
     # or, after a build:
-    $env:PDFEDITOR_INSTALLER = "$PWD\\dist\\PDFEditor-0.1.0-setup.exe"; uv run pytest -m installer
+    $env:PDFEDITOR_INSTALLER = "$PWD\\dist\\PDFEditor-0.2.0-setup.exe"; uv run pytest -m installer
 
 A silent per-user install into a temporary folder (no shortcut, no "Open with" entry),
 an upgrade over it and a silent uninstall. The only real registry key touched is the

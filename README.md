@@ -21,7 +21,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 
 ### Install (setup) — recommended
 
-1. Download `PDFEditor-<version>-setup.exe` (for example `PDFEditor-0.1.0-setup.exe`,
+1. Download `PDFEditor-<version>-setup.exe` (for example `PDFEditor-0.2.0-setup.exe`,
    about 38 MB).
 2. Run it. The program is not signed, so Windows SmartScreen may say "Windows protected your
    PC": click **More info ▸ Run anyway**.
@@ -48,7 +48,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 
 No installation: the program runs from any folder, for example a USB stick.
 
-1. Download `PDFEditor-<version>-win64.zip` (for example `PDFEditor-0.1.0-win64.zip`).
+1. Download `PDFEditor-<version>-win64.zip` (for example `PDFEditor-0.2.0-win64.zip`).
 2. Extract it: it contains one `PDFEditor` folder. Put that folder anywhere you like, for
    example `Documents\PDFEditor` or a USB stick (no administrator rights needed; not the
    setup's folder `%LOCALAPPDATA%\Programs\PDFEditor`).
@@ -76,7 +76,7 @@ then delete the `PDFEditor` folder and, to remove your settings, signatures and 
 
 ### Installation (programme d’installation) — recommandée
 
-1. Téléchargez `PDFEditor-<version>-setup.exe` (par exemple `PDFEditor-0.1.0-setup.exe`,
+1. Téléchargez `PDFEditor-<version>-setup.exe` (par exemple `PDFEditor-0.2.0-setup.exe`,
    environ 38 Mo).
 2. Lancez-le. Le programme n’est pas signé : si Windows SmartScreen affiche « Windows a
    protégé votre ordinateur », cliquez sur **Informations complémentaires ▸ Exécuter quand
@@ -110,7 +110,7 @@ then delete the `PDFEditor` folder and, to remove your settings, signatures and 
 Sans installation : le programme fonctionne depuis n’importe quel dossier, par exemple une
 clé USB.
 
-1. Téléchargez `PDFEditor-<version>-win64.zip` (par exemple `PDFEditor-0.1.0-win64.zip`).
+1. Téléchargez `PDFEditor-<version>-win64.zip` (par exemple `PDFEditor-0.2.0-win64.zip`).
 2. Extrayez-le : il contient un dossier `PDFEditor`. Placez ce dossier où vous voulez, par
    exemple `Documents\PDFEditor` ou une clé USB (aucun droit d’administrateur nécessaire ;
    pas le dossier de l’installation, `%LOCALAPPDATA%\Programs\PDFEditor`).
@@ -158,7 +158,7 @@ frozen or installer tests against an existing build:
 
 ```powershell
 $env:PDFEDITOR_FROZEN_EXE = "$PWD\dist\PDFEditor\PDFEditor.exe"; uv run pytest -m frozen
-$env:PDFEDITOR_INSTALLER = "$PWD\dist\PDFEditor-0.1.0-setup.exe"; uv run pytest -m installer
+$env:PDFEDITOR_INSTALLER = "$PWD\dist\PDFEditor-0.2.0-setup.exe"; uv run pytest -m installer
 ```
 
 The installer tests install silently for the current user into a temporary folder (no
