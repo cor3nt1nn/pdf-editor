@@ -780,8 +780,10 @@ Editor (nothing is downloaded, nothing leaves the computer). When a document loo
 a banner above the pages says so ("This document looks scanned: …") with a **Recognise
 text…** button.
 
-- **Pages**: *This page*, *Pages without text* (default: scans and blank pages) or *All
-  pages*. Pages that already have text are recognised but never get a second text layer.
+- **Pages**: *This page*, *Pages without text* (default: scans and blank pages, including
+  scans whose only real text is a small stamp such as a scanner header or a Bates number)
+  or *All pages*. Pages that already have text are recognised but never get a second text
+  layer; on a stamped scan the stamp's words are not written again.
 - **Make the text searchable (saved with the file)** (default on): the recognised words are
   written into the page as invisible text, exactly over the words of the image. The page
   looks the same; Ctrl+F in any viewer finds the words, and selection, copy and

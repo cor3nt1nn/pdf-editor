@@ -111,14 +111,16 @@ class OcrDialog(QDialog):
 
     def pages(self) -> list[int]:
         """The pages to recognise for the chosen scope (the pages without text are those
-        whose content shows no text: scans, blank pages)."""
+        whose content shows no text — scans, blank pages — and scans whose only text is a
+        small stamp: ``PdfDocument.lacks_text``, cheap and cached, never the full page
+        text)."""
         doc = self._document
         scope = self.scope()
         if scope == "page":
             return [self._current]
         if scope == "all":
             return list(range(doc.page_count))
-        return [i for i in range(doc.page_count) if not doc.has_content_text(i)]
+        return [i for i in range(doc.page_count) if doc.lacks_text(i)]
 
     def save_choices(self) -> None:
         self._settings.ocr_scope = self.scope()

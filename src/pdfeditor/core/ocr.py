@@ -16,8 +16,9 @@ rotation at recognition time; :meth:`PageOcr.rotated` follows later rotations an
 :meth:`PageOcr.rawdict` feeds :meth:`pagetext.PageText.from_rawdict` (in-memory OCR text,
 invisible spans).
 
-:func:`is_scanned_page` tells a page that looks like a scan (no text, mostly image, few
-vector paths) from a digital one.
+:func:`is_scanned_page` tells a page that looks like a scan (no text but perhaps a small
+stamp, mostly image, few vector paths) from a digital one; :func:`text_profile` tells
+painted text from an invisible OCR layer.
 """
 
 from __future__ import annotations
@@ -50,6 +51,10 @@ SCAN_IMAGE_COVERAGE = 0.5
 #: ... and it draws at most this many vector paths (a digital page with outlined text
 #: draws hundreds).
 MAX_SCAN_DRAWINGS = 20
+#: A scan may carry a little real text (a scanner's header line, a Bates number): it
+#: still counts as a scan when its painted text covers less than this fraction of the
+#: page (M8 review m6).
+STAMP_TEXT_COVERAGE = 0.02
 #: Version of :meth:`PageOcr.to_json`.
 JSON_VERSION = 1
 
@@ -509,10 +514,56 @@ def image_info(page: pymupdf.Page) -> list[dict[str, Any]]:
     return textpage.extractIMGINFO()
 
 
-def page_has_text(page: pymupdf.Page) -> bool:
-    """The page's content (annotations left out) shows at least one non-space char."""
+@dataclass(frozen=True)
+class TextProfile:
+    """What text a page's content (annotations left out) shows: the boxes of its painted
+    spans (page space, spans of spaces left out) and whether it has unpainted text
+    (render mode 3 or alpha 0: an OCR layer, ours or another program's)."""
+
+    visible: tuple[Rect, ...] = ()
+    invisible: bool = False
+
+    @property
+    def has_text(self) -> bool:
+        return bool(self.visible) or self.invisible
+
+
+def text_profile(page: pymupdf.Page) -> TextProfile:
+    """The :class:`TextProfile` of ``page`` (one plain text extraction, no fonts)."""
     textpage = pymupdf.TextPage(page.get_displaylist(annots=False).get_textpage(0))
-    return bool(textpage.extractText().strip())
+    visible: list[Rect] = []
+    invisible = False
+    for block in textpage.extractDICT().get("blocks", ()):
+        if block.get("type", 0) != 0:
+            continue
+        for line in block.get("lines", ()):
+            for span in line.get("spans", ()):
+                if not str(span.get("text", "")).strip():
+                    continue
+                if int(span.get("alpha", 255)) == 0:
+                    invisible = True
+                else:
+                    visible.append(_rect(span.get("bbox", (0, 0, 0, 0))))
+    return TextProfile(tuple(visible), invisible)
+
+
+def page_has_text(page: pymupdf.Page) -> bool:
+    """The page's content (annotations left out) shows at least one non-space char,
+    painted or not."""
+    return text_profile(page).has_text
+
+
+def text_coverage(boxes: Iterable[Rect], frame: pymupdf.Rect) -> float:
+    """Fraction of ``frame`` covered by ``boxes`` (clipped; overlaps counted twice)."""
+    area = frame.width * frame.height
+    if area <= 0:
+        return 0.0
+    covered = 0.0
+    for box in boxes:
+        r = pymupdf.Rect(box).normalize() & frame
+        if not r.is_empty:
+            covered += r.width * r.height
+    return min(covered / area, 1.0)
 
 
 def image_coverage(page: pymupdf.Page) -> float:
@@ -531,14 +582,35 @@ def image_coverage(page: pymupdf.Page) -> float:
     return min(covered / area, 1.0)
 
 
-def is_scanned_page(page: pymupdf.Page) -> bool:
-    """``page`` looks like a scan without text: no text, images cover at least
-    :data:`SCAN_IMAGE_COVERAGE` of it, at most :data:`MAX_SCAN_DRAWINGS` vector paths.
-    Caller holds the document lock."""
+def is_scanned_page(
+    page: pymupdf.Page,
+    *,
+    ignore_invisible: bool = False,
+    profile: TextProfile | None = None,
+) -> bool:
+    """``page`` looks like a scan without text: images cover at least
+    :data:`SCAN_IMAGE_COVERAGE` of it, it draws at most :data:`MAX_SCAN_DRAWINGS` vector
+    paths, it has no unpainted text (an OCR layer: the scan was recognised already;
+    ``ignore_invisible`` leaves it out, for snapping) and its painted text, if any, covers
+    less than :data:`STAMP_TEXT_COVERAGE` of it (a scanner stamp). ``profile``: the
+    page's :func:`text_profile` when the caller has it. Caller holds the document lock."""
     from pdfeditor.core.snapping import vector_paths
 
-    if page_has_text(page):
+    if profile is None:
+        profile = text_profile(page)
+    if profile.invisible and not ignore_invisible:
+        return False
+    if profile.visible and text_coverage(profile.visible, page.rect) >= STAMP_TEXT_COVERAGE:
         return False
     if image_coverage(page) < SCAN_IMAGE_COVERAGE:
         return False
     return len(vector_paths(page)) <= MAX_SCAN_DRAWINGS
+
+
+def scan_state(page: pymupdf.Page) -> tuple[bool, bool]:
+    """``(scanned, lacks_text)`` of ``page``: :func:`is_scanned_page`, and whether the
+    page needs recognising — no text at all (scans, blank pages) or a scan whose only text
+    is a small stamp. One text extraction for both. Caller holds the document lock."""
+    profile = text_profile(page)
+    scanned = is_scanned_page(page, profile=profile)
+    return scanned, scanned or not profile.has_text

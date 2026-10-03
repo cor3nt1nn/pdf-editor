@@ -37,11 +37,12 @@ from __future__ import annotations
 import io
 import logging
 import re
+from collections.abc import Sequence
 from functools import cache
 
 import pymupdf
 
-from pdfeditor.core.ocr import OcrError, OcrLine, PageOcr
+from pdfeditor.core.ocr import OcrError, OcrLine, PageOcr, Rect, text_profile
 from pdfeditor.core.pdfdict import get_nested, inherited, inherited_owner, set_nested
 
 log = logging.getLogger(__name__)
@@ -95,8 +96,28 @@ def _unit(d: tuple[float, float]) -> tuple[float, float]:
     return d[0] / n, d[1] / n
 
 
-def _line_ops(line: OcrLine, inv: pymupdf.Matrix) -> list[bytes]:
-    """``Tf Tz Tm Tj`` of each word of ``line``."""
+#: An OCR word is left out of the layer when existing painted text covers this fraction
+#: of its box (a scanner stamp that is real text already, M8 review m6).
+OVERLAP_RATIO = 0.3
+
+
+def _covered(rect: tuple[float, float, float, float], boxes: Sequence[Rect]) -> bool:
+    x0, y0, x1, y1 = rect
+    area = (x1 - x0) * (y1 - y0)
+    if area <= 0:
+        return False
+    hit = 0.0
+    for bx0, by0, bx1, by1 in boxes:
+        w = min(x1, bx1) - max(x0, bx0)
+        h = min(y1, by1) - max(y0, by0)
+        if w > 0 and h > 0:
+            hit += w * h
+    return hit >= OVERLAP_RATIO * area
+
+
+def _line_ops(line: OcrLine, inv: pymupdf.Matrix, skip: Sequence[Rect] = ()) -> list[bytes]:
+    """``Tf Tz Tm Tj`` of each word of ``line`` (words over the ``skip`` boxes, the page's
+    own painted text, left out)."""
     dx, dy = _unit(line.dir)
     nx, ny = -dy, dx  # across the line, towards the bottom of the glyphs
     lin = pymupdf.Matrix(inv.a, inv.b, inv.c, inv.d, 0, 0)
@@ -113,6 +134,8 @@ def _line_ops(line: OcrLine, inv: pymupdf.Matrix) -> list[bytes]:
         c0, c1 = min(across), max(across)
         width, height = a1 - a0, c1 - c0
         if width <= 0 or height < MIN_WORD_HEIGHT or not word.text.strip():
+            continue
+        if skip and _covered(word.rect, skip):
             continue
         size = SIZE_RATIO * height
         shown = word.text.encode("cp1252", "replace").decode("cp1252")
@@ -138,13 +161,14 @@ def _line_ops(line: OcrLine, inv: pymupdf.Matrix) -> list[bytes]:
     return ops
 
 
-def layer_stream(page: pymupdf.Page, ocr: PageOcr) -> bytes:
-    """The layer's content stream for ``ocr`` (page space of ``page`` as it is now)."""
+def layer_stream(page: pymupdf.Page, ocr: PageOcr, skip: Sequence[Rect] = ()) -> bytes:
+    """The layer's content stream for ``ocr`` (page space of ``page`` as it is now);
+    words over the ``skip`` boxes (page space) are left out."""
     inv = page_to_content_matrix(page)
     out = io.BytesIO()
     out.write(LAYER_MARKER + b"\nQ\nq\nBT\n3 Tr\n")
     for line in ocr.lines:
-        for op in _line_ops(line, inv):
+        for op in _line_ops(line, inv, skip):
             out.write(op)
     out.write(b"ET\nQ\n")
     return out.getvalue()
@@ -246,15 +270,17 @@ def _set_contents(doc: pymupdf.Document, page_xref: int, xrefs: list[int]) -> No
 
 def add_layer(doc: pymupdf.Document, page: pymupdf.Page, ocr: PageOcr) -> int:
     """Append ``ocr``'s words to ``page`` as an invisible text layer; returns the number
-    of words written. Raises :class:`OcrError` (``"exists"``) when the page already has
-    one, ``ValueError`` when ``ocr`` was made for another rotation. The caller reloads
-    the page (or re-fetches it) before reading it again."""
+    of words written (words over the page's own painted text are left out). Raises
+    :class:`OcrError` (``"exists"``) when the page already has one, ``ValueError`` when
+    ``ocr`` was made for another rotation. The caller reloads the page (or re-fetches
+    it) before reading it again."""
     rotation = int(page.rotation) % 360
     if ocr.rotation != rotation:
         raise ValueError(f"OCR result for rotation {ocr.rotation}, page has {rotation}")
     if has_layer(doc, page):
         raise OcrError("the page already has an OCR text layer", "exists")
-    data = layer_stream(page, ocr)
+    # A scan with a little real text (a stamp): the stamp's words are not written again.
+    data = layer_stream(page, ocr, text_profile(page).visible)
     words = data.count(b" Tj\n")
     contents = list(page.get_contents())
     prefix = _new_stream(doc, PREFIX_MARKER + b"\nq\n")

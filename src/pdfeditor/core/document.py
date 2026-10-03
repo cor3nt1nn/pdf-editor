@@ -223,8 +223,9 @@ class PdfDocument(QObject):
         self._shapes_cache: dict[int, PageShapes] = {}
         # Selectable text by page (read without the lock, written under it).
         self._text_cache: dict[int, PageText] = {}
-        # "Looks scanned" by page (is_scanned_page), dropped with the text cache.
-        self._scan_cache: dict[int, bool] = {}
+        # (looks scanned, lacks text) by page (ocr.scan_state), dropped with the text
+        # cache.
+        self._scan_cache: dict[int, tuple[bool, bool]] = {}
         # Text recognised this session (M8), by page id: follows page moves, survives
         # saves and reloads, dropped on close. In the page's rotation at recognition.
         self._ocr_cache: dict[PageId, PageOcr] = {}
@@ -1184,7 +1185,8 @@ class PdfDocument(QObject):
         A cache hit never takes the lock (hover must not wait for a render); only a miss
         scans under it. A page that cannot be scanned has no shapes.
 
-        A scanned page (no vector shape, :meth:`is_scanned_page`) gets the rules found in
+        A scanned page (no vector shape, :func:`ocr.is_scanned_page` with its invisible
+        text left out, so an OCR layer changes nothing) gets the rules found in
         a 100 dpi grey render of it instead (M8, :mod:`pdfeditor.core.scan_shapes`; the
         render takes the lock, the ≈0.1 s of pixel work does not), plus the dotted
         leaders of its :meth:`page_ocr` words.
@@ -1201,7 +1203,8 @@ class PdfDocument(QObject):
             try:
                 page = self.fitz[i]
                 cached = snapping.scan_page(page)
-                if _no_shapes(cached) and self.is_scanned_page(i):
+                # An OCR layer (invisible text) must not take the scan's rules away.
+                if _no_shapes(cached) and ocr.is_scanned_page(page, ignore_invisible=True):
                     image = _grey_render(page, scan_shapes.RENDER_DPI)
                 del page
             except Exception:  # MuPDF raises FzError* (not RuntimeError)
@@ -1326,9 +1329,9 @@ class PdfDocument(QObject):
                 raise OcrError(f"page {i + 1} could not be rendered: {exc}") from exc
         return replace(request, page=i)
 
-    def is_scanned_page(self, i: int) -> bool:
-        """Page ``i`` looks like a scan without text (:func:`ocr.is_scanned_page`),
-        cached like :meth:`page_text`."""
+    def _scan_state(self, i: int) -> tuple[bool, bool]:
+        """(:meth:`is_scanned_page`, :meth:`lacks_text`) of page ``i``, cached like
+        :meth:`page_text` (one plain text extraction, never the full page text)."""
         cached = self._scan_cache.get(i)
         if cached is not None:
             return cached
@@ -1336,13 +1339,24 @@ class PdfDocument(QObject):
         with self.lock:
             try:
                 page = self.fitz[i]
-                cached = ocr.is_scanned_page(page)
+                cached = ocr.scan_state(page)
                 del page
             except Exception:  # MuPDF raises FzError* (not RuntimeError)
                 log.warning("could not inspect page %d", i, exc_info=True)
-                cached = False
+                cached = (False, False)
         self._scan_cache[i] = cached
         return cached
+
+    def is_scanned_page(self, i: int) -> bool:
+        """Page ``i`` looks like a scan without text — or with only a small text stamp —
+        and without an OCR layer (:func:`ocr.is_scanned_page`); cached."""
+        return self._scan_state(i)[0]
+
+    def lacks_text(self, i: int) -> bool:
+        """Page ``i`` needs recognising: its content shows no text at all (a scan, a blank
+        page) or it is a scan whose only text is a small stamp (:meth:`is_scanned_page`).
+        Cheap and cached: the scope "Pages without text" asks it of every page."""
+        return self._scan_state(i)[1]
 
     def scanned_pages(self, limit: int | None = None) -> list[int]:
         """The pages that look scanned without text, among the first ``limit`` pages (all

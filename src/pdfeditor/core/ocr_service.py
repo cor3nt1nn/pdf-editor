@@ -10,9 +10,10 @@ recognises page *n* (≈0.6 s), page *n + 1* is rendered, so the window stays re
 
 Each result is stored as it arrives (``PdfDocument.set_page_ocr``; a cancelled or failed
 run keeps the pages done) and, with ``make_searchable``, written into the page as an
-invisible text layer when the document allows it (``can_modify``) and the page has no
-content text yet — through one batch :class:`~pdfeditor.core.commands.AddOcrLayerCommand`
-("Recognise text") that the caller pushes once the run is over (:meth:`take_command`).
+invisible text layer when the document allows it (``can_modify``) and the page lacks
+text (``PdfDocument.lacks_text``: none, or only a scanner stamp) and has no layer yet —
+through one batch :class:`~pdfeditor.core.commands.AddOcrLayerCommand` ("Recognise text")
+that the caller pushes once the run is over (:meth:`take_command`).
 
 Signals: ``page_done(index, PageOcr)``, ``page_failed(index, message)`` (that page only),
 ``progress(done, total)``, ``finished(cancelled)`` (normal end or :meth:`cancel`) and
@@ -297,7 +298,7 @@ class OcrService(QObject):
         doc.set_page_ocr(index, result)
         if self._make_searchable and doc.can_modify and not result.is_empty:
             try:
-                if not doc.has_content_text(index) and not doc.has_ocr_layer(index):
+                if doc.lacks_text(index) and not doc.has_ocr_layer(index):
                     self._layer(index, result)
             except OcrError as exc:
                 self.page_failed.emit(index, str(exc))
