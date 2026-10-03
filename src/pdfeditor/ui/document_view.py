@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from pdfeditor.core.document import PasswordCallback, PdfDocument
 from pdfeditor.core.forms import XfaKind
+from pdfeditor.core.ocr_service import OcrService
 from pdfeditor.ui.banner import InfoBanner
 from pdfeditor.ui.overlays.annot_editor import AnnotTextEditor
 from pdfeditor.ui.overlays.annot_items import AnnotSelection
@@ -23,6 +24,9 @@ from pdfeditor.ui.page_view import PageView
 
 log = logging.getLogger(__name__)
 
+#: The "looks scanned" banner examines at most this many pages (from the first).
+SCAN_BANNER_PAGES = 50
+
 
 class DocumentView(QWidget):
     """Owns the current PdfDocument (SDI) and one QUndoStack for it."""
@@ -33,6 +37,8 @@ class DocumentView(QWidget):
     #: the exception). The undo history is already cleared and the document marked
     #: modified (docs/ARCHITECTURE.md Deviation 90).
     history_failed = Signal(str, object)
+    #: The banner's "Recognise text…" button was clicked (M8).
+    recognise_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -60,6 +66,12 @@ class DocumentView(QWidget):
         # ReplaceTextCommand for each ``run_committed``).
         self.text_hover = TextHover(self.page_view, self)
         self.textedit_editor = TextRunEditor(self.page_view, parent=self)
+        # Background text recognition of the current document (M8; MainWindow starts it
+        # and pushes its command). Cancelled when the document is replaced.
+        self.ocr_service = OcrService(self)
+        self.ocr_service.finished.connect(self._refresh_banner)
+        self.ocr_service.failed.connect(self._refresh_banner)
+        self.banner.action_triggered.connect(self.recognise_requested)
         self._document: PdfDocument | None = None
 
     @property
@@ -150,6 +162,9 @@ class DocumentView(QWidget):
         self.history_failed.emit(kind, error)
 
     def _replace(self, document: PdfDocument | None) -> None:
+        # A run on the old document stops (its finished(True) lets the window push what
+        # was done onto the old stack, cleared below).
+        self.ocr_service.cancel()
         old = self._document
         if old is not None:
             old.path_changed.disconnect(self.path_changed)
@@ -233,15 +248,34 @@ class DocumentView(QWidget):
                 ),
                 "info",
             )
-        return None
+        return self._scan_message(doc)
 
-    def _refresh_banner(self) -> None:
+    def _scan_message(self, doc: PdfDocument) -> tuple[str, str, str] | None:
+        """The "looks scanned" notice with its "Recognise text…" button (M8): some of the
+        first :data:`SCAN_BANNER_PAGES` pages are scans without text that were not
+        recognised yet (not while a recognition runs)."""
+        if self.ocr_service.is_running:
+            return None
+        examined = min(doc.page_count, SCAN_BANNER_PAGES)
+        pending = [i for i in doc.scanned_pages(limit=examined) if not doc.has_page_ocr(i)]
+        if not pending:
+            return None
+        text = self.tr(
+            "This document looks scanned: {n} of {m} pages have no selectable text."
+        ).format(n=len(pending), m=examined)
+        return (text, "info", self.tr("Recognise text…"))
+
+    def refresh_banner(self) -> None:
+        """Re-evaluate the banner (after a text recognition, for instance)."""
+        self._refresh_banner()
+
+    def _refresh_banner(self, *_args: object) -> None:
         """Show the banner for the current state; a message the user closed stays closed
         (until the document changes), a message that no longer applies disappears."""
         message = self.banner_message()
         if message is None:
             self.banner.clear()
-        elif message != self.banner.message:
+        elif tuple(message[:2]) != self.banner.message:
             self.banner.show_message(*message)
 
     @staticmethod
@@ -266,6 +300,7 @@ class DocumentView(QWidget):
         self.annot_selection.clear()
         self.text_selection.clear()
         self.text_hover.clear()
+        self.ocr_service.shutdown()  # kills a running worker, no signal
         service = self.page_view.service
         service.stop()  # asks the worker to stop; waits up to 1 s
         if self._document is not None:

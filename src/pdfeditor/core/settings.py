@@ -21,6 +21,9 @@ MARKUP_COLOR_DEFAULTS = {
 #: Environment variable naming a directory that holds the INI file instead of the
 #: per-user location (``%APPDATA%\PDFEditor\PDFEditor.ini``). Used by the frozen tests.
 SETTINGS_DIR_ENV = "PDFEDITOR_SETTINGS_DIR"
+#: Page scopes of the Recognise Text dialog (M8): the current page, the pages without
+#: text (default), every page.
+OCR_SCOPES = ("page", "without_text", "all")
 
 
 def default_qsettings() -> QSettings:
@@ -289,3 +292,25 @@ class Settings:
     @markup_strikeout_color.setter
     def markup_strikeout_color(self, value: str) -> None:
         self.set_markup_color("strikeout", value)
+
+    # -- text recognition (M8) ---------------------------------------------
+    @property
+    def ocr_make_searchable(self) -> bool:
+        """Recognised text is written into the pages (saved with the file)."""
+        return self._bool("ocr/make_searchable", True)
+
+    @ocr_make_searchable.setter
+    def ocr_make_searchable(self, value: bool) -> None:
+        self._s.setValue("ocr/make_searchable", bool(value))
+
+    @property
+    def ocr_scope(self) -> str:
+        """Pages the Recognise Text dialog proposes: one of :data:`OCR_SCOPES`."""
+        value = self._str("ocr/scope", OCR_SCOPES[1])
+        return value if value in OCR_SCOPES else OCR_SCOPES[1]
+
+    @ocr_scope.setter
+    def ocr_scope(self, value: str) -> None:
+        if value not in OCR_SCOPES:
+            raise ValueError(f"unknown OCR scope: {value!r}")
+        self._s.setValue("ocr/scope", value)

@@ -177,6 +177,7 @@ def test_process_cannot_start(qtbot, mixed_doc, tmp_path) -> None:
     with qtbot.waitSignal(service.failed, timeout=TIMEOUT_MS):
         service.start(mixed_doc, [1])
     assert "could not be started" in seen.failed[0]
+    assert service.failure_reason == "start"
     assert not service.is_running and seen.finished == []
 
 
@@ -186,6 +187,7 @@ def test_process_exits_early(qtbot, mixed_doc) -> None:
     with qtbot.waitSignal(service.failed, timeout=TIMEOUT_MS):
         service.start(mixed_doc, [1])
     assert seen.done == [] and not service.is_running
+    assert service.failure_reason in ("exit", "crash")
 
 
 def test_process_timeout(qtbot, mixed_doc, monkeypatch) -> None:
@@ -195,6 +197,7 @@ def test_process_timeout(qtbot, mixed_doc, monkeypatch) -> None:
     with qtbot.waitSignal(service.failed, timeout=TIMEOUT_MS):
         service.start(mixed_doc, [1])
     assert "did not answer" in seen.failed[0]
+    assert service.failure_reason == "timeout"
 
 
 def test_start_errors(qtbot, mixed_doc) -> None:
@@ -216,3 +219,4 @@ def test_closed_document_fails_the_run(qtbot, mixed_doc) -> None:
     with qtbot.waitSignal(service.failed, timeout=TIMEOUT_MS):
         pass
     assert seen.failed == ["the document was closed"]
+    assert service.failure_reason == "closed"

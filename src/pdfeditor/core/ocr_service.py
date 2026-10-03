@@ -16,7 +16,9 @@ content text yet — through one batch :class:`~pdfeditor.core.commands.AddOcrLa
 
 Signals: ``page_done(index, PageOcr)``, ``page_failed(index, message)`` (that page only),
 ``progress(done, total)``, ``finished(cancelled)`` (normal end or :meth:`cancel`) and
-``failed(message)`` (the worker could not start, died or timed out; the run is over).
+``failed(message)`` (the worker could not start, died or timed out; the run is over;
+:attr:`OcrService.failure_reason` says which: ``"start"``, ``"crash"``, ``"exit"``,
+``"timeout"``, ``"protocol"`` or ``"closed"``).
 """
 
 from __future__ import annotations
@@ -77,6 +79,8 @@ class OcrService(QObject):
         self._running = False
         self._make_searchable = False
         self._batch: AddOcrLayerCommand | None = None
+        #: Why the last run failed ("" when it did not).
+        self.failure_reason = ""
         self._watchdog = QTimer(self)
         self._watchdog.setSingleShot(True)
         self._watchdog.timeout.connect(self._on_timeout)
@@ -126,6 +130,7 @@ class OcrService(QObject):
         self._done = 0
         self._make_searchable = bool(make_searchable)
         self._batch = None
+        self.failure_reason = ""
         self._running = True
         process = QProcess(self)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
@@ -180,9 +185,10 @@ class OcrService(QObject):
             process.waitForFinished(KILL_WAIT_MS)
         process.deleteLater()
 
-    def _fail(self, message: str) -> None:
+    def _fail(self, message: str, reason: str) -> None:
         log.warning("text recognition failed: %s", message)
         self._stop()
+        self.failure_reason = reason
         self.failed.emit(message)
 
     def _index(self, pid: PageId) -> int | None:
@@ -216,7 +222,7 @@ class OcrService(QObject):
             return
         doc = self._doc
         if doc is None or not doc.is_open:
-            self._fail("the document was closed")
+            self._fail("the document was closed", "closed")
             return
         while True:
             if self._prepared is not None:
@@ -264,10 +270,12 @@ class OcrService(QObject):
         try:
             reply = json.loads(line)
         except ValueError:
-            self._fail(f"unreadable reply from the text recognition process: {line[:80]!r}")
+            self._fail(
+                f"unreadable reply from the text recognition process: {line[:80]!r}", "protocol"
+            )
             return
         if pid is None:
-            self._fail(f"unexpected reply: {reply.get('error') or reply}")
+            self._fail(f"unexpected reply: {reply.get('error') or reply}", "protocol")
             return
         index = self._index(pid)
         if index is not None:
@@ -315,16 +323,16 @@ class OcrService(QObject):
         if not self._running:
             return
         if error is QProcess.ProcessError.FailedToStart:
-            self._fail("the text recognition process could not be started")
+            self._fail("the text recognition process could not be started", "start")
         elif error is QProcess.ProcessError.Crashed:
-            self._fail("the text recognition process crashed")
+            self._fail("the text recognition process crashed", "crash")
         elif error is QProcess.ProcessError.WriteError:
-            self._fail("the text recognition process stopped reading")
+            self._fail("the text recognition process stopped reading", "crash")
 
     def _on_process_finished(self, code: int, _status: QProcess.ExitStatus) -> None:
         if self._running:
-            self._fail(f"the text recognition process exited (code {code})")
+            self._fail(f"the text recognition process exited (code {code})", "exit")
 
     def _on_timeout(self) -> None:
         if self._running:
-            self._fail("the text recognition process did not answer in time")
+            self._fail("the text recognition process did not answer in time", "timeout")

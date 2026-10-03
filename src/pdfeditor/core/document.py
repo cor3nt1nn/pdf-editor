@@ -1490,7 +1490,11 @@ class PdfDocument(QObject):
         self._widget_cache.clear()
         self._clear_annot_cache()
         self._load_generation += 1
+        # Same content after a save: "looks scanned" stays valid (the scan banner is
+        # re-evaluated after every save and must not rescan 50 pages each time).
+        scans = dict(self._scan_cache)
         self._clear_shapes_cache()
+        self._scan_cache.update(scans)
         self._read_form_state()
 
     def render(self, i: int, scale: float, clip: QRectF | None = None) -> QImage:

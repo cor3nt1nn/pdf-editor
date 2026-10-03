@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QStyle, QToolButton, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStyle,
+    QToolButton,
+    QWidget,
+)
 
 # Accent colour of a "warning" banner (amber); "info" uses the palette highlight.
 WARNING_ACCENT = QColor(232, 160, 0)
@@ -28,8 +36,12 @@ class InfoBanner(QFrame):
     Colours derive from the palette (a light tint of the accent over the base colour
     with the palette's text colour), so the banner stays readable in light and dark
     themes. The close button only hides the banner: :attr:`message` keeps the text, so
-    the owner can tell a dismissed message from a new one.
+    the owner can tell a dismissed message from a new one. A message may carry an action
+    button (``action_text``, M8): clicking it emits :attr:`action_triggered`.
     """
+
+    #: The message's action button was clicked.
+    action_triggered = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -52,9 +64,14 @@ class InfoBanner(QFrame):
         self.close_button.setAccessibleName(self.tr("Close"))
         self.close_button.clicked.connect(self.hide)
 
+        self.action_button = QPushButton(self)
+        self.action_button.hide()
+        self.action_button.clicked.connect(self.action_triggered)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 6, 6, 6)
         layout.addWidget(self.label, 1)
+        layout.addWidget(self.action_button, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
         self.hide()
 
@@ -71,11 +88,18 @@ class InfoBanner(QFrame):
     def kind(self) -> str:
         return self._message[1] if self._message is not None else ""
 
-    def show_message(self, text: str, kind: str = "info") -> None:
+    @property
+    def action_text(self) -> str:
+        """Text of the action button ("" when the message has none)."""
+        return self.action_button.text() if self._message is not None else ""
+
+    def show_message(self, text: str, kind: str = "info", action_text: str | None = None) -> None:
         if kind not in KINDS:
             raise ValueError(f"unknown banner kind: {kind!r}")
         self._message = (text, kind)
         self.label.setText(text)
+        self.action_button.setText(action_text or "")
+        self.action_button.setVisible(bool(action_text))
         self._apply_style()
         self.show()
 
@@ -83,6 +107,8 @@ class InfoBanner(QFrame):
         """Hide the banner and forget its message."""
         self._message = None
         self.label.clear()
+        self.action_button.setText("")
+        self.action_button.hide()
         self.hide()
 
     def changeEvent(self, event: QEvent) -> None:

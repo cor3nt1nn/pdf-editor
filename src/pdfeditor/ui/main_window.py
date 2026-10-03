@@ -58,6 +58,7 @@ from pdfeditor.resources import app_icon, icon
 from pdfeditor.ui import dialogs, page_dialogs, signature_dialogs
 from pdfeditor.ui.document_view import DocumentView
 from pdfeditor.ui.export_dialog import ExportDialog
+from pdfeditor.ui.ocr_dialog import OcrDialog, OcrProgress
 from pdfeditor.ui.thumbnails import ThumbnailModel, ThumbnailSidebar
 from pdfeditor.ui.tools.annot_tools import AnnotToolBase, SignatureTool, StampTool, TextTool
 from pdfeditor.ui.tools.base import ToolManager
@@ -344,6 +345,15 @@ class MainWindow(QMainWindow):
         self.removeAction(self.act_delete_annot)
         self.act_delete_annot.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.document_view.addAction(self.act_delete_annot)
+        # Text recognition of scanned pages (M8).
+        self.act_ocr = self._action(
+            self.tr("Recognise &Text (OCR)…"),
+            QKeySequence("Ctrl+Shift+O"),
+            self.recognise_text,
+            "recognise_text",
+        )
+        self._ocr_progress: OcrProgress | None = None
+        self._ocr_pages_done = 0
         self.act_auto_shrink = self._action(
             self.tr("Auto-shrink Overflowing Text"), None, None, "auto_shrink_text"
         )
@@ -545,6 +555,8 @@ class MainWindow(QMainWindow):
             self.menu_edit.addAction(act)
         self.menu_edit.addAction(self.act_delete_annot)
         self.menu_edit.addSeparator()
+        self.menu_edit.addAction(self.act_ocr)
+        self.menu_edit.addSeparator()
         self.menu_edit.addAction(self.act_auto_shrink)
         self.menu_pages = bar.addMenu(self.tr("&Pages"))
         self.menu_pages.setObjectName("pages_menu")
@@ -676,6 +688,12 @@ class MainWindow(QMainWindow):
         self.document_view.document_changed.connect(self._on_document_changed)
         self.document_view.path_changed.connect(self._on_path_changed)
         self.document_view.history_failed.connect(self._on_history_failed)
+        self.document_view.recognise_requested.connect(self.recognise_text)
+        ocr = self.document_view.ocr_service
+        ocr.page_done.connect(self._on_ocr_page_done)
+        ocr.progress.connect(self._on_ocr_progress)
+        ocr.finished.connect(self._on_ocr_finished)
+        ocr.failed.connect(self._on_ocr_failed)
         self.font_size_spin.valueChanged.connect(self._on_font_size_changed)
         self.color_button.clicked.connect(self.choose_text_color)
 
@@ -722,6 +740,7 @@ class MainWindow(QMainWindow):
             act.setEnabled(can_annotate)
         self.act_select_text.setEnabled(has_doc)
         self.act_textedit_tool.setEnabled(self._can_modify())
+        self.act_ocr.setEnabled(has_doc and not self.document_view.ocr_service.is_running)
         self._update_style_enabled()
         self._update_delete_action()
         self._update_copy_action()
@@ -1126,6 +1145,77 @@ class MainWindow(QMainWindow):
         tool = self._active_annot_tool()
         if tool is not None:
             tool.delete_selection()
+
+    # -- text recognition (M8) ---------------------------------------------------
+    def recognise_text(self) -> bool:
+        """Edit ▸ Recognise Text (OCR)…: ask for the pages, then recognise them in the
+        background behind a progress dialog. True if a run started."""
+        doc = self.document_view.document
+        service = self.document_view.ocr_service
+        if doc is None or service.is_running:
+            return False
+        self.document_view.commit_pending_edits()
+        dialog = OcrDialog(doc, self.settings, self.page_view.current_page, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        dialog.save_choices()
+        pages = dialog.pages()
+        if not pages:
+            self._show_message(self.tr("Every page already has text."))
+            return False
+        self.start_text_recognition(pages, make_searchable=dialog.make_searchable())
+        return True
+
+    def start_text_recognition(self, pages: list[int], *, make_searchable: bool) -> None:
+        """Recognise ``pages`` of the current document (see :class:`OcrService`)."""
+        doc = self.document_view.document
+        if doc is None:
+            return
+        self._ocr_pages_done = 0
+        progress = OcrProgress(len(pages), self)
+        progress.canceled.connect(self.document_view.ocr_service.cancel)
+        self._ocr_progress = progress
+        self.document_view.ocr_service.start(doc, pages, make_searchable=make_searchable)
+        self.document_view.refresh_banner()
+        self._update_actions()
+        progress.show()
+
+    def _on_ocr_page_done(self, _page: int, _result: object) -> None:
+        self._ocr_pages_done += 1
+
+    def _on_ocr_progress(self, done: int, _total: int) -> None:
+        if self._ocr_progress is not None:
+            self._ocr_progress.set_done(done)
+
+    def _end_ocr(self) -> None:
+        """Close the progress dialog and push what the run wrote (one undo step)."""
+        progress, self._ocr_progress = self._ocr_progress, None
+        if progress is not None:
+            progress.canceled.disconnect()
+            progress.close()
+            progress.deleteLater()
+        command = self.document_view.ocr_service.take_command()
+        if command is not None and self.document_view.document is not None:
+            self.document_view.push(command)
+        self._update_actions()
+
+    def _on_ocr_finished(self, cancelled: bool) -> None:
+        self._end_ocr()
+        if cancelled:
+            self._show_message(self.tr("Text recognition was cancelled"))
+        else:
+            self._show_message(
+                self.tr("Text recognised on {n} page(s)").format(n=self._ocr_pages_done)
+            )
+
+    def _on_ocr_failed(self, message: str) -> None:
+        self._end_ocr()
+        self._show_message(self.tr("Text recognition failed"))
+        if self.document_view.ocr_service.failure_reason == "start":
+            text = self.tr("The text recognition process could not be started.")
+        else:
+            text = self.tr("Text recognition failed")
+        dialogs.warn(self, self.tr("Recognise Text"), text, details=message)
 
     def rotate_current_page(self, delta: int) -> None:
         """Rotate the current page (kept for callers predating M6: see rotate_pages)."""
