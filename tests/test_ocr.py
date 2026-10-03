@@ -235,3 +235,21 @@ def test_is_scanned_page(scan_clean, scan_rotated, simple_pdf, tmp_path) -> None
         busy.draw_line((10, 10 + 5 * i), (300, 10 + 5 * i))
     assert not ocr.is_scanned_page(busy)  # many vector paths: a digital drawing
     doc.close()
+
+
+def test_looking_at_pages_changes_nothing(tmp_path) -> None:
+    """Scan detection and resolution choice never make MuPDF write appearance streams
+    of annotations lacking them (the document would have changes to save)."""
+    import fixtures
+
+    from pdfeditor.core.document import _incremental_bytes
+
+    path = fixtures.make_annotated_pdf(tmp_path / "annotated.pdf")
+    with pymupdf.open(str(path)) as doc:
+        before = len(_incremental_bytes(doc))
+    with pymupdf.open(str(path)) as doc:
+        for page in doc:
+            ocr.is_scanned_page(page)
+            ocr.choose_dpi(page)
+            ocr.image_coverage(page)
+        assert len(_incremental_bytes(doc)) == before

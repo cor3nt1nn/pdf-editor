@@ -340,7 +340,7 @@ def choose_dpi(page: pymupdf.Page) -> int:
     best_area = 0.0
     dpi = float(DEFAULT_DPI)
     try:
-        infos = page.get_image_info()
+        infos = image_info(page)
     except Exception:  # MuPDF raises FzError* (not RuntimeError)
         log.warning("could not list the images of page %d", page.number, exc_info=True)
         infos = []
@@ -496,6 +496,16 @@ def _read_lines(
 
 
 # -- scanned page detection (caller holds the document lock) --------------------------------
+def image_info(page: pymupdf.Page) -> list[dict[str, Any]]:
+    """``Page.get_image_info()`` of the page's content only. PyMuPDF's own runs the
+    annotations too, which makes MuPDF create missing appearance streams: the document
+    would then have changes to save after a mere look."""
+    textpage = pymupdf.TextPage(
+        page.get_displaylist(annots=False).get_textpage(pymupdf.TEXT_PRESERVE_IMAGES)
+    )
+    return textpage.extractIMGINFO()
+
+
 def page_has_text(page: pymupdf.Page) -> bool:
     """The page's content (annotations left out) shows at least one non-space char."""
     textpage = pymupdf.TextPage(page.get_displaylist(annots=False).get_textpage(0))
@@ -511,7 +521,7 @@ def image_coverage(page: pymupdf.Page) -> float:
     if area <= 0:
         return 0.0
     covered = 0.0
-    for info in page.get_image_info():
+    for info in image_info(page):
         r = pymupdf.Rect(info.get("bbox", (0, 0, 0, 0))).normalize() & frame
         if not r.is_empty:
             covered += r.width * r.height

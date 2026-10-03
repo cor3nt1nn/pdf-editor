@@ -26,7 +26,7 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations, ocr, orphans, pagetext, signature, snapping
+from pdfeditor.core import annotations, ocr, orphans, pagetext, scan_shapes, signature, snapping
 from pdfeditor.core import pages as page_ops
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.files import same_file
@@ -1183,23 +1183,45 @@ class PdfDocument(QObject):
 
         Cached per page and dropped on ``page_changed(i)`` (rotation, and annotation
         edits: paths inside annotation rects are skipped, so moving one changes the
-        shapes), ``structure_changed``, ``reloaded`` and ``close()``. A cache hit never
-        takes the lock (hover must not wait for a render); only a miss scans under it. A
-        page that cannot be scanned has no shapes.
+        shapes), ``ocr_changed(i)``, ``structure_changed``, ``reloaded`` and ``close()``.
+        A cache hit never takes the lock (hover must not wait for a render); only a miss
+        scans under it. A page that cannot be scanned has no shapes.
+
+        A scanned page (no vector shape, :meth:`is_scanned_page`) gets the rules found in
+        a 100 dpi grey render of it instead (M8, :mod:`pdfeditor.core.scan_shapes`; the
+        render takes the lock, the ≈0.1 s of pixel work does not), plus the dotted
+        leaders of its :meth:`page_ocr` words.
         """
         cached = self._shapes_cache.get(i)
         if cached is not None:
             return cached
         self._check_index(i)
+        image: QImage | None = None
         with self.lock:
             cached = self._shapes_cache.get(i)
-            if cached is None:
-                try:
-                    cached = snapping.scan_page(self.fitz[i])
-                except Exception:  # MuPDF raises FzError* (not RuntimeError)
-                    log.warning("could not scan page %d for snapping", i, exc_info=True)
-                    cached = snapping.EMPTY_SHAPES
+            if cached is not None:
+                return cached
+            try:
+                page = self.fitz[i]
+                cached = snapping.scan_page(page)
+                if _no_shapes(cached) and self.is_scanned_page(i):
+                    image = _grey_render(page, scan_shapes.RENDER_DPI)
+                del page
+            except Exception:  # MuPDF raises FzError* (not RuntimeError)
+                log.warning("could not scan page %d for snapping", i, exc_info=True)
+                cached = snapping.EMPTY_SHAPES
+            if image is None:
                 self._shapes_cache[i] = cached
+                return cached
+            size = (cached.page_size[0], cached.page_size[1])
+            leaders = scan_shapes.leader_segments(self.page_ocr(i))
+        try:
+            rules = scan_shapes.scan_rules(image, image.width() / size[0])
+            cached = scan_shapes.scan_shapes(rules, size, leaders)
+        except Exception:  # pure Python/Qt: a bug, never a reason to fail a hover
+            log.warning("could not find the rules of scanned page %d", i, exc_info=True)
+        with self.lock:
+            self._shapes_cache[i] = cached
         return cached
 
     def _clear_shapes_cache(self) -> None:
@@ -1708,6 +1730,18 @@ class PdfDocument(QObject):
         self._widget_cache.clear()
         self._clear_annot_cache()
         self._clear_shapes_cache()
+
+
+def _no_shapes(shapes: PageShapes) -> bool:
+    return not (shapes.boxes or shapes.h_segments or shapes.v_segments or shapes.glyph_boxes)
+
+
+def _grey_render(page: pymupdf.Page, dpi: int) -> QImage:
+    """``page`` as displayed, without annotations, in grey (caller holds the lock)."""
+    pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY, alpha=False, annots=False)
+    return QImage(
+        pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_Grayscale8
+    ).copy()
 
 
 def _shifted(count: int, index: int, n: int) -> list[int | None]:
