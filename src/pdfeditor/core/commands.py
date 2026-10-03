@@ -30,6 +30,7 @@ from pdfeditor.core.document import (
 )
 from pdfeditor.core.fontmatch import SystemFonts
 from pdfeditor.core.forms import FieldKind, WidgetInfo
+from pdfeditor.core.ocr import OcrError, PageOcr
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapshots import SnapshotStore
 from pdfeditor.core.textedit import EditReason, Run, TextEditError, TextEditResult
@@ -761,3 +762,67 @@ class ReplaceTextCommand(_ImmediateCommand):
         if self.result is None:
             raise TextEditError("nothing to undo")
         self._set(self.result.before, self.result.after)
+
+
+# -- text recognition (M8) ---------------------------------------------------
+class AddOcrLayerCommand(_ImmediateCommand):
+    """Write recognised text into pages as an invisible, searchable layer (one undo
+    step for any number of pages; docs/M8_PLAN.md "OCR design" 4).
+
+    ``AddOcrLayerCommand(doc, page, ocr)`` makes one page searchable ("Make page text
+    searchable"). The OCR service builds a batch instead: ``AddOcrLayerCommand(doc,
+    text=...)`` ("Recognise text") then :meth:`add_page` for each page as its result
+    arrives — the layer is written at once (the document emits ``page_changed``) and the
+    command counts as applied, so pushing it once the batch ends performs nothing. Undo
+    removes the layers (by their streams' first lines: renumbering by a full save does not
+    matter), redo writes them again from the kept results. Pages are kept by id. Failures
+    (:class:`OcrError`, a page gone) are recorded in :attr:`error`.
+    """
+
+    def __init__(
+        self,
+        doc: PdfDocument,
+        page: int | None = None,
+        ocr: PageOcr | None = None,
+        *,
+        text: str | None = None,
+    ) -> None:
+        if text is None:
+            text = (
+                QCoreApplication.translate("Commands", "Make page text searchable")
+                if page is not None
+                else QCoreApplication.translate("Commands", "Recognise text")
+            )
+        super().__init__(doc, text)
+        #: (page id, recognised text) of every page written by this command.
+        self.pages: list[tuple[PageId, PageOcr]] = []
+        self._first: tuple[PageId, PageOcr | None] | None = None
+        if page is not None:
+            self._first = (doc.page_id(page), ocr)
+
+    def add_page(self, page: int, ocr: PageOcr) -> int:
+        """Write ``ocr`` into page ``page`` now (part of this command); returns the word
+        count. Raises :class:`OcrError` (the page is then unchanged and not added)."""
+        words = self.doc.add_ocr_layer(page, ocr)
+        self.pages.append((self.doc.page_id(page), ocr))
+        self._applied = True  # the push that ends the batch performs nothing
+        return words
+
+    def _redo(self) -> None:
+        if self._first is not None and not self.pages:
+            pid, ocr = self._first
+            index = self._index(pid, OcrError)
+            if ocr is None:
+                ocr = self.doc.page_ocr(index)
+                if ocr is None:
+                    raise OcrError(f"page {index + 1} was not recognised")
+            self.doc.add_ocr_layer(index, ocr)
+            self.pages.append((pid, ocr))
+            return
+        for pid, ocr in self.pages:
+            self.doc.add_ocr_layer(self._index(pid, OcrError), ocr)
+
+    def _undo(self) -> None:
+        for pid, _ocr in reversed(self.pages):
+            if not self.doc.remove_ocr_layer(self._index(pid, OcrError)):
+                raise OcrError("the OCR text layer is no longer on the page")

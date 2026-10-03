@@ -182,6 +182,9 @@ class PageText:
     invisible_rects: tuple[QRectF, ...] = ()
     #: Areas of images (rawdict image blocks), page space.
     image_rects: tuple[QRectF, ...] = ()
+    #: Where the text comes from: ``"content"`` (the page's content, an OCR layer
+    #: included) or ``"ocr"`` (an in-memory OCR result of a page without text, M8).
+    source: str = "content"
 
     # -- construction --------------------------------------------------------------------
     @classmethod

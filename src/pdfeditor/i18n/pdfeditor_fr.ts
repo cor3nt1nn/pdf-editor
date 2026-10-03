@@ -22,116 +22,126 @@
 <context>
     <name>Commands</name>
     <message>
-        <location filename="../core/commands.py" line="139"/>
+        <location filename="../core/commands.py" line="140"/>
         <source>Rotate page</source>
         <extracomment>The exception raised by the last ``redo()``/``undo()``, None if it succeeded.</extracomment>
         <translation>la rotation de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="141"/>
+        <location filename="../core/commands.py" line="142"/>
         <source>Rotate pages</source>
         <translation>la rotation des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="233"/>
+        <location filename="../core/commands.py" line="234"/>
         <source>Delete page</source>
         <translation>la suppression de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="235"/>
+        <location filename="../core/commands.py" line="236"/>
         <source>Delete pages</source>
         <translation>la suppression des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="289"/>
+        <location filename="../core/commands.py" line="290"/>
         <source>Move pages</source>
         <translation>le déplacement des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="348"/>
+        <location filename="../core/commands.py" line="349"/>
         <source>Insert blank page</source>
         <translation>l’insertion d’une page vierge</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="370"/>
+        <location filename="../core/commands.py" line="371"/>
         <source>Insert pages</source>
         <translation>l’insertion des pages</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="436"/>
+        <location filename="../core/commands.py" line="437"/>
         <source>Edit form field</source>
         <translation>la modification du champ</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="527"/>
+        <location filename="../core/commands.py" line="528"/>
         <source>Add signature</source>
         <extracomment>The snapshot under its synthetic name, before this command claimed a /NM for it.</extracomment>
         <translation>l’ajout de la signature</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="529"/>
+        <location filename="../core/commands.py" line="530"/>
         <source>Add stamp</source>
         <translation>l’ajout du tampon</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="531"/>
+        <location filename="../core/commands.py" line="532"/>
         <source>Add highlight</source>
         <translation>l’ajout du surlignage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="533"/>
+        <location filename="../core/commands.py" line="534"/>
         <source>Add underline</source>
         <translation>l’ajout du soulignement</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="535"/>
+        <location filename="../core/commands.py" line="536"/>
         <source>Add strike-through</source>
         <translation>l’ajout du texte barré</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="536"/>
+        <location filename="../core/commands.py" line="537"/>
         <source>Add text</source>
         <translation>l’ajout du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="612"/>
+        <location filename="../core/commands.py" line="613"/>
         <source>Change markup color</source>
         <translation>le changement de couleur du marquage</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="614"/>
+        <location filename="../core/commands.py" line="615"/>
         <source>Edit text</source>
         <translation>la modification du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="621"/>
+        <location filename="../core/commands.py" line="622"/>
         <source>Move annotation</source>
         <translation>le déplacement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="622"/>
+        <location filename="../core/commands.py" line="623"/>
         <source>Resize annotation</source>
         <translation>le redimensionnement de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="623"/>
+        <location filename="../core/commands.py" line="624"/>
         <source>Change text style</source>
         <translation>le changement de style du texte</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="676"/>
+        <location filename="../core/commands.py" line="677"/>
         <source>Delete annotation</source>
         <translation>la suppression de l’annotation</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="727"/>
+        <location filename="../core/commands.py" line="728"/>
         <source>Edit page text</source>
         <translation>la modification du texte de la page</translation>
     </message>
     <message>
-        <location filename="../core/commands.py" line="747"/>
+        <location filename="../core/commands.py" line="748"/>
         <source>The page changed since this edit; it cannot be undone.</source>
         <translation>La page a changé depuis cette modification ; elle ne peut pas être annulée.</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="792"/>
+        <source>Make page text searchable</source>
+        <translation>le texte recherchable de la page</translation>
+    </message>
+    <message>
+        <location filename="../core/commands.py" line="794"/>
+        <source>Recognise text</source>
+        <translation>la reconnaissance du texte</translation>
     </message>
 </context>
 <context>
@@ -1532,88 +1542,88 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>TextEditTool</name>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="51"/>
+        <location filename="../ui/tools/textedit_tool.py" line="52"/>
         <source>No editable text here (scanned image or outlined text).</source>
         <translation>Aucun texte modifiable ici (image numérisée ou texte vectorisé).</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="57"/>
+        <location filename="../ui/tools/textedit_tool.py" line="58"/>
         <source>This text is an invisible OCR layer over an image; it cannot be edited here.</source>
         <translation>Ce texte est une couche OCR invisible sur une image ; il ne peut pas être modifié ici.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="64"/>
+        <location filename="../ui/tools/textedit_tool.py" line="65"/>
         <source>The text could not be changed.</source>
         <translation>Le texte n’a pas pu être modifié.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="68"/>
+        <location filename="../ui/tools/textedit_tool.py" line="69"/>
         <source>Editing page text is not permitted by this document’s security settings.</source>
         <translation>La modification du texte n’est pas autorisée par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="75"/>
+        <location filename="../ui/tools/textedit_tool.py" line="76"/>
         <source>This page is too complex to edit (content larger than {size} MB).</source>
         <translation>Cette page est trop complexe pour être modifiée (contenu supérieur à {size} Mo).</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="81"/>
+        <location filename="../ui/tools/textedit_tool.py" line="82"/>
         <source>Only text in a single style can be edited at once; the selection was reduced.</source>
         <translation>Seul un texte d’un même style peut être modifié à la fois ; la sélection a été réduite.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="88"/>
+        <location filename="../ui/tools/textedit_tool.py" line="89"/>
         <source>This text belongs to an embedded graphic (form XObject); it cannot be edited here.</source>
         <translation>Ce texte fait partie d’un graphisme incorporé (XObject de formulaire) ; il ne peut pas être modifié ici.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="95"/>
+        <location filename="../ui/tools/textedit_tool.py" line="96"/>
         <source>Right-to-left and vertical text cannot be edited.</source>
         <translation>Le texte de droite à gauche et le texte vertical ne peuvent pas être modifiés.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="101"/>
+        <location filename="../ui/tools/textedit_tool.py" line="102"/>
         <source>Part of this text is drawn twice (simulated bold); select the whole doubled text.</source>
         <translation>Une partie de ce texte est dessinée deux fois (gras simulé) ; sélectionnez tout le texte doublé.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="108"/>
+        <location filename="../ui/tools/textedit_tool.py" line="109"/>
         <source>No installed font can show these characters.</source>
         <translation>Aucune police installée ne peut afficher ces caractères.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="114"/>
+        <location filename="../ui/tools/textedit_tool.py" line="115"/>
         <source>The text changed while it was being edited; the edit was not applied.</source>
         <translation>Le texte a changé pendant sa modification ; la modification n’a pas été appliquée.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="120"/>
+        <location filename="../ui/tools/textedit_tool.py" line="121"/>
         <source>Control and invisible formatting characters cannot be used in page text.</source>
         <translation>Les caractères de contrôle et de mise en forme invisibles ne peuvent pas être utilisés dans le texte de la page.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="126"/>
+        <location filename="../ui/tools/textedit_tool.py" line="127"/>
         <source>After editing page text, the next save rewrites the whole file.</source>
         <translation>Après une modification du texte, le prochain enregistrement réécrit tout le fichier.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="167"/>
+        <location filename="../ui/tools/textedit_tool.py" line="168"/>
         <source>Replaced with {family}: the document’s font lacks some of these characters.</source>
         <extracomment>Refusals after which the editor is not reopened with the typed text.</extracomment>
         <translation>Remplacé par {family} : la police du document ne contient pas certains de ces caractères.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="174"/>
+        <location filename="../ui/tools/textedit_tool.py" line="175"/>
         <source>Neighbouring characters were included in the edit: “{text}”</source>
         <translation>Des caractères voisins ont été inclus dans la modification : « {text} »</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="180"/>
+        <location filename="../ui/tools/textedit_tool.py" line="181"/>
         <source>The new text is wider than the original and overflows.</source>
         <translation>Le nouveau texte, plus large que l’original, déborde.</translation>
     </message>
     <message>
-        <location filename="../ui/tools/textedit_tool.py" line="186"/>
+        <location filename="../ui/tools/textedit_tool.py" line="187"/>
         <source>The new text is wider than the original and was narrowed to fit.</source>
         <translation>Le nouveau texte, plus large que l’original, a été resserré.</translation>
     </message>

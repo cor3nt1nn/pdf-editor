@@ -26,7 +26,7 @@ import pymupdf
 from PySide6.QtCore import QObject, QRectF, QSizeF, Signal
 from PySide6.QtGui import QImage
 
-from pdfeditor.core import annotations, orphans, pagetext, signature, snapping
+from pdfeditor.core import annotations, ocr, orphans, pagetext, signature, snapping
 from pdfeditor.core import pages as page_ops
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, AnnotSpec
 from pdfeditor.core.files import same_file
@@ -44,6 +44,7 @@ from pdfeditor.core.forms import (
     widget_kind,
 )
 from pdfeditor.core.geometry import fitz_from_qrect
+from pdfeditor.core.ocr import OcrError, OcrRequest, PageOcr
 from pdfeditor.core.pagetext import PageText
 from pdfeditor.core.signature import ImageData
 from pdfeditor.core.snapping import PageShapes
@@ -186,6 +187,9 @@ class PdfDocument(QObject):
     #: a save. Content, page count and sizes are unchanged; never keep pymupdf objects
     #: (pages, widgets, annots) across calls, re-fetch them from ``fitz`` instead.
     reloaded = Signal()
+    #: The in-memory OCR result of page ``i`` was set or cleared (:meth:`set_page_ocr`);
+    #: the page's text and snapping shapes are re-read. The page content is unchanged.
+    ocr_changed = Signal(int)
 
     def __init__(
         self,
@@ -222,6 +226,11 @@ class PdfDocument(QObject):
         self._shapes_cache: dict[int, PageShapes] = {}
         # Selectable text by page (read without the lock, written under it).
         self._text_cache: dict[int, PageText] = {}
+        # "Looks scanned" by page (is_scanned_page), dropped with the text cache.
+        self._scan_cache: dict[int, bool] = {}
+        # Text recognised this session (M8), by page id: follows page moves, survives
+        # saves and reloads, dropped on close. In the page's rotation at recognition.
+        self._ocr_cache: dict[PageId, PageOcr] = {}
         # Scope of synthetic annotation names: bumped whenever xrefs may change.
         self._load_generation = 0
         self._is_form = False
@@ -250,6 +259,7 @@ class PdfDocument(QObject):
         self.path_changed.connect(self._clear_widget_cache)
         self.path_changed.connect(self._clear_annot_cache)
         self.reloaded.connect(self._on_reloaded)
+        self.ocr_changed.connect(self._on_ocr_changed)
 
     # -- opening -----------------------------------------------------------
     @classmethod
@@ -1195,6 +1205,7 @@ class PdfDocument(QObject):
     def _clear_shapes_cache(self) -> None:
         self._shapes_cache.clear()
         self._text_cache.clear()
+        self._scan_cache.clear()
 
     # -- text ----------------------------------------------------------------
     def page_text(self, i: int) -> PageText:
@@ -1202,9 +1213,14 @@ class PdfDocument(QObject):
 
         Cached per page like :meth:`page_shapes` and dropped with it: on
         ``page_changed(i)``, ``structure_changed`` (undo of a deletion included),
-        ``reloaded`` and ``close()``. A cache hit never takes the lock; a miss extracts
-        under it. A page whose text cannot be read logs a warning and has
-        ``EMPTY_PAGE_TEXT``.
+        ``reloaded``, ``ocr_changed(i)`` and ``close()``. A cache hit never takes the
+        lock; a miss extracts under it. A page whose text cannot be read logs a warning
+        and has ``EMPTY_PAGE_TEXT``.
+
+        A page whose content has no text but which was recognised this session (M8,
+        :meth:`page_ocr`) gets the recognised words instead, as invisible text
+        (``PageText.source == "ocr"``): selectable and copyable, never editable. An OCR
+        layer written into the page (:meth:`add_ocr_layer`) is content text.
         """
         cached = self._text_cache.get(i)
         if cached is not None:
@@ -1218,13 +1234,168 @@ class PdfDocument(QObject):
                 except Exception:  # MuPDF raises FzError* (not RuntimeError)
                     log.warning("could not extract the text of page %d", i, exc_info=True)
                     cached = pagetext.EMPTY_PAGE_TEXT
+                if cached.is_empty:
+                    cached = self._ocr_page_text(i) or cached
                 self._text_cache[i] = cached
         return cached
+
+    def _ocr_page_text(self, i: int) -> PageText | None:
+        """The in-memory OCR words of page ``i`` as invisible text, or None."""
+        result = self.page_ocr(i)
+        if result is None or result.is_empty:
+            return None
+        return replace(PageText.from_rawdict(result.rawdict()), source="ocr")
+
+    def has_content_text(self, i: int) -> bool:
+        """Page ``i``'s content shows text (an OCR layer included; in-memory OCR words
+        are not content)."""
+        text = self.page_text(i)
+        return not text.is_empty and text.source != "ocr"
 
     def cached_page_text(self, i: int) -> PageText | None:
         """The cached :meth:`page_text` of page ``i``, or None when it is not cached; never
         extracts nor takes the lock (safe from a paint event)."""
         return self._text_cache.get(i)
+
+    # -- text recognition (M8) -------------------------------------------------
+    def page_ocr(self, i: int) -> PageOcr | None:
+        """The text recognised on page ``i`` this session (:meth:`set_page_ocr`), turned
+        to the page's current rotation, or None. Kept by page id: it follows the page
+        through moves, saves and reloads, until :meth:`close`."""
+        self._check_index(i)
+        result = self._ocr_cache.get(self._page_ids[i])
+        if result is None:
+            return None
+        rotation = self.page_rotation(i)
+        return result if result.rotation == rotation else result.rotated(rotation)
+
+    def has_page_ocr(self, i: int) -> bool:
+        """Page ``i`` was recognised this session (never takes the lock)."""
+        return 0 <= i < self._page_count and self._page_ids[i] in self._ocr_cache
+
+    def set_page_ocr(self, i: int, result: PageOcr | None) -> None:
+        """Keep ``result`` (recognised on page ``i`` as it is displayed now; None forgets
+        it) and emit ``ocr_changed(i)``. Not undoable and not saved: only an OCR layer
+        (:meth:`add_ocr_layer`) is written to the file."""
+        self._check_index(i)
+        pid = self._page_ids[i]
+        if result is None:
+            if self._ocr_cache.pop(pid, None) is None:
+                return
+        else:
+            self._ocr_cache[pid] = result
+        self.ocr_changed.emit(i)
+
+    def clear_ocr(self) -> None:
+        """Forget every in-memory OCR result (no signal)."""
+        self._ocr_cache.clear()
+
+    def _on_ocr_changed(self, i: int) -> None:
+        self._text_cache.pop(i, None)
+        self._shapes_cache.pop(i, None)
+
+    def ocr_request(self, i: int, dpi: int | None = None) -> OcrRequest:
+        """Page ``i`` rendered for recognition (RGB, as displayed, no annotations; see
+        :func:`pdfeditor.core.ocr.render_request`). Raises :class:`OcrError`."""
+        self._check_index(i)
+        with self.lock:
+            try:
+                page = self.fitz[i]
+                request = ocr.render_request(page, dpi)
+                del page
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise OcrError(f"page {i + 1} could not be rendered: {exc}") from exc
+        return replace(request, page=i)
+
+    def is_scanned_page(self, i: int) -> bool:
+        """Page ``i`` looks like a scan without text (:func:`ocr.is_scanned_page`),
+        cached like :meth:`page_text`."""
+        cached = self._scan_cache.get(i)
+        if cached is not None:
+            return cached
+        self._check_index(i)
+        with self.lock:
+            try:
+                page = self.fitz[i]
+                cached = ocr.is_scanned_page(page)
+                del page
+            except Exception:  # MuPDF raises FzError* (not RuntimeError)
+                log.warning("could not inspect page %d", i, exc_info=True)
+                cached = False
+        self._scan_cache[i] = cached
+        return cached
+
+    def scanned_pages(self, limit: int | None = None) -> list[int]:
+        """The pages that look scanned without text, among the first ``limit`` pages (all
+        when None)."""
+        count = self._page_count if limit is None else min(limit, self._page_count)
+        return [i for i in range(count) if self.is_scanned_page(i)]
+
+    def has_ocr_layer(self, i: int) -> bool:
+        """Page ``i`` has an OCR text layer written by :meth:`add_ocr_layer`."""
+        from pdfeditor.core import ocr_layer
+
+        self._check_index(i)
+        with self.lock:
+            page = self.fitz[i]
+            try:
+                return ocr_layer.has_layer(self.fitz, page)
+            finally:
+                del page
+
+    def add_ocr_layer(self, i: int, result: PageOcr | None = None) -> int:
+        """Write ``result`` (default :meth:`page_ocr`) into page ``i`` as invisible text
+        (see :mod:`pdfeditor.core.ocr_layer`); returns the number of words. Emits
+        ``page_changed``. An incremental save is fine (text is only added).
+
+        Raises :class:`OcrError`: ``"permission"`` without :attr:`can_modify`,
+        ``"exists"`` when the page has a layer already, ``"failed"`` otherwise (no
+        result, MuPDF error); the page is then unchanged.
+        """
+        from pdfeditor.core import ocr_layer
+
+        self._check_index(i)
+        if not self._can_modify:
+            raise OcrError("modifying this document is not permitted", "permission")
+        if result is None:
+            result = self.page_ocr(i)
+            if result is None:
+                raise OcrError(f"page {i + 1} was not recognised")
+        with self.lock:
+            page = self.fitz[i]
+            rotation = int(page.rotation) % 360
+            if result.rotation != rotation:
+                result = result.rotated(rotation)
+            try:
+                words = ocr_layer.add_layer(self.fitz, page, result)
+            except OcrError:
+                raise
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise OcrError(str(exc)) from exc
+            finally:
+                del page
+        self.page_changed.emit(i)
+        return words
+
+    def remove_ocr_layer(self, i: int) -> bool:
+        """Remove page ``i``'s OCR layer (undo of :meth:`add_ocr_layer`); False when it
+        has none. Emits ``page_changed`` after a removal. Raises :class:`OcrError`."""
+        from pdfeditor.core import ocr_layer
+
+        self._check_index(i)
+        if not self._can_modify:
+            raise OcrError("modifying this document is not permitted", "permission")
+        with self.lock:
+            page = self.fitz[i]
+            try:
+                removed = ocr_layer.remove_layer(self.fitz, page)
+            except Exception as exc:  # MuPDF raises FzError* (not RuntimeError)
+                raise OcrError(str(exc)) from exc
+            finally:
+                del page
+        if removed:
+            self.page_changed.emit(i)
+        return removed
 
     # -- page text editing (M7) ----------------------------------------------
     def replace_text_run(
@@ -1520,6 +1691,7 @@ class PdfDocument(QObject):
         self._page_ids = []
         self._reindex()
         self.snapshots.clear()
+        self._ocr_cache.clear()
 
     def _on_page_changed(self, i: int) -> None:
         self._size_cache.pop(i, None)
@@ -1527,6 +1699,7 @@ class PdfDocument(QObject):
         self._annot_cache.pop(i, None)
         self._shapes_cache.pop(i, None)
         self._text_cache.pop(i, None)
+        self._scan_cache.pop(i, None)
 
     def _on_structure_changed(self) -> None:
         with self.lock:
