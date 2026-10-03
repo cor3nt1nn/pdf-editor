@@ -31,14 +31,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
    rights and installs in `C:\Program Files\PDFEditor`.
 4. Optional tasks, both unticked: a desktop shortcut, and **Add PDF Editor to the “Open
    with” list of PDF files (this account only)** — the same as **Settings ▸ Register with
-   Windows (Open with)…** in the program. The setup never changes your default PDF program:
-   to make PDF Editor the default, choose it in Windows **Settings ▸ Apps ▸ Default apps**.
+   Windows (Open with)…** in the program (not offered by "Install for all users": each user
+   registers it from the program). The setup never changes your default PDF program: to
+   make PDF Editor the default, choose it in Windows **Settings ▸ Apps ▸ Default apps**.
 5. Start it from the Start menu (**PDF Editor**). To upgrade, run the setup of the newer
    version: it offers to close a running PDF Editor and keeps your settings and signatures.
 6. Uninstall: Windows **Settings ▸ Apps ▸ Installed apps ▸ PDF Editor ▸ Uninstall** (or
    Control Panel ▸ Programs and Features). This removes the program, its shortcuts and its
    "Open with" entry, then asks whether to also delete your settings, saved signatures and
-   log files (default **No**).
+   log files (default **No**). Uninstalling an all-users installation deletes no user's data:
+   it says that each user's settings, signatures and logs stay in that user's
+   `AppData\Roaming\PDFEditor` and `AppData\Local\PDFEditor` folders.
 
 ### Portable (zip)
 
@@ -84,8 +87,9 @@ then delete the `PDFEditor` folder and, to remove your settings, signatures and 
    `C:\Program Files\PDFEditor`.
 4. Tâches facultatives, décochées : un raccourci sur le bureau et **Ajouter PDF Editor à la
    liste « Ouvrir avec » des fichiers PDF (ce compte uniquement)** — comme **Paramètres ▸
-   Enregistrer dans Windows (Ouvrir avec)…** dans le programme. L’installation ne change
-   jamais votre programme PDF par défaut : pour faire de PDF Editor le programme par défaut,
+   Enregistrer dans Windows (Ouvrir avec)…** dans le programme (non proposé par « Installer
+   pour tous les utilisateurs » : chaque utilisateur le fait depuis le programme).
+   L’installation ne change jamais votre programme PDF par défaut : pour faire de PDF Editor le programme par défaut,
    choisissez-le dans **Paramètres ▸ Applications ▸ Applications par défaut** de Windows.
 5. Lancez-le depuis le menu Démarrer (**PDF Editor**). Pour mettre à jour, lancez
    l’installation de la nouvelle version : elle propose de fermer PDF Editor s’il est ouvert
@@ -94,7 +98,10 @@ then delete the `PDFEditor` folder and, to remove your settings, signatures and 
    Désinstaller** (ou Panneau de configuration ▸ Programmes et fonctionnalités). Le programme,
    ses raccourcis et son entrée « Ouvrir avec » sont supprimés, puis une question propose de
    supprimer aussi vos paramètres, signatures enregistrées et fichiers journaux (par défaut
-   **Non**).
+   **Non**). La désinstallation d’une installation pour tous les utilisateurs ne supprime
+   les données de personne : elle indique que les paramètres, signatures et journaux de
+   chaque utilisateur restent dans ses dossiers `AppData\Roaming\PDFEditor` et
+   `AppData\Local\PDFEditor`.
 
 ### Version portable (zip)
 
@@ -874,6 +881,10 @@ where PDF Editor is not installed yet.
    to also delete settings, saved signatures and log files, listing `%APPDATA%\PDFEditor` and
    `%LOCALAPPDATA%\PDFEditor`; **No** (the default) keeps them, **Yes** deletes both; the
    install folder, the Start menu entry and the "Open with" entry are gone either way.
+9. **All users**: run the setup, choose "Install for all users" (administrator prompt): the
+   "Open with" task is not offered. Uninstall it from Installed apps: no question about
+   deleting data, an information box says where each user's data stays instead; the
+   administrator's own `%APPDATA%\PDFEditor` is untouched.
 
 ## License
 

@@ -26,6 +26,12 @@ FR_MESSAGES = {
         "PDF Editor n’a pas pu être ajouté à la liste « Ouvrir avec ». "
         "Vous pourrez le faire plus tard depuis Paramètres."
     ),
+    "UserDataKept": (
+        "PDF Editor a été désinstallé pour tous les utilisateurs. Les paramètres, signatures "
+        "enregistrées et fichiers journaux de chaque utilisateur sont conservés dans son "
+        r"profil, dossiers AppData\Roaming\PDFEditor et AppData\Local\PDFEditor ; "
+        "chacun peut les supprimer."
+    ),
 }
 EN_MESSAGES = {
     "OpenWithTask": "Add PDF Editor to the “Open with” list of PDF files (this account only)",
@@ -34,6 +40,11 @@ EN_MESSAGES = {
     ),
     "RegisterFailed": (
         "PDF Editor could not be added to the “Open with” list. You can do it later from Settings."
+    ),
+    "UserDataKept": (
+        "PDF Editor was removed for all users. Each user’s settings, saved signatures and log "
+        r"files are kept in that user’s profile, in the AppData\Roaming\PDFEditor and "
+        r"AppData\Local\PDFEditor folders; each user can delete them."
     ),
 }
 
@@ -115,14 +126,18 @@ def test_custom_messages(sections) -> None:
         assert messages[f"en.{key}"] == value
     for key, value in FR_MESSAGES.items():
         assert messages[f"fr.{key}"] == value
-    assert len(messages) == 6
+    assert len(messages) == 2 * len(EN_MESSAGES)
+    assert EN_MESSAGES.keys() == FR_MESSAGES.keys()
 
 
 def test_tasks_unchecked(sections) -> None:
     tasks = sections["Tasks"]
     assert len(tasks) == 2
     assert all("Flags: unchecked" in t for t in tasks)
-    assert any('Name: "openwith"; Description: "{cm:OpenWithTask}"' in t for t in tasks)
+    (open_with,) = [t for t in tasks if 'Name: "openwith"' in t]
+    assert 'Description: "{cm:OpenWithTask}"' in open_with
+    # All users (elevated): the uninstaller could not unregister the original user.
+    assert open_with.endswith("Check: not IsAdminInstallMode")
     assert any('Name: "desktopicon"' in t for t in tasks)
 
 
@@ -167,3 +182,15 @@ def test_user_data_prompt(sections) -> None:
     assert "MB_DEFBUTTON2" in code  # default answer: No
     assert "{userappdata}\\PDFEditor" in code and "{localappdata}\\PDFEditor" in code
     assert code.count("DelTree(") == 2
+
+
+def test_all_users_uninstall_deletes_no_user_data(sections) -> None:
+    """Elevated, {userappdata}/{localappdata} are the administrator's folders: an
+    all-users uninstall deletes nothing and says where each user's data lives."""
+    code = "\n".join(sections["Code"])
+    step = code.split("procedure CurUninstallStepChanged", 1)[1]
+    admin = step.index("if IsAdminInstallMode then")
+    assert admin < step.index("ExpandConstant('{userappdata}")
+    branch = step[admin : step.index("Exit;", admin)]
+    assert "CustomMessage('UserDataKept')" in branch and "SuppressibleMsgBox" in branch
+    assert "DelTree" not in branch

@@ -72,10 +72,14 @@ en.DeleteUserData=Also delete your PDF Editor settings, saved signatures and log
 fr.DeleteUserData=Supprimer aussi vos paramètres, signatures enregistrées et fichiers journaux de PDF Editor ?%n%n%1%n%2
 en.RegisterFailed=PDF Editor could not be added to the “Open with” list. You can do it later from Settings.
 fr.RegisterFailed=PDF Editor n’a pas pu être ajouté à la liste « Ouvrir avec ». Vous pourrez le faire plus tard depuis Paramètres.
+en.UserDataKept=PDF Editor was removed for all users. Each user’s settings, saved signatures and log files are kept in that user’s profile, in the AppData\Roaming\PDFEditor and AppData\Local\PDFEditor folders; each user can delete them.
+fr.UserDataKept=PDF Editor a été désinstallé pour tous les utilisateurs. Les paramètres, signatures enregistrées et fichiers journaux de chaque utilisateur sont conservés dans son profil, dossiers AppData\Roaming\PDFEditor et AppData\Local\PDFEditor ; chacun peut les supprimer.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "openwith"; Description: "{cm:OpenWithTask}"; Flags: unchecked
+; Not offered for an all-users install: it would register the administrator account, and
+; the elevated uninstaller could not remove the registration of the user who asked for it.
+Name: "openwith"; Description: "{cm:OpenWithTask}"; Flags: unchecked; Check: not IsAdminInstallMode
 
 [InstallDelete]
 ; An upgrade replaces the bundled libraries entirely (no stale DLL from an older build).
@@ -129,15 +133,22 @@ begin
     RegisterFileType;
 end;
 
-{ After an interactive uninstall, offer (default No) to delete the user's data:
+{ After an interactive per-user uninstall, offer (default No) to delete the user's data:
   settings and signatures in %APPDATA%\PDFEditor, logs in %LOCALAPPDATA%\PDFEditor.
-  A silent uninstall never deletes them. }
+  A silent uninstall never deletes them. An all-users uninstall runs elevated: there the
+  userappdata and localappdata constants are the administrator's folders, not those of the
+  people who used PDF Editor, so it deletes nothing and only says where the data lives. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Roaming, Local: String;
 begin
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
+    if IsAdminInstallMode then
+    begin
+      SuppressibleMsgBox(CustomMessage('UserDataKept'), mbInformation, MB_OK, IDOK);
+      Exit;
+    end;
     Roaming := ExpandConstant('{userappdata}\PDFEditor');
     Local := ExpandConstant('{localappdata}\PDFEditor');
     if DirExists(Roaming) or DirExists(Local) then
