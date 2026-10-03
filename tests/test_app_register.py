@@ -19,6 +19,7 @@ def calls(monkeypatch) -> list[str]:
     done: list[str] = []
     monkeypatch.setattr(file_assoc, "register", lambda **_: done.append("register"))
     monkeypatch.setattr(file_assoc, "unregister", lambda *_, **__: done.append("unregister"))
+    monkeypatch.setattr(file_assoc, "registered_command", lambda *_, **__: None)
 
     def no_app(*_args, **_kwargs):
         raise AssertionError("the registration flags must not create a QApplication")
@@ -41,6 +42,21 @@ def test_register_flag(calls) -> None:
 def test_unregister_flag(calls) -> None:
     assert app_module.main(["PDFEditor.exe", app_module.UNREGISTER_FLAG]) == 0
     assert calls == ["unregister"]
+
+
+def test_unregister_removes_our_own_registration(monkeypatch, calls) -> None:
+    ours = file_assoc.command_line(file_assoc.app_command())
+    monkeypatch.setattr(file_assoc, "registered_command", lambda *_, **__: ours.upper())
+    assert app_module.main(["PDFEditor.exe", app_module.UNREGISTER_FLAG]) == 0
+    assert calls == ["unregister"]
+
+
+def test_unregister_keeps_another_copys_registration(monkeypatch, calls) -> None:
+    """Uninstalling the setup version leaves the portable copy's "Open with" entry."""
+    other = r'"D:\Portable\PDFEditor\PDFEditor.exe" "%1"'
+    monkeypatch.setattr(file_assoc, "registered_command", lambda *_, **__: other)
+    assert app_module.main(["PDFEditor.exe", app_module.UNREGISTER_FLAG]) == 0
+    assert calls == []
 
 
 @pytest.mark.parametrize("flag", [app_module.REGISTER_FLAG, app_module.UNREGISTER_FLAG])
@@ -78,13 +94,14 @@ def test_flag_only_as_first_argument(monkeypatch, calls) -> None:
 
 
 def test_subprocess_creates_no_qt_application() -> None:
-    """In a fresh process: exit code passes through ``python -m pdfeditor`` and no Qt
-    application (hence no window) exists afterwards."""
+    """In a fresh process: the exit codes come back and no Qt application (hence no
+    window) exists afterwards."""
     code = (
         "import sys\n"
         "from pdfeditor.core import file_assoc\n"
         "file_assoc.register = lambda **k: print('registered')\n"
         "file_assoc.unregister = lambda *a, **k: (_ for _ in ()).throw(OSError('no'))\n"
+        "file_assoc.registered_command = lambda *a, **k: None\n"
         "import pdfeditor.app as app\n"
         "from PySide6.QtCore import QCoreApplication\n"
         "ok = app.main(['x', app.REGISTER_FLAG])\n"

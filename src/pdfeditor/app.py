@@ -118,13 +118,21 @@ def file_type_registration(register: bool) -> int:
     """The hidden ``--register-file-type`` / ``--unregister-file-type`` modes (no window,
     no Qt application, no file log: the uninstaller runs it and must not recreate the
     user's data folder). Returns 0 on success, 1 on failure; never raises, since a
-    windowed build would show a traceback box in the middle of a silent install."""
+    windowed build would show a traceback box in the middle of a silent install.
+
+    Unregistering leaves alone a registration that opens another copy of the app (say the
+    portable zip): uninstalling one copy must not remove the other's "Open with" entry."""
     from pdfeditor.core import file_assoc
 
     try:
         if register:
             file_assoc.register()
         else:
+            current = file_assoc.registered_command()
+            ours = file_assoc.command_line(file_assoc.app_command())
+            if current is not None and current.casefold() != ours.casefold():
+                log.info("PDF files are registered to another copy (%s): kept", current)
+                return 0
             file_assoc.unregister()
     except Exception:  # noqa: BLE001 - reported by the exit code
         log.exception("could not %s the PDF file type", "register" if register else "unregister")
