@@ -9,9 +9,11 @@ Skipped unless ``PDFEDITOR_INSTALLER`` names the built setup:
 A silent per-user install into a temporary folder (no shortcut, no "Open with" entry),
 an upgrade over it and a silent uninstall. The only real registry key touched is the
 setup's own ``HKCU\\...\\Uninstall\\{AppId}_is1``, which the uninstall removes (and the
-teardown, should the uninstall fail); the whole module skips when that key exists already,
-i.e. when PDF Editor is really installed on this machine. The user's data folders
-(``%APPDATA%\\PDFEditor``, ``%LOCALAPPDATA%\\PDFEditor``) must be left untouched.
+teardown — registered before the setup runs, so a timeout or an error cannot skip it —
+should the uninstall fail); the whole module skips when PDF Editor is really installed on
+this machine, for this user (HKCU) or for all users (HKLM, both registry views). The
+user's data folders (``%APPDATA%\\PDFEditor``, ``%LOCALAPPDATA%\\PDFEditor``) must be left
+untouched.
 """
 
 from __future__ import annotations
@@ -53,16 +55,30 @@ SILENT = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/NOICONS", "/NORE
 TASKS = "/MERGETASKS=!desktopicon,!openwith"
 
 
-def _key_exists(path: str) -> bool:
+def _key_exists(path: str, hive: int | None = None, view: int = 0) -> bool:
     try:
-        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CURRENT_USER, path))
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER if hive is None else hive, path, 0, winreg.KEY_READ | view
+        )
     except FileNotFoundError:
         return False
+    winreg.CloseKey(key)
     return True
 
 
 def _installed() -> bool:
-    return sys.platform == "win32" and _key_exists(UNINSTALL_KEY)
+    """PDF Editor is really installed: its Uninstall key (or an entry named "PDF Editor")
+    exists for this user or for all users (HKLM, 64- and 32-bit views)."""
+    if sys.platform != "win32":
+        return False
+    places = [(winreg.HKEY_CURRENT_USER, 0)] + [
+        (winreg.HKEY_LOCAL_MACHINE, view)
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY)
+    ]
+    for hive, view in places:
+        if _key_exists(UNINSTALL_KEY, hive, view) or _our_uninstall_keys(hive, view):
+            return True
+    return False
 
 
 pytestmark = [
@@ -76,9 +92,10 @@ pytestmark = [
 ]
 
 
-def _values(path: str) -> dict[str, object]:
+def _values(path: str, hive: int | None = None, view: int = 0) -> dict[str, object]:
     out: dict[str, object] = {}
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+    hive = winreg.HKEY_CURRENT_USER if hive is None else hive
+    with winreg.OpenKey(hive, path, 0, winreg.KEY_READ | view) as key:
         index = 0
         while True:
             try:
@@ -89,9 +106,15 @@ def _values(path: str) -> dict[str, object]:
             index += 1
 
 
-def _our_uninstall_keys() -> list[str]:
-    names = []
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL) as key:
+def _our_uninstall_keys(hive: int | None = None, view: int = 0) -> list[str]:
+    """Uninstall entries of PDF Editor (by AppId or display name) in ``hive``."""
+    names: list[str] = []
+    hive = winreg.HKEY_CURRENT_USER if hive is None else hive
+    try:
+        key = winreg.OpenKey(hive, UNINSTALL, 0, winreg.KEY_READ | view)
+    except FileNotFoundError:
+        return names
+    with key:
         index = 0
         while True:
             try:
@@ -103,7 +126,7 @@ def _our_uninstall_keys() -> list[str]:
                 names.append(name)
                 continue
             try:
-                if _values(UNINSTALL + "\\" + name).get("DisplayName") == "PDF Editor":
+                if _values(UNINSTALL + "\\" + name, hive, view).get("DisplayName") == "PDF Editor":
                     names.append(name)
             except OSError:
                 pass
@@ -211,11 +234,14 @@ def _uninstall(target: Path) -> int:
     """Silent uninstall; unins000.exe hands over to a copy of itself in %TEMP% and returns
     at once, so wait for the folder and the Uninstall key to go."""
     uninstaller = target / "unins000.exe"
-    code = subprocess.run(
-        [str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-        timeout=INSTALL_TIMEOUT,
-        check=False,
-    ).returncode
+    try:
+        code = subprocess.run(
+            [str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+            timeout=INSTALL_TIMEOUT,
+            check=False,
+        ).returncode
+    except subprocess.TimeoutExpired:  # killed; the caller checks what is left
+        return -1
     _wait_until(lambda: not target.exists() and not _key_exists(UNINSTALL_KEY))
     return code
 
@@ -234,19 +260,32 @@ class Install:
         self.uninstall_code: int | None = None
 
 
+def _cleanup(state: Install) -> None:
+    """Never leave the setup's Uninstall key or the folder behind (also after a timeout or
+    an error in the setup itself). The key is deleted only when it names our temporary
+    folder: the module skipped if PDF Editor was installed before."""
+    try:
+        if (state.target / "unins000.exe").is_file():
+            _uninstall(state.target)
+    finally:
+        if _key_exists(UNINSTALL_KEY):
+            try:
+                location = str(_values(UNINSTALL_KEY).get("InstallLocation", ""))
+            except OSError:
+                location = ""
+            if not location or Path(location).is_relative_to(state.work):
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
+        shutil.rmtree(state.target, ignore_errors=True)
+
+
 @pytest.fixture(scope="module")
-def install(tmp_path_factory) -> Install:
+def install(request, tmp_path_factory) -> Install:
     setup = Path(SETUP or "")
     assert setup.is_file(), f"{setup} not found"
     state = Install(setup, tmp_path_factory.mktemp("installer"))
+    request.addfinalizer(lambda: _cleanup(state))  # before anything can fail
     state.first = _run_setup(setup, state.target, state.work / "install.log")
-    yield state
-    # Teardown: never leave the setup's Uninstall key or the folder behind.
-    if (state.target / "unins000.exe").is_file():
-        _uninstall(state.target)
-    if _key_exists(UNINSTALL_KEY):
-        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY)
-    shutil.rmtree(state.target, ignore_errors=True)
+    return state
 
 
 def test_setup_program(install) -> None:
