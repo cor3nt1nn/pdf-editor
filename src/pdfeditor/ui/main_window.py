@@ -1201,8 +1201,16 @@ class MainWindow(QMainWindow):
 
     def _on_ocr_finished(self, cancelled: bool) -> None:
         self._end_ocr()
+        skipped = self.document_view.ocr_service.failed_pages
         if cancelled:
             self._show_message(self.tr("Text recognition was cancelled"))
+        elif skipped:
+            # Pages given up (too long, unreadable): named so they can be retried.
+            self._show_message(
+                self.tr("Text recognised on {n} page(s); not recognised: page(s) {pages}").format(
+                    n=self._ocr_pages_done, pages=", ".join(str(i + 1) for i in skipped)
+                )
+            )
         else:
             self._show_message(
                 self.tr("Text recognised on {n} page(s)").format(n=self._ocr_pages_done)

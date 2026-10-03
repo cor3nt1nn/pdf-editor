@@ -253,3 +253,40 @@ def test_scan_notice_hidden_during_a_run(qtbot, window, scan_clean, tmp_path) ->
     _recognise_one_page(qtbot, window)
     assert banner.isVisible()
     assert banner.text == "This document looks scanned: 2 of 3 pages have no selectable text."
+
+
+# -- m4: page size limit and per-page timeouts ------------------------------------------------
+def test_choose_dpi_caps_the_pixels() -> None:
+    doc = pymupdf.open()
+    a4 = doc.new_page(width=595, height=842)
+    assert ocr.choose_dpi(a4) == 300  # no image: the default, 35 Mpx
+    a0 = doc.new_page(width=2384, height=3370)  # A0: 300 dpi would be 723 Mpx
+    dpi = ocr.choose_dpi(a0)
+    assert dpi == ocr.max_dpi(a0) < 300
+    assert (2384 * dpi / 72) * (3370 * dpi / 72) <= ocr.MAX_PIXELS
+    request = ocr.render_request(a0, 300)  # an explicit resolution is capped too
+    assert request.dpi == dpi and request.width * request.height <= ocr.MAX_PIXELS
+    doc.close()
+
+
+def test_skipped_pages_in_the_status(qtbot, window, scan_clean, tmp_path, monkeypatch) -> None:
+    import sys
+
+    from pdfeditor.core import ocr_service
+
+    monkeypatch.setattr(ocr_service, "PAGE_TIMEOUT_MS", 3_000)
+    from PySide6.QtWidgets import QDialog
+
+    accepted = QDialog.DialogCode.Accepted
+    monkeypatch.setattr(OcrDialog, "exec", lambda d: d.all_radio.setChecked(True) or accepted)
+    window.open_file(str(_three_scans(scan_clean, tmp_path)))
+    service = window.document_view.ocr_service
+    from test_ocr_service import HANGS_ON_PAGE_1
+
+    service._command = [sys.executable, "-c", HANGS_ON_PAGE_1]
+    with qtbot.waitSignal(service.finished, timeout=60_000):
+        assert window.recognise_text()
+    assert (
+        window.statusBar().currentMessage()
+        == "Text recognised on 2 page(s); not recognised: page(s) 2"
+    )

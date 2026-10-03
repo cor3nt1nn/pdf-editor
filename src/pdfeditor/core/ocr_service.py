@@ -17,7 +17,8 @@ that the caller pushes once the run is over (:meth:`take_command`).
 
 Signals: ``page_done(index, PageOcr)``, ``page_failed(index, message)`` (that page only),
 ``progress(done, total)``, ``finished(cancelled)`` (normal end or :meth:`cancel`) and
-``failed(message)`` (the worker could not start, died or timed out; the run is over;
+``failed(message)`` (the worker could not start, died or timed out on
+:data:`MAX_CONSECUTIVE_TIMEOUTS` pages in a row; the run is over;
 :attr:`OcrService.failure_reason` says which: ``"start"``, ``"crash"``, ``"exit"``,
 ``"timeout"``, ``"protocol"`` or ``"closed"``).
 """
@@ -44,7 +45,11 @@ log = logging.getLogger(__name__)
 #: The worker process must start within this time...
 START_TIMEOUT_MS = 15_000
 #: ... and answer each page within this one (its own start-up included for the first).
+#: A page that takes longer is given up (``page_failed``): the worker is killed and a new
+#: one goes on with the next page...
 PAGE_TIMEOUT_MS = 60_000
+#: ... unless this many pages in a row timed out: the run then fails (``"timeout"``).
+MAX_CONSECUTIVE_TIMEOUTS = 2
 #: How long :meth:`OcrService.cancel` waits for the killed worker.
 KILL_WAIT_MS = 1_000
 
@@ -80,8 +85,12 @@ class OcrService(QObject):
         self._running = False
         self._make_searchable = False
         self._batch: AddOcrLayerCommand | None = None
+        self._timeouts = 0
         #: Why the last run failed ("" when it did not).
         self.failure_reason = ""
+        #: Indexes of the pages of the last run that could not be recognised (an error
+        #: reply, a render failure or a page timeout), in the order they failed.
+        self.failed_pages: list[int] = []
         self._watchdog = QTimer(self)
         self._watchdog.setSingleShot(True)
         self._watchdog.timeout.connect(self._on_timeout)
@@ -131,8 +140,15 @@ class OcrService(QObject):
         self._done = 0
         self._make_searchable = bool(make_searchable)
         self._batch = None
+        self._timeouts = 0
         self.failure_reason = ""
+        self.failed_pages = []
         self._running = True
+        log.info("text recognition of %d pages", len(ids))
+        self._spawn()
+
+    def _spawn(self) -> None:
+        """Start a worker process; its ``started`` sends the next page."""
         process = QProcess(self)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._on_output)
@@ -142,7 +158,7 @@ class OcrService(QObject):
         process.started.connect(self._send_next)
         self._process = process
         command = self._command or worker_command()
-        log.info("text recognition of %d pages: %s", len(ids), command)
+        log.info("text recognition worker: %s", command)
         self._watchdog.start(START_TIMEOUT_MS)
         process.start(command[0], command[1:])
 
@@ -209,9 +225,13 @@ class OcrService(QObject):
         try:
             return self._doc.ocr_request(index)
         except OcrError as exc:
-            self.page_failed.emit(index, str(exc))
+            self._page_failed(index, str(exc))
             self._count_page()
             return None
+
+    def _page_failed(self, index: int, message: str) -> None:
+        self.failed_pages.append(index)
+        self.page_failed.emit(index, message)
 
     def _count_page(self) -> None:
         self._done += 1
@@ -284,11 +304,12 @@ class OcrService(QObject):
                 try:
                     result = PageOcr.from_json(reply["ocr"])
                 except (KeyError, ValueError) as exc:
-                    self.page_failed.emit(index, f"malformed result: {exc}")
+                    self._page_failed(index, f"malformed result: {exc}")
                 else:
                     self._store(index, result)
             else:
-                self.page_failed.emit(index, str(reply.get("error", "unknown error")))
+                self._page_failed(index, str(reply.get("error", "unknown error")))
+        self._timeouts = 0
         self._count_page()
         self._send_next()
 
@@ -301,7 +322,7 @@ class OcrService(QObject):
                 if doc.lacks_text(index) and not doc.has_ocr_layer(index):
                     self._layer(index, result)
             except OcrError as exc:
-                self.page_failed.emit(index, str(exc))
+                self.page_failed.emit(index, str(exc))  # recognised: not a failed page
         self.page_done.emit(index, result)
 
     def _layer(self, index: int, result: PageOcr) -> None:
@@ -335,5 +356,21 @@ class OcrService(QObject):
             self._fail(f"the text recognition process exited (code {code})", "exit")
 
     def _on_timeout(self) -> None:
-        if self._running:
+        """The worker did not start, or did not answer for a page: that page is given up
+        and a new worker goes on with the next one (a page too big or too hard must not
+        stop the run), unless pages keep timing out."""
+        if not self._running:
+            return
+        pid, self._in_flight = self._in_flight, None
+        self._timeouts += 1
+        if pid is None or self._timeouts >= MAX_CONSECUTIVE_TIMEOUTS:
             self._fail("the text recognition process did not answer in time", "timeout")
+            return
+        index = self._index(pid)
+        log.warning("text recognition of page %s timed out; restarting the worker", index)
+        self._reap()
+        self._buffer = b""
+        if index is not None:
+            self._page_failed(index, "the text recognition of this page took too long")
+        self._count_page()
+        self._spawn()

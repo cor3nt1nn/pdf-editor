@@ -46,6 +46,10 @@ MIN_DPI = 150
 MAX_DPI = 300
 #: Resolution of pages without an image (vector-outlined text).
 DEFAULT_DPI = 300
+#: Largest page image sent for recognition (pixels): a big page (A0, a poster) is read
+#: at a lower resolution rather than as a 400 MB image the worker chews on for minutes.
+#: 40 Mpx = an A3 page at 300 dpi (≈ 35 Mpx) with some room.
+MAX_PIXELS = 40_000_000
 #: A scanned page: images cover at least this fraction of the page...
 SCAN_IMAGE_COVERAGE = 0.5
 #: ... and it draws at most this many vector paths (a digital page with outlined text
@@ -342,9 +346,20 @@ class OcrRequest:
     languages: str = LANGUAGES
 
 
+def max_dpi(page: pymupdf.Page) -> int:
+    """The highest resolution at which ``page`` (as displayed) stays within
+    :data:`MAX_PIXELS` (at least 1)."""
+    rect = page.rect
+    area = abs(rect.width * rect.height)
+    if area <= 0:
+        return MAX_DPI
+    return max(1, int(72.0 * math.sqrt(MAX_PIXELS / area)))
+
+
 def choose_dpi(page: pymupdf.Page) -> int:
     """Recognition resolution of ``page``: the native resolution of its largest image,
-    within [:data:`MIN_DPI`, :data:`MAX_DPI`]; :data:`DEFAULT_DPI` without an image."""
+    within [:data:`MIN_DPI`, :data:`MAX_DPI`]; :data:`DEFAULT_DPI` without an image;
+    never above :func:`max_dpi` (a huge page goes below :data:`MIN_DPI`)."""
     best_area = 0.0
     dpi = float(DEFAULT_DPI)
     try:
@@ -360,13 +375,14 @@ def choose_dpi(page: pymupdf.Page) -> int:
             continue
         best_area = area_pt
         dpi = math.sqrt(pixels / area_pt) * 72.0
-    return int(round(min(max(dpi, MIN_DPI), MAX_DPI)))
+    return min(int(round(min(max(dpi, MIN_DPI), MAX_DPI))), max_dpi(page))
 
 
 def render_request(page: pymupdf.Page, dpi: int | None = None) -> OcrRequest:
     """Render ``page`` as displayed (no annotations) to RGB at ``dpi`` (default
-    :func:`choose_dpi`). Caller holds the document lock."""
-    dpi = int(dpi or choose_dpi(page))
+    :func:`choose_dpi`; always capped by :func:`max_dpi`). Caller holds the document
+    lock."""
+    dpi = min(int(dpi or choose_dpi(page)), max_dpi(page))
     pix = page.get_pixmap(dpi=dpi, colorspace=pymupdf.csRGB, alpha=False, annots=False)
     if pix.n != 3 or pix.stride != pix.width * 3:
         pix = pymupdf.Pixmap(pymupdf.csRGB, pix, 0)

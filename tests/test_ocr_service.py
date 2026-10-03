@@ -191,13 +191,47 @@ def test_process_exits_early(qtbot, mixed_doc) -> None:
 
 
 def test_process_timeout(qtbot, mixed_doc, monkeypatch) -> None:
+    """A worker that never answers: the first page is given up and a new worker started;
+    the second page times out too (twice in a row) and the run fails."""
     monkeypatch.setattr(ocr_service, "PAGE_TIMEOUT_MS", 300)
     service = OcrService(command=[sys.executable, "-c", "import time; time.sleep(30)"])
     seen = _Recorder(service)
     with qtbot.waitSignal(service.failed, timeout=TIMEOUT_MS):
-        service.start(mixed_doc, [1])
+        service.start(mixed_doc, [0, 1])
+    assert seen.failed_pages == [(0, "the text recognition of this page took too long")]
     assert "did not answer" in seen.failed[0]
     assert service.failure_reason == "timeout"
+    assert service.failed_pages == [0]
+
+
+HANGS_ON_PAGE_1 = r"""
+import json, sys, time
+from pdfeditor.core.ocr import PageOcr
+from pdfeditor.core.ocr_worker import read_frame
+stdin, stdout = sys.stdin.buffer, sys.stdout.buffer
+while (request := read_frame(stdin)) is not None:
+    if request.page == 1:
+        time.sleep(60)
+    result = PageOcr((), request.page_width, request.page_height, request.rotation)
+    reply = {"page": request.page, "ok": True, "ocr": result.to_json()}
+    stdout.write(json.dumps(reply).encode() + b"\n")
+    stdout.flush()
+"""
+
+
+def test_page_timeout_skips_the_page(qtbot, three_scans, monkeypatch) -> None:
+    """A page that takes too long is given up, the worker restarted and the run goes on."""
+    monkeypatch.setattr(ocr_service, "PAGE_TIMEOUT_MS", 3_000)
+    service = OcrService(command=[sys.executable, "-c", HANGS_ON_PAGE_1])
+    seen = _Recorder(service)
+    with qtbot.waitSignal(service.finished, timeout=TIMEOUT_MS) as blocker:
+        service.start(three_scans, [0, 1, 2])
+    assert blocker.args == [False]
+    assert seen.done == [0, 2]
+    assert [i for i, _m in seen.failed_pages] == [1]
+    assert service.failed_pages == [1]
+    assert seen.progress[-1] == (3, 3)
+    assert seen.failed == [] and service.failure_reason == ""
 
 
 def test_start_errors(qtbot, mixed_doc) -> None:

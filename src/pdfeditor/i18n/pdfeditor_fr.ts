@@ -484,28 +484,28 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>DocumentView</name>
     <message>
-        <location filename="../ui/document_view.py" line="233"/>
+        <location filename="../ui/document_view.py" line="243"/>
         <source>This form uses dynamic XFA, which cannot be filled here. Open it in Adobe Acrobat Reader, print it to PDF (Microsoft Print to PDF), then fill the printed copy in PDF Editor as a flat form.</source>
         <extracomment>The &quot;looks scanned&quot; banner examines at most this many pages (from the first). A command failed while the stack ran it: (``&quot;undo&quot;``, ``&quot;redo&quot;`` or ``&quot;push&quot;``, the exception). The undo history is already cleared and the document marked modified (docs/ARCHITECTURE.md Deviation 90). The banner&apos;s &quot;Recognise text…&quot; button was clicked (M8).</extracomment>
         <translation>Ce formulaire utilise XFA dynamique, qui ne peut pas être rempli ici. Ouvrez-le dans Adobe Acrobat Reader, imprimez-le en PDF (Microsoft Print to PDF), puis remplissez la copie imprimée dans PDF Editor comme un formulaire simple.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="241"/>
+        <location filename="../ui/document_view.py" line="251"/>
         <source>Form filling is not permitted by this document’s security settings.</source>
         <translation>Le remplissage du formulaire n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="247"/>
+        <location filename="../ui/document_view.py" line="257"/>
         <source>This form contains XFA data; saving will convert it to a standard PDF form.</source>
         <translation>Ce formulaire contient des données XFA ; l’enregistrement le convertira en formulaire PDF standard.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="264"/>
+        <location filename="../ui/document_view.py" line="275"/>
         <source>This document looks scanned: {n} of {m} pages have no selectable text.</source>
         <translation>Ce document semble numérisé : {n} page(s) sur {m} n’ont pas de texte sélectionnable.</translation>
     </message>
     <message>
-        <location filename="../ui/document_view.py" line="266"/>
+        <location filename="../ui/document_view.py" line="277"/>
         <source>Recognise text…</source>
         <translation>Reconnaître le texte…</translation>
     </message>
@@ -579,10 +579,10 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>InfoBanner</name>
     <message>
-        <location filename="../ui/banner.py" line="63"/>
-        <location filename="../ui/banner.py" line="64"/>
+        <location filename="../ui/banner.py" line="65"/>
+        <location filename="../ui/banner.py" line="66"/>
         <source>Close</source>
-        <extracomment>The message&apos;s action button was clicked.</extracomment>
+        <extracomment>The message&apos;s action button was clicked. The user closed the banner (its close button).</extracomment>
         <translation>Fermer</translation>
     </message>
 </context>
@@ -683,9 +683,9 @@ Redémarrer maintenant ?</translation>
     <name>MainWindow</name>
     <message>
         <location filename="../ui/main_window.py" line="175"/>
-        <location filename="../ui/main_window.py" line="1301"/>
-        <location filename="../ui/main_window.py" line="1307"/>
-        <location filename="../ui/main_window.py" line="1449"/>
+        <location filename="../ui/main_window.py" line="1309"/>
+        <location filename="../ui/main_window.py" line="1315"/>
+        <location filename="../ui/main_window.py" line="1457"/>
         <source>Pages</source>
         <extracomment>Range of the toolbar font-size spin box (pt). The user&apos;s saved signatures (injectable: tests pass a store in tmp_path).</extracomment>
         <translation>Pages</translation>
@@ -1132,123 +1132,128 @@ Redémarrer maintenant ?</translation>
         <translation>Toutes les pages ont déjà du texte.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1205"/>
+        <location filename="../ui/main_window.py" line="1206"/>
         <source>Text recognition was cancelled</source>
         <translation>Reconnaissance du texte annulée</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1208"/>
+        <location filename="../ui/main_window.py" line="1210"/>
+        <source>Text recognised on {n} page(s); not recognised: page(s) {pages}</source>
+        <translation>Texte reconnu sur {n} page(s) ; non reconnue(s) : page(s) {pages}</translation>
+    </message>
+    <message>
+        <location filename="../ui/main_window.py" line="1216"/>
         <source>Text recognised on {n} page(s)</source>
         <translation>Texte reconnu sur {n} page(s)</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1213"/>
-        <location filename="../ui/main_window.py" line="1217"/>
+        <location filename="../ui/main_window.py" line="1221"/>
+        <location filename="../ui/main_window.py" line="1225"/>
         <source>Text recognition failed</source>
         <translation>Échec de la reconnaissance du texte</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1215"/>
+        <location filename="../ui/main_window.py" line="1223"/>
         <source>The text recognition process could not be started.</source>
         <translation>Le processus de reconnaissance du texte n’a pas pu démarrer.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1218"/>
+        <location filename="../ui/main_window.py" line="1226"/>
         <source>Recognise Text</source>
         <translation>Reconnaître le texte</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1274"/>
+        <location filename="../ui/main_window.py" line="1282"/>
         <source>A document must keep at least one page.</source>
         <translation>Un document doit conserver au moins une page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1277"/>
+        <location filename="../ui/main_window.py" line="1285"/>
         <source>Page operations are not permitted by this document’s security settings.</source>
         <translation>Les opérations sur les pages ne sont pas autorisées par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1280"/>
+        <location filename="../ui/main_window.py" line="1288"/>
         <source>The page could not be deleted: no room for the undo copy.</source>
         <translation>La page n’a pas pu être supprimée : pas d’espace pour la copie d’annulation.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1282"/>
+        <location filename="../ui/main_window.py" line="1290"/>
         <source>The pages could not be inserted: no room for their undo copy.</source>
         <translation>Les pages n’ont pas pu être insérées : pas d’espace pour leur copie d’annulation.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1283"/>
+        <location filename="../ui/main_window.py" line="1291"/>
         <source>The page operation failed.</source>
         <translation>L’opération sur les pages a échoué.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1376"/>
+        <location filename="../ui/main_window.py" line="1384"/>
         <source>Inserted {count} pages</source>
         <translation>{count} pages insérées</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1379"/>
+        <location filename="../ui/main_window.py" line="1387"/>
         <source>Some inserted form fields were renamed because the document already had fields with the same names.</source>
         <translation>Certains champs de formulaire insérés ont été renommés car le document contenait déjà des champs portant les mêmes noms.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1403"/>
-        <location filename="../ui/main_window.py" line="1438"/>
+        <location filename="../ui/main_window.py" line="1411"/>
+        <location filename="../ui/main_window.py" line="1446"/>
         <source>Copying pages is not permitted by this document’s security settings.</source>
         <translation>La copie de pages n’est pas autorisée par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1446"/>
+        <location filename="../ui/main_window.py" line="1454"/>
         <source>These files were written before the error: {names}.</source>
         <translation>Ces fichiers ont été écrits avant l’erreur : {names}.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1465"/>
+        <location filename="../ui/main_window.py" line="1473"/>
         <source>Extract Pages</source>
         <translation>Extraire les pages</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1442"/>
+        <location filename="../ui/main_window.py" line="1450"/>
         <source>The pages could not be written.</source>
         <translation>Les pages n’ont pas pu être écrites.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1463"/>
+        <location filename="../ui/main_window.py" line="1471"/>
         <source>{stem} - pages.pdf</source>
         <translation>{stem} - pages.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1471"/>
+        <location filename="../ui/main_window.py" line="1479"/>
         <source>Extracted {count} pages to “{name}”</source>
         <translation>{count} pages extraites vers « {name} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1490"/>
+        <location filename="../ui/main_window.py" line="1498"/>
         <source>Split Document</source>
         <translation>Scinder le document</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1500"/>
+        <location filename="../ui/main_window.py" line="1508"/>
         <source>Split into {count} files in “{folder}”</source>
         <translation>Document scindé en {count} fichiers dans « {folder} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1567"/>
+        <location filename="../ui/main_window.py" line="1575"/>
         <source>Pointer and editing</source>
         <translation>Souris et saisie</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1624"/>
-        <location filename="../ui/main_window.py" line="1635"/>
-        <location filename="../ui/main_window.py" line="1708"/>
+        <location filename="../ui/main_window.py" line="1632"/>
+        <location filename="../ui/main_window.py" line="1643"/>
+        <location filename="../ui/main_window.py" line="1716"/>
         <source>Cannot open file</source>
         <translation>Impossible d’ouvrir le fichier</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1625"/>
-        <location filename="../ui/main_window.py" line="1636"/>
-        <location filename="../ui/main_window.py" line="1709"/>
+        <location filename="../ui/main_window.py" line="1633"/>
+        <location filename="../ui/main_window.py" line="1644"/>
+        <location filename="../ui/main_window.py" line="1717"/>
         <source>“{path}” could not be opened as a PDF document.
 
 {error}</source>
@@ -1257,132 +1262,132 @@ Redémarrer maintenant ?</translation>
 {error}</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1637"/>
-        <location filename="../ui/main_window.py" line="1730"/>
+        <location filename="../ui/main_window.py" line="1645"/>
+        <location filename="../ui/main_window.py" line="1738"/>
         <source>An unexpected error occurred.</source>
         <translation>Une erreur inattendue s’est produite.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1648"/>
+        <location filename="../ui/main_window.py" line="1656"/>
         <source>Adding text and stamps is not permitted by this document’s security settings.</source>
         <translation>L’ajout de texte et de tampons n’est pas autorisé par les paramètres de sécurité de ce document.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1654"/>
+        <location filename="../ui/main_window.py" line="1662"/>
         <source>The file was repaired while opening; saving will rewrite it completely.</source>
         <translation>Le fichier a été réparé à l’ouverture ; l’enregistrement le réécrira entièrement.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1675"/>
+        <location filename="../ui/main_window.py" line="1683"/>
         <source>No recent files</source>
         <translation>Aucun fichier récent</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1710"/>
-        <location filename="../ui/main_window.py" line="1722"/>
+        <location filename="../ui/main_window.py" line="1718"/>
+        <location filename="../ui/main_window.py" line="1730"/>
         <source>The file does not exist.</source>
         <translation>Le fichier n’existe pas.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1724"/>
+        <location filename="../ui/main_window.py" line="1732"/>
         <source>The file could not be read. It may be locked by another program.</source>
         <translation>Le fichier n’a pas pu être lu. Il est peut-être verrouillé par un autre programme.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1726"/>
+        <location filename="../ui/main_window.py" line="1734"/>
         <source>The file is empty.</source>
         <translation>Le fichier est vide.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1727"/>
+        <location filename="../ui/main_window.py" line="1735"/>
         <source>The file is damaged or is not a PDF document.</source>
         <translation>Le fichier est endommagé ou n’est pas un document PDF.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1728"/>
+        <location filename="../ui/main_window.py" line="1736"/>
         <source>The document has no pages.</source>
         <translation>Le document ne contient aucune page.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1750"/>
+        <location filename="../ui/main_window.py" line="1758"/>
         <source>The file “{name}” no longer exists. Use Save As to save a copy.</source>
         <translation>Le fichier « {name} » n’existe plus. Utilisez « Enregistrer sous » pour en enregistrer une copie.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1770"/>
+        <location filename="../ui/main_window.py" line="1778"/>
         <source>Saved</source>
         <translation>Enregistré</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1783"/>
+        <location filename="../ui/main_window.py" line="1791"/>
         <source>The document could not be saved and had to be closed.</source>
         <translation>Le document n’a pas pu être enregistré et a dû être fermé.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1807"/>
+        <location filename="../ui/main_window.py" line="1815"/>
         <source>The document could not be saved as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>Le document n’a pas pu être enregistré sous « {name} ». Vérifiez que le dossier existe et que vous avez le droit d’y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1837"/>
+        <location filename="../ui/main_window.py" line="1845"/>
         <source>{stem} - flattened.pdf</source>
         <translation>{stem} - aplati.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1839"/>
+        <location filename="../ui/main_window.py" line="1847"/>
         <source>{stem} - copy.pdf</source>
         <translation>{stem} - copie.pdf</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1847"/>
+        <location filename="../ui/main_window.py" line="1855"/>
         <source>Export Copy</source>
         <translation>Exporter une copie</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1416"/>
-        <location filename="../ui/main_window.py" line="1848"/>
+        <location filename="../ui/main_window.py" line="1424"/>
+        <location filename="../ui/main_window.py" line="1856"/>
         <source>Choose another name: the copy cannot replace the open document.</source>
         <translation>Choisissez un autre nom : la copie ne peut pas remplacer le document ouvert.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1863"/>
+        <location filename="../ui/main_window.py" line="1871"/>
         <source>Export failed</source>
         <translation>Échec de l’exportation</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1865"/>
+        <location filename="../ui/main_window.py" line="1873"/>
         <source>The copy could not be written as “{name}”. Check that the folder exists and that you are allowed to write there.</source>
         <translation>La copie n’a pas pu être écrite sous « {name} ». Vérifiez que le dossier existe et que vous pouvez y écrire.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1871"/>
+        <location filename="../ui/main_window.py" line="1879"/>
         <source>Exported to “{name}”</source>
         <translation>Exporté vers « {name} »</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1896"/>
+        <location filename="../ui/main_window.py" line="1904"/>
         <source>Registered with Windows</source>
         <translation>Enregistré dans Windows</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1900"/>
+        <location filename="../ui/main_window.py" line="1908"/>
         <source>Removed from Windows</source>
         <translation>Retiré de Windows</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1909"/>
+        <location filename="../ui/main_window.py" line="1917"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1910"/>
+        <location filename="../ui/main_window.py" line="1918"/>
         <source>The registration could not be changed.</source>
         <translation>L’enregistrement n’a pas pu être modifié.</translation>
     </message>
     <message>
-        <location filename="../ui/main_window.py" line="1749"/>
-        <location filename="../ui/main_window.py" line="1782"/>
-        <location filename="../ui/main_window.py" line="1805"/>
+        <location filename="../ui/main_window.py" line="1757"/>
+        <location filename="../ui/main_window.py" line="1790"/>
+        <location filename="../ui/main_window.py" line="1813"/>
         <source>Save failed</source>
         <translation>Échec de l’enregistrement</translation>
     </message>
@@ -1443,12 +1448,12 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>OcrProgress</name>
     <message>
-        <location filename="../ui/ocr_dialog.py" line="135"/>
+        <location filename="../ui/ocr_dialog.py" line="137"/>
         <source>Recognise Text</source>
         <translation>Reconnaître le texte</translation>
     </message>
     <message>
-        <location filename="../ui/ocr_dialog.py" line="148"/>
+        <location filename="../ui/ocr_dialog.py" line="150"/>
         <source>Recognising text… page {n} of {m}</source>
         <translation>Reconnaissance du texte… page {n} sur {m}</translation>
     </message>
