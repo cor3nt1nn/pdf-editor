@@ -163,12 +163,20 @@ def test_no_registry_section(sections) -> None:
     assert "Software\\Classes" not in "\n".join(sum(sections.values(), []))
 
 
-def test_flags_used(sections) -> None:
-    (uninstall_run,) = sections["UninstallRun"]
-    assert 'Parameters: "{#UnregisterFlag}"' in uninstall_run
-    assert "runhidden" in uninstall_run and "RunOnceId" in uninstall_run
+def test_flags_used(sections, text) -> None:
+    assert "UninstallRun" not in sections  # unregistered from [Code], to log the result
     code = "\n".join(sections["Code"])
     assert "'{#RegisterFlag}'" in code
+    step = code.split("procedure CurUninstallStepChanged", 1)[1]
+    unregister = step.split("if CurUninstallStep = usUninstall then", 1)[1].split("end;", 1)[0]
+    assert "'{#UnregisterFlag}'" in unregister and "SW_HIDE" in unregister
+    assert "Log(Format('{#UnregisterFlag} exit code: %d (%s)'" in unregister
+    assert "Log(Format('{#RegisterFlag} exit code: %d (%s)'" in code
+    defines = _defines(text)
+    assert defines["ExitRegistryError"] == str(app.EXIT_REGISTRY_ERROR)
+    assert defines["ExitRegisterFailed"] == str(app.EXIT_REGISTER_FAILED)
+    assert "{#ExitRegistryError}: Result :=" in code
+    assert "{#ExitRegisterFailed}: Result :=" in code
     assert "WizardIsTaskSelected('openwith')" in code
     assert "ExecAsOriginalUser" in code
     assert "CustomMessage('RegisterFailed')" in code

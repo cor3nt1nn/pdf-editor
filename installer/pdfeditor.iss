@@ -22,6 +22,9 @@
 ; Must equal pdfeditor.app.REGISTER_FLAG / UNREGISTER_FLAG (tests/test_installer_script.py).
 #define RegisterFlag "--register-file-type"
 #define UnregisterFlag "--unregister-file-type"
+; Their exit codes: pdfeditor.app.EXIT_REGISTRY_ERROR / EXIT_REGISTER_FAILED.
+#define ExitRegistryError "2"
+#define ExitRegisterFailed "3"
 
 [Setup]
 ; The AppId identifies the installation for upgrades and the uninstaller: NEVER change it.
@@ -95,9 +98,6 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{app}\{#AppExeName}"; Parameters: "{#UnregisterFlag}"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterFileType"
-
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
 
@@ -113,6 +113,19 @@ begin
       Result := False;
 end;
 
+{ What an exit code of the file-type flags means (for the setup and uninstall logs). }
+function FileTypeResult(Code: Integer): String;
+begin
+  case Code of
+    0: Result := 'done';
+    {#ExitRegistryError}: Result := 'the registry refused the change (access denied?)';
+    {#ExitRegisterFailed}: Result := 'unexpected error';
+    -1: Result := 'PDFEditor.exe could not be started';
+  else
+    Result := 'unknown exit code';
+  end;
+end;
+
 { The "Open with" task: PDFEditor.exe --register-file-type writes the HKCU keys of
   core\file_assoc.py for the user who started Setup; exit code 0 = done. }
 procedure RegisterFileType;
@@ -122,7 +135,7 @@ begin
   if not ExecAsOriginalUser(ExpandConstant('{app}\{#AppExeName}'), '{#RegisterFlag}', '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     ResultCode := -1;
-  Log(Format('{#RegisterFlag} exit code: %d', [ResultCode]));
+  Log(Format('{#RegisterFlag} exit code: %d (%s)', [ResultCode, FileTypeResult(ResultCode)]));
   if ResultCode <> 0 then
     SuppressibleMsgBox(CustomMessage('RegisterFailed'), mbInformation, MB_OK, IDOK);
 end;
@@ -141,7 +154,17 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Roaming, Local: String;
+  ResultCode: Integer;
 begin
+  { Before the files go: PDFEditor.exe --unregister-file-type removes this copy's "Open
+    with" registration (it keeps one that opens another copy, and writes no file). }
+  if CurUninstallStep = usUninstall then
+  begin
+    if not Exec(ExpandConstant('{app}\{#AppExeName}'), '{#UnregisterFlag}', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+      ResultCode := -1;
+    Log(Format('{#UnregisterFlag} exit code: %d (%s)', [ResultCode, FileTypeResult(ResultCode)]));
+  end;
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
   begin
     if IsAdminInstallMode then

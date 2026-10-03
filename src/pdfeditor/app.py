@@ -48,6 +48,11 @@ OCR_WORKER_FLAG = "--ocr-worker"
 #: it from, the "Open with" list of PDF files (``core/file_assoc.py``), then exit.
 REGISTER_FLAG = "--register-file-type"
 UNREGISTER_FLAG = "--unregister-file-type"
+#: Exit codes of those modes (the installer logs them, installer/pdfeditor.iss): done, the
+#: registry refused (``OSError``: access denied, a policy...), any other failure.
+EXIT_REGISTERED = 0
+EXIT_REGISTRY_ERROR = 2
+EXIT_REGISTER_FAILED = 3
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -117,8 +122,10 @@ def self_check(directory: str | os.PathLike[str]) -> int:
 def file_type_registration(register: bool) -> int:
     """The hidden ``--register-file-type`` / ``--unregister-file-type`` modes (no window,
     no Qt application, no file log: the uninstaller runs it and must not recreate the
-    user's data folder). Returns 0 on success, 1 on failure; never raises, since a
-    windowed build would show a traceback box in the middle of a silent install.
+    user's data folder). Returns :data:`EXIT_REGISTERED` (0) on success,
+    :data:`EXIT_REGISTRY_ERROR` (2) when the registry refused (``OSError``) and
+    :data:`EXIT_REGISTER_FAILED` (3) on any other failure; never raises, since a windowed
+    build would show a traceback box in the middle of a silent install.
 
     Unregistering leaves alone a registration that opens another copy of the app (say the
     portable zip): uninstalling one copy must not remove the other's "Open with" entry."""
@@ -132,12 +139,15 @@ def file_type_registration(register: bool) -> int:
             ours = file_assoc.command_line(file_assoc.app_command())
             if current is not None and current.casefold() != ours.casefold():
                 log.info("PDF files are registered to another copy (%s): kept", current)
-                return 0
+                return EXIT_REGISTERED
             file_assoc.unregister()
+    except OSError:
+        log.exception("could not %s the PDF file type", "register" if register else "unregister")
+        return EXIT_REGISTRY_ERROR
     except Exception:  # noqa: BLE001 - reported by the exit code
         log.exception("could not %s the PDF file type", "register" if register else "unregister")
-        return 1
-    return 0
+        return EXIT_REGISTER_FAILED
+    return EXIT_REGISTERED
 
 
 def _log_uncaught(kind, value, tb) -> None:  # noqa: ANN001 - sys.excepthook signature

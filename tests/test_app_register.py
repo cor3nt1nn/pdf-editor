@@ -60,22 +60,24 @@ def test_unregister_keeps_another_copys_registration(monkeypatch, calls) -> None
 
 
 @pytest.mark.parametrize("flag", [app_module.REGISTER_FLAG, app_module.UNREGISTER_FLAG])
-def test_failure_exits_1(monkeypatch, calls, flag, caplog) -> None:
+def test_registry_error_exits_2(monkeypatch, calls, flag, caplog) -> None:
     def fail(*_args, **_kwargs):
         raise OSError("access denied")
 
     monkeypatch.setattr(file_assoc, "register", fail)
     monkeypatch.setattr(file_assoc, "unregister", fail)
-    assert app_module.main(["PDFEditor.exe", flag]) == 1
+    assert app_module.main(["PDFEditor.exe", flag]) == app_module.EXIT_REGISTRY_ERROR == 2
     assert "access denied" in caplog.text
 
 
-def test_unexpected_error_exits_1(monkeypatch, calls) -> None:
-    def boom(**_kwargs):
+@pytest.mark.parametrize("flag", [app_module.REGISTER_FLAG, app_module.UNREGISTER_FLAG])
+def test_unexpected_error_exits_3(monkeypatch, calls, flag) -> None:
+    def boom(*_args, **_kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(file_assoc, "register", boom)
-    assert app_module.main(["PDFEditor.exe", app_module.REGISTER_FLAG]) == 1
+    monkeypatch.setattr(file_assoc, "unregister", boom)
+    assert app_module.main(["PDFEditor.exe", flag]) == app_module.EXIT_REGISTER_FAILED == 3
 
 
 def test_flag_only_as_first_argument(monkeypatch, calls) -> None:
@@ -110,4 +112,4 @@ def test_subprocess_creates_no_qt_application() -> None:
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
-    assert done.stdout.split() == ["registered", "0", "1", "True"]
+    assert done.stdout.split() == ["registered", "0", "2", "True"]
