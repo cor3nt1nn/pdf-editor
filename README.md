@@ -11,7 +11,7 @@ Export Copy… (flattened or clean copies), Open Recent, "Open with" registratio
 portable Windows release; Milestone 6 adds page tools (reorder, delete, insert,
 extract, split) and text selection, copy and highlight/underline/strike-through markups;
 Milestone 7 edits the page's own text in place; Milestone 8 (current) recognises the text of
-scanned pages (OCR) and makes it searchable.
+scanned pages (OCR), makes it searchable and adds a Windows setup program.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
 [docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md),
 [docs/M5_PLAN.md](docs/M5_PLAN.md), [docs/M6_PLAN.md](docs/M6_PLAN.md),
@@ -19,9 +19,35 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 
 ## Install & use (end users)
 
+### Install (setup) — recommended
+
+1. Download `PDFEditor-<version>-setup.exe` (for example `PDFEditor-0.1.0-setup.exe`,
+   about 38 MB).
+2. Run it. The program is not signed, so Windows SmartScreen may say "Windows protected your
+   PC": click **More info ▸ Run anyway**.
+3. Pick the language of the setup (English or French), accept the licence (AGPL-3.0) and
+   keep **Install for me only** (no administrator rights; installed in
+   `%LOCALAPPDATA%\Programs\PDFEditor`). "Install for all users" asks for administrator
+   rights and installs in `C:\Program Files\PDFEditor`.
+4. Optional tasks, both unticked: a desktop shortcut, and **Add PDF Editor to the “Open
+   with” list of PDF files (this account only)** — the same as **Settings ▸ Register with
+   Windows (Open with)…** in the program. The setup never changes your default PDF program:
+   to make PDF Editor the default, choose it in Windows **Settings ▸ Apps ▸ Default apps**.
+5. Start it from the Start menu (**PDF Editor**). To upgrade, run the setup of the newer
+   version: it offers to close a running PDF Editor and keeps your settings and signatures.
+6. Uninstall: Windows **Settings ▸ Apps ▸ Installed apps ▸ PDF Editor ▸ Uninstall** (or
+   Control Panel ▸ Programs and Features). This removes the program, its shortcuts and its
+   "Open with" entry, then asks whether to also delete your settings, saved signatures and
+   log files (default **No**).
+
+### Portable (zip)
+
+No installation: the program runs from any folder, for example a USB stick.
+
 1. Download `PDFEditor-<version>-win64.zip` (for example `PDFEditor-0.1.0-win64.zip`).
 2. Extract it: it contains one `PDFEditor` folder. Put that folder anywhere you like, for
-   example `%LOCALAPPDATA%\Programs\PDFEditor` (no administrator rights needed).
+   example `Documents\PDFEditor` or a USB stick (no administrator rights needed; not the
+   setup's folder `%LOCALAPPDATA%\Programs\PDFEditor`).
 3. Run `PDFEditor.exe` in that folder. The program is not signed, so Windows SmartScreen may
    say "Windows protected your PC": click **More info ▸ Run anyway** (only the first time).
 4. Optional: **Settings ▸ Register with Windows (Open with)…** adds PDF Editor to the
@@ -38,15 +64,47 @@ Where PDF Editor keeps its data:
 - log file: `%LOCALAPPDATA%\PDFEditor\PDFEditor\logs\pdfeditor.log` (its exact path is
   shown in Help ▸ About PDF Editor…; attach it when reporting a problem)
 
-Uninstall: **Settings ▸ Unregister from Windows** (if you registered it), then delete the
-`PDFEditor` folder and, to remove your settings, signatures and log too,
-`%APPDATA%\PDFEditor` and `%LOCALAPPDATA%\PDFEditor`.
+Uninstall the portable copy: **Settings ▸ Unregister from Windows** (if you registered it),
+then delete the `PDFEditor` folder and, to remove your settings, signatures and log too,
+`%APPDATA%\PDFEditor` and `%LOCALAPPDATA%\PDFEditor`. Both versions share these settings.
 
 ## Installation et utilisation (utilisateurs)
 
+### Installation (programme d’installation) — recommandée
+
+1. Téléchargez `PDFEditor-<version>-setup.exe` (par exemple `PDFEditor-0.1.0-setup.exe`,
+   environ 38 Mo).
+2. Lancez-le. Le programme n’est pas signé : si Windows SmartScreen affiche « Windows a
+   protégé votre ordinateur », cliquez sur **Informations complémentaires ▸ Exécuter quand
+   même**.
+3. Choisissez la langue de l’installation (français ou anglais), acceptez la licence
+   (AGPL-3.0) et gardez **Installer pour moi uniquement** (aucun droit d’administrateur ;
+   installé dans `%LOCALAPPDATA%\Programs\PDFEditor`). « Installer pour tous les
+   utilisateurs » demande les droits d’administrateur et installe dans
+   `C:\Program Files\PDFEditor`.
+4. Tâches facultatives, décochées : un raccourci sur le bureau et **Ajouter PDF Editor à la
+   liste « Ouvrir avec » des fichiers PDF (ce compte uniquement)** — comme **Paramètres ▸
+   Enregistrer dans Windows (Ouvrir avec)…** dans le programme. L’installation ne change
+   jamais votre programme PDF par défaut : pour faire de PDF Editor le programme par défaut,
+   choisissez-le dans **Paramètres ▸ Applications ▸ Applications par défaut** de Windows.
+5. Lancez-le depuis le menu Démarrer (**PDF Editor**). Pour mettre à jour, lancez
+   l’installation de la nouvelle version : elle propose de fermer PDF Editor s’il est ouvert
+   et garde vos paramètres et signatures.
+6. Désinstallation : **Paramètres ▸ Applications ▸ Applications installées ▸ PDF Editor ▸
+   Désinstaller** (ou Panneau de configuration ▸ Programmes et fonctionnalités). Le programme,
+   ses raccourcis et son entrée « Ouvrir avec » sont supprimés, puis une question propose de
+   supprimer aussi vos paramètres, signatures enregistrées et fichiers journaux (par défaut
+   **Non**).
+
+### Version portable (zip)
+
+Sans installation : le programme fonctionne depuis n’importe quel dossier, par exemple une
+clé USB.
+
 1. Téléchargez `PDFEditor-<version>-win64.zip` (par exemple `PDFEditor-0.1.0-win64.zip`).
 2. Extrayez-le : il contient un dossier `PDFEditor`. Placez ce dossier où vous voulez, par
-   exemple `%LOCALAPPDATA%\Programs\PDFEditor` (aucun droit d’administrateur nécessaire).
+   exemple `Documents\PDFEditor` ou une clé USB (aucun droit d’administrateur nécessaire ;
+   pas le dossier de l’installation, `%LOCALAPPDATA%\Programs\PDFEditor`).
 3. Lancez `PDFEditor.exe` dans ce dossier. Le programme n’est pas signé : si Windows
    SmartScreen affiche « Windows a protégé votre ordinateur », cliquez sur **Informations
    complémentaires ▸ Exécuter quand même** (la première fois seulement).
@@ -65,9 +123,10 @@ Où PDF Editor conserve ses données :
   exact est indiqué dans Aide ▸ À propos de PDF Editor… ; joignez-le pour signaler un
   problème)
 
-Désinstallation : **Paramètres ▸ Retirer de Windows** (si vous l’aviez enregistré), puis
-supprimez le dossier `PDFEditor` et, pour effacer aussi vos paramètres, signatures et
-journal, `%APPDATA%\PDFEditor` et `%LOCALAPPDATA%\PDFEditor`.
+Désinstallation de la version portable : **Paramètres ▸ Retirer de Windows** (si vous
+l’aviez enregistré), puis supprimez le dossier `PDFEditor` et, pour effacer aussi vos
+paramètres, signatures et journal, `%APPDATA%\PDFEditor` et `%LOCALAPPDATA%\PDFEditor`. Les
+deux versions partagent ces paramètres.
 
 ## Build the Windows release
 
@@ -783,6 +842,35 @@ Run it on copies of real scans; keep the originals.
    tooltip; recognised text is selectable but nothing is saved.
 7. **Snapping**: on a scanned form, the text tool snaps to table cells, underlines and
    checkbox squares (and a stamp centres in a square); on a slightly skewed scan too.
+
+### Manual installer checklist (Milestone 8)
+
+Build it with `scripts\build_exe.ps1 -Installer`; do it on a test account or a machine
+where PDF Editor is not installed yet.
+
+1. **SmartScreen**: run `PDFEditor-<version>-setup.exe` from Downloads: "Windows protected
+   your PC" → More info ▸ Run anyway; the setup shows the app icon and "PDF Editor".
+2. **Language**: with Windows in French the setup runs in French without asking, in English
+   on an English Windows; on a Windows in another language a box offers English or French.
+   Every page is in that language (the licence text itself is the English AGPL).
+3. **Install mode**: "Install for me only" needs no administrator prompt; the folder is
+   `%LOCALAPPDATA%\Programs\PDFEditor`.
+4. **Tasks**: both boxes are unticked; the "Open with" task reads "Add PDF Editor to the
+   “Open with” list of PDF files (this account only)" (French: « Ajouter PDF Editor à la
+   liste « Ouvrir avec » des fichiers PDF (ce compte uniquement) »). Tick it: after the
+   install, right-click a PDF ▸ Open with lists PDF Editor and opens the file; the default
+   PDF program is unchanged; **Settings ▸ Unregister from Windows** is enabled in the app.
+5. **Start menu**: "PDF Editor" is in the Start menu with its icon and starts the app; the
+   last page's "Launch PDF Editor" box starts it too; no desktop shortcut unless ticked.
+6. **Apps & features**: Settings ▸ Apps ▸ Installed apps lists "PDF Editor", version
+   `<version>`, publisher "PDF Editor contributors", the app icon and about 117 MB.
+7. **Upgrade while running**: with PDF Editor open on a document, run the setup again: it
+   offers to close the application, installs, and there is still one "PDF Editor" entry in
+   Installed apps; settings, recent files and signatures are kept.
+8. **Uninstall**: from Installed apps: after the files are removed, a question asks whether
+   to also delete settings, saved signatures and log files, listing `%APPDATA%\PDFEditor` and
+   `%LOCALAPPDATA%\PDFEditor`; **No** (the default) keeps them, **Yes** deletes both; the
+   install folder, the Start menu entry and the "Open with" entry are gone either way.
 
 ## License
 
