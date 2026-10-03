@@ -151,7 +151,7 @@ It produces `dist\PDFEditor\` (`PDFEditor.exe`, `_internal\`, `README.md`, `LICE
 `dist\PDFEditor-<version>-win64.zip` (about 49 MB; about 110 MB extracted). With
 `-Installer` it also compiles `installer\pdfeditor.iss` into
 `dist\PDFEditor-<version>-setup.exe` (about 38 MB) with Inno Setup: the compiler is
-`$env:ISCC` if set, else an installed Inno Setup 7 or 6, else the portable Inno Setup 7.1.0
+`$env:ISCC` if set, else an installed Inno Setup 7.1 or later, else the portable Inno Setup 7.1.0
 package that `scripts\fetch_innosetup.ps1` downloads once from nuget.org (SHA-256 checked)
 into `build\tools\innosetup\` — nothing is installed on the build machine. To rerun the
 frozen or installer tests against an existing build:

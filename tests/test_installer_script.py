@@ -3,6 +3,7 @@ needed. The compiled setup is tested by tests/test_installer.py (marker ``instal
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -266,3 +267,47 @@ def test_all_users_uninstall_deletes_no_user_data(sections) -> None:
     branch = step[admin : step.index("Exit;", admin)]
     assert "CustomMessage('UserDataKept')" in branch and "SuppressibleMsgBox" in branch
     assert "DelTree" not in branch
+
+
+FETCH = BUILD_EXE.parent / "fetch_innosetup.ps1"
+PINNED = BUILD_EXE.parent.parent / "build" / "tools" / "innosetup" / "tools"
+
+
+def _fetch(roots: list[Path]) -> tuple[str, str]:
+    """Run fetch_innosetup.ps1 searching ``roots`` instead of Program Files (Windows
+    resets %ProgramFiles% for every process: it cannot be redirected)."""
+    env = dict(os.environ)
+    env.pop("ISCC", None)
+    command = f"& '{FETCH}' -SearchRoots " + ",".join(f"'{r}'" for r in roots)
+    done = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip().splitlines()[-1], done.stdout
+
+
+@pytest.mark.skipif(
+    shutil.which("powershell") is None or not (PINNED / "ISCC.exe").is_file(),
+    reason="needs Windows PowerShell and the pinned Inno Setup in build/tools",
+)
+def test_fetch_skips_an_old_compiler(tmp_path) -> None:
+    """Installer review 8: an installed compiler older than 7.1 is not used (its file
+    version says so); a 7.1 one is, even without a version resource (the portable package
+    has none: the compiler's banner tells)."""
+    import sys
+
+    roots = [tmp_path / "ProgramFiles", tmp_path / "Programs"]
+    old = roots[0] / "Inno Setup 6"
+    old.mkdir(parents=True)
+    shutil.copyfile(sys._base_executable, old / "ISCC.exe")  # file version 3.12
+    found, out = _fetch(roots)
+    assert Path(found) == PINNED / "ISCC.exe"
+    assert "skipping" in out and str(old / "ISCC.exe") in out
+    new = roots[1] / "Inno Setup 7"
+    shutil.copytree(PINNED, new)
+    found, _out = _fetch(roots)
+    assert Path(found) == new / "ISCC.exe"

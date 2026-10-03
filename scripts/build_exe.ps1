@@ -10,7 +10,7 @@
     exe's version.
 
     -Installer then compiles installer\pdfeditor.iss with Inno Setup (ISCC.exe from
-    scripts\fetch_innosetup.ps1: $env:ISCC, an installed Inno Setup 7/6, or the pinned
+    scripts\fetch_innosetup.ps1: $env:ISCC, an installed Inno Setup 7.1+, or the pinned
     portable 7.1.0 package downloaded into build\tools) into
     dist\PDFEditor-<version>-setup.exe, fails on any compiler warning, prints its size and
     checks its version resource.
