@@ -81,17 +81,6 @@ def _installed() -> bool:
     return False
 
 
-pytestmark = [
-    pytest.mark.installer,
-    pytest.mark.skipif(not SETUP, reason="PDFEDITOR_INSTALLER is not set (needs a build)"),
-    pytest.mark.skipif(sys.platform != "win32", reason="Windows only"),
-    pytest.mark.skipif(
-        bool(SETUP) and _installed(),
-        reason="PDF Editor is installed on this machine (its Uninstall key exists)",
-    ),
-]
-
-
 def _values(path: str, hive: int | None = None, view: int = 0) -> dict[str, object]:
     out: dict[str, object] = {}
     hive = winreg.HKEY_CURRENT_USER if hive is None else hive
@@ -131,6 +120,18 @@ def _our_uninstall_keys(hive: int | None = None, view: int = 0) -> list[str]:
             except OSError:
                 pass
     return names
+
+
+# After the helpers: the skip condition calls them at import time.
+pytestmark = [
+    pytest.mark.installer,
+    pytest.mark.skipif(not SETUP, reason="PDFEDITOR_INSTALLER is not set (needs a build)"),
+    pytest.mark.skipif(sys.platform != "win32", reason="Windows only"),
+    pytest.mark.skipif(
+        bool(SETUP) and _installed(),
+        reason="PDF Editor is installed on this machine (its Uninstall key exists)",
+    ),
+]
 
 
 def _registry_snapshot() -> dict[str, object]:
