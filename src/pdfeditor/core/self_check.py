@@ -210,3 +210,118 @@ def check_annotations(directory: Path) -> dict[str, Any]:
         "annotations": kinds,
         **exports,
     }
+
+
+# -- M8: text recognition and font subsetting ---------------------------------------
+#: Words of the generated scan of :func:`check_ocr` (French, with accents).
+OCR_TEXT = (
+    "Formulaire de demande d'inscription à l'école",
+    "Nom et prénom de l'élève : Élodie Lévêque",
+    "Fait à Monaco, le 3 septembre 2026",
+)
+#: Fraction of :data:`OCR_TEXT`'s words that must be recognised.
+OCR_MIN_RECALL = 0.8
+
+
+def make_scan_pdf(path: Path) -> list[str]:
+    """An image-only page (a 200 dpi grey render of :data:`OCR_TEXT`); returns the true
+    words."""
+    src = pymupdf.open()
+    page = src.new_page(width=595, height=842)
+    for k, line in enumerate(OCR_TEXT):
+        page.insert_text((60, 100 + 30 * k), line, fontsize=13, fontname="helv")
+    words = [w[4] for w in page.get_text("words")]
+    pix = page.get_pixmap(dpi=200, colorspace=pymupdf.csGRAY)
+    src.close()
+    doc = pymupdf.open()
+    scan = doc.new_page(width=595, height=842)
+    scan.insert_image(scan.rect, pixmap=pix)
+    doc.save(str(path))
+    doc.close()
+    return words
+
+
+def _recall(truth: list[str], found: list[str]) -> float:
+    pool = list(truth)
+    for word in found:
+        if word in pool:
+            pool.remove(word)
+    return 1 - len(pool) / len(truth)
+
+
+def check_ocr(directory: Path) -> dict[str, Any]:
+    """Recognise a generated scan in this process with the bundled language data, write
+    the searchable layer and save; the words must be found in the saved file."""
+    from pdfeditor.core import ocr
+
+    folder = ocr.check_tessdata(ocr.tessdata_dir())
+    path = directory / "ocr-scan.pdf"
+    truth = make_scan_pdf(path)
+    doc = PdfDocument.open(path)
+    try:
+        _require(doc.is_scanned_page(0), "the generated scan does not look scanned")
+        result = ocr.recognise(doc.ocr_request(0))
+        found = [w.text for w in result.words]
+        recall = _recall(truth, found)
+        _require(recall >= OCR_MIN_RECALL, f"recall {recall:.2f}: {found}")
+        doc.add_ocr_layer(0, result)
+        doc.save()
+    finally:
+        doc.close()
+    with pymupdf.open(str(path)) as saved:
+        _require(saved[0].search_for("Formulaire"), "the OCR layer was not saved")
+    return {
+        "tessdata": str(folder),
+        "words": len(found),
+        "recall": round(recall, 3),
+        "seconds": round(result.seconds, 2),
+    }
+
+
+def check_ocr_worker(directory: Path) -> dict[str, Any]:
+    """Run the OCR worker process (``PDFEditor.exe --ocr-worker`` when frozen) on one
+    page through its stdin/stdout pipes."""
+    import json
+    import subprocess
+
+    from pdfeditor.core import ocr, ocr_worker
+    from pdfeditor.core.ocr_service import worker_command
+
+    path = directory / "ocr-worker-scan.pdf"
+    truth = make_scan_pdf(path)
+    with pymupdf.open(str(path)) as doc:
+        request = ocr.render_request(doc[0], 150)
+    command = worker_command()
+    done = subprocess.run(
+        command,
+        input=ocr_worker.encode_frame(request),
+        capture_output=True,
+        timeout=120,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    _require(done.returncode == 0, f"exit code {done.returncode}: {done.stderr[-500:]!r}")
+    lines = done.stdout.decode("ascii").splitlines()
+    _require(len(lines) == 1, f"replies: {lines!r}")
+    reply = json.loads(lines[0])
+    _require(reply.get("ok"), f"reply: {reply}")
+    found = [w.text for w in ocr.PageOcr.from_json(reply["ocr"]).words]
+    recall = _recall(truth, found)
+    _require(recall >= OCR_MIN_RECALL, f"recall {recall:.2f}: {found}")
+    return {"command": command, "words": len(found), "recall": round(recall, 3)}
+
+
+def check_font_subset(directory: Path) -> dict[str, Any]:
+    """Embed a subset of an installed font with fontTools (M7's substitute fonts): a
+    missing fontTools table module would only fail here."""
+    from pdfeditor.core import fontembed
+    from pdfeditor.core.fontmatch import system_fonts
+
+    face = system_fonts().find("Arial")
+    _require(face is not None, "Arial is not installed")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    font = fontembed.ensure_font(doc, page.xref, face.path, face.index, text="Été àç")
+    path = directory / "font-subset.pdf"
+    doc.save(str(path))
+    doc.close()
+    return {"font": str(face.path), "xref": font.xref, "bytes": path.stat().st_size}

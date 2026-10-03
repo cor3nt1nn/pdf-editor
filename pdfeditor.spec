@@ -76,6 +76,9 @@ datas = [
     (str(PKG / "resources" / "icons"), "pdfeditor/resources/icons"),
     (str(PKG / "resources" / "app.ico"), "pdfeditor/resources"),
 ]
+# Tesseract language data of the OCR (M8): fra + eng tessdata_fast, LICENSE, VERSION.txt.
+TESSDATA = PKG / "resources" / "tessdata"
+datas += [(str(f), "pdfeditor/resources/tessdata") for f in sorted(TESSDATA.glob("*")) if f.is_file()]
 # Licence texts (added by M5-T6); an empty or missing directory is fine.
 LICENSES = PKG / "resources" / "licenses"
 if LICENSES.is_dir():

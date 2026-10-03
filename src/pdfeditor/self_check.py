@@ -3,7 +3,9 @@
 Generates its own documents with the core APIs (an AES-256 form, FreeText + check-mark
 stamp, a signature with a soft mask), then opens, fills, places, renders, saves
 (incremental and full) and exports them (flattened and clean). Also checks the Qt side
-of the bundle: French translators, SVG icons, image format plugins. Everything is
+of the bundle: French translators, SVG icons, image format plugins; and (M8) text
+recognition with the bundled language data, in this process and in the worker process,
+and fontTools subsetting of an installed font. Everything is
 written into ``DIR`` (PDFs, ``report.json``, ``self-check.log``); the user's settings,
 signature store and log are never touched. No window is shown.
 """
@@ -152,6 +154,9 @@ def run(directory: str | os.PathLike[str]) -> int:
     report.run("image_formats", check_image_formats)
     report.run("form", lambda: documents.check_form(out))
     report.run("annotations", lambda: documents.check_annotations(out))
+    report.run("font_subset", lambda: documents.check_font_subset(out))
+    report.run("ocr", lambda: documents.check_ocr(out))
+    report.run("ocr_worker", lambda: documents.check_ocr_worker(out))
     report.data["ok"] = report.ok
     report.data["checks"] = report.checks
     (out / REPORT_NAME).write_text(

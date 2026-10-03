@@ -13,6 +13,8 @@ next to `PDFEditor.exe` (and in `_internal\pdfeditor\resources\licenses`):
 | `PSF-2.0.txt` | Python Software Foundation License and the licences of the libraries bundled with Python |
 | `PyInstaller-GPL-2.0-bootloader-exception.txt` | PyInstaller: GPL-2.0-or-later with the bootloader exception (and Apache-2.0 run-time hooks) |
 | `MIT-fontTools.txt` | MIT License (fontTools), with the notices of the parts it includes (Adobe AGL: BSD-3-Clause; cu2qu: Apache-2.0) |
+| `Apache-2.0.txt` | Apache License 2.0 (Tesseract OCR engine inside MuPDF, tessdata_fast language data) |
+| `BSD-2-Clause-Leptonica.txt` | Leptonica licence, BSD 2-Clause style (image library inside MuPDF, used by Tesseract) |
 
 ## Qt, PySide6 and shiboken6 — LGPL-3.0
 
@@ -62,6 +64,20 @@ https://github.com/fonttools/fonttools — subsets installed fonts when edited p
 a font the document does not contain. It is used under the MIT License (`MIT-fontTools.txt`,
 which also reproduces its `LICENSE.external`: the Adobe Glyph List under the BSD 3-Clause
 License and cu2qu under the Apache License 2.0). Source code: https://pypi.org/project/fonttools/#files.
+
+## Tesseract, Leptonica and tessdata_fast — text recognition (OCR)
+
+- Tesseract OCR © Google and the Tesseract contributors — https://github.com/tesseract-ocr/tesseract
+  — and Leptonica © Dan Bloomberg and the Leptonica contributors — http://www.leptonica.org —
+  are compiled into MuPDF (`_internal\pymupdf\mupdfcpp64.dll`) and recognise the text of
+  scanned pages. Tesseract is under the Apache License 2.0 (`Apache-2.0.txt`), Leptonica under
+  its BSD 2-Clause style licence (`BSD-2-Clause-Leptonica.txt`). Source code: with MuPDF's
+  source distribution (both are in its `thirdparty` folder), and at the links above.
+- Language data `fra.traineddata` and `eng.traineddata` (in
+  `_internal\pdfeditor\resources\tessdata`) from tessdata_fast © Google and the Tesseract
+  contributors — https://github.com/tesseract-ocr/tessdata_fast — under the Apache License 2.0
+  (`Apache-2.0.txt`, also as `LICENSE` next to the files; `VERSION.txt` names the exact
+  commit). The files are unmodified.
 
 ## Python — PSF License
 

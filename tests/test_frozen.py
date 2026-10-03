@@ -32,8 +32,12 @@ pytestmark = [
     pytest.mark.skipif(not EXE, reason="PDFEDITOR_FROZEN_EXE is not set (needs a build)"),
 ]
 
-#: 102 MB at v0.1.0; fontTools (M7) adds an estimated 3-5 MB.
-MAX_FOLDER_MB = 115
+#: 102 MB at v0.1.0; 110.1 MB with fontTools (M7) and the Tesseract language data (M8).
+MAX_FOLDER_MB = 120
+#: The zip deliverable: 48.8 MB at M8.
+MAX_ZIP_MB = 55
+#: Bundled Tesseract language data (M8).
+TESSDATA = {"fra.traineddata", "eng.traineddata", "LICENSE", "VERSION.txt"}
 QT_DLLS = {"Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Svg.dll"}
 QT_PLUGINS = {
     "platforms/qwindows.dll",
@@ -77,6 +81,13 @@ def test_self_check_report(self_check) -> None:
     assert all(checks["icons"].values())
     assert {"svg", "jpeg", "png", "tiff", "webp", "bmp", "gif"} <= set(checks["image_formats"])
     assert Path(checks["paths"]["app_local_data"]).name == "PDFEditor"
+    # M8: OCR in the app process and in the worker process (PDFEditor.exe --ocr-worker,
+    # a windowed exe talking through pipes), fontTools subsetting (M7).
+    assert checks["ocr"]["recall"] >= 0.8
+    assert "_internal" in checks["ocr"]["tessdata"]
+    assert checks["ocr_worker"]["recall"] >= 0.8
+    assert checks["ocr_worker"]["command"][1:] == ["--ocr-worker"]
+    assert checks["font_subset"]["bytes"] > 0
     assert (out / "self-check.log").is_file()
 
 
@@ -133,6 +144,16 @@ def test_bundle_is_pruned(exe) -> None:
     assert not (qt / "opengl32sw.dll").exists()
     size = sum(p.stat().st_size for p in exe.parent.rglob("*") if p.is_file())
     assert size <= MAX_FOLDER_MB * 1024 * 1024
+    zips = list(exe.parent.parent.glob("PDFEditor-*-win64.zip"))
+    for z in zips:
+        assert z.stat().st_size <= MAX_ZIP_MB * 1024 * 1024, z
+
+
+def test_tessdata_is_bundled(exe) -> None:
+    folder = exe.parent / "_internal" / "pdfeditor" / "resources" / "tessdata"
+    assert {p.name for p in folder.iterdir()} == TESSDATA
+    assert (folder / "fra.traineddata").stat().st_size == 1_130_365
+    assert (folder / "eng.traineddata").stat().st_size == 4_113_088
 
 
 def test_licenses_are_shipped(exe) -> None:

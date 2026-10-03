@@ -26,7 +26,11 @@ LICENSES = {
     "PSF-2.0.txt": "PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2",
     "PyInstaller-GPL-2.0-bootloader-exception.txt": "Bootloader Exception",
     "MIT-fontTools.txt": "Copyright (c) 2017 Just van Rossum",
+    "Apache-2.0.txt": "Apache License",
+    "BSD-2-Clause-Leptonica.txt": "Copyright (C) 2001-2020 Leptonica",
 }
+#: Short permissive licences (the others are long full texts).
+SHORT_LICENSES = {"BSD-2-Clause-Leptonica.txt"}
 
 
 @pytest.fixture
@@ -47,7 +51,7 @@ def test_license_files_exist_and_are_listed() -> None:
     for name, marker in LICENSES.items():
         text = files[name].read_text(encoding="utf-8")
         assert marker in text, name
-        assert len(text) > 5000, name  # full texts, not a summary
+        assert len(text) > (1000 if name in SHORT_LICENSES else 5000), name  # full texts
     assert files["AGPL-3.0.txt"].read_bytes() == (ROOT / "LICENSE").read_bytes()
     assert "Version 3, 29 June 2007" in files["LGPL-3.0.txt"].read_text(encoding="utf-8")
     assert "Version 2, June 1991" in files[
@@ -71,6 +75,9 @@ def test_third_party_notice_lists_components_and_files() -> None:
         "Python",
         "PyInstaller",
         "fontTools",
+        "Tesseract",
+        "Leptonica",
+        "tessdata_fast",
     ):
         assert component in text, component
     assert "_internal\\PySide6" in text  # how to replace the Qt libraries

@@ -10,11 +10,12 @@ adds signing with an image of a handwritten signature; Milestone 5 adds File ▸
 Export Copy… (flattened or clean copies), Open Recent, "Open with" registration and a
 portable Windows release; Milestone 6 adds page tools (reorder, delete, insert,
 extract, split) and text selection, copy and highlight/underline/strike-through markups;
-Milestone 7 (current) edits the page's own text in place.
+Milestone 7 edits the page's own text in place; Milestone 8 (current) recognises the text of
+scanned pages (OCR) and makes it searchable.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN.md),
 [docs/M3_PLAN.md](docs/M3_PLAN.md), [docs/M4_PLAN.md](docs/M4_PLAN.md),
-[docs/M5_PLAN.md](docs/M5_PLAN.md), [docs/M6_PLAN.md](docs/M6_PLAN.md) and
-[docs/M7_PLAN.md](docs/M7_PLAN.md).
+[docs/M5_PLAN.md](docs/M5_PLAN.md), [docs/M6_PLAN.md](docs/M6_PLAN.md),
+[docs/M7_PLAN.md](docs/M7_PLAN.md) and [docs/M8_PLAN.md](docs/M8_PLAN.md).
 
 ## Install & use (end users)
 
@@ -77,7 +78,7 @@ powershell -File scripts\build_exe.ps1 -Smoke   # same, then run the frozen test
 
 It produces `dist\PDFEditor\` (`PDFEditor.exe`, `_internal\`, `README.md`, `LICENSE`,
 `THIRD_PARTY_LICENSES.md`, `licenses\`) and the deliverable
-`dist\PDFEditor-<version>-win64.zip` (about 44 MB; about 102 MB extracted). To rerun the
+`dist\PDFEditor-<version>-win64.zip` (about 49 MB; about 110 MB extracted). To rerun the
 frozen tests against an existing build:
 
 ```powershell
@@ -698,6 +699,78 @@ Run it on copies of real documents; keep the originals.
    text is in place, in the expected font, Ctrl+F finds it and not the old word, copying it
    gives the new text; no repair prompt when closing Adobe Reader. Reopen it in PDF Editor:
    the edited word can be edited again.
+
+## Recognise text in scans (Milestone 8)
+
+A scanned page is a picture: its text cannot be selected, searched, copied or snapped to.
+Edit ▸ **Recognise Text (OCR)…** (**Ctrl+Shift+O**) reads it with Tesseract, the OCR engine
+built into the PDF library, using the French and English language data shipped with PDF
+Editor (nothing is downloaded, nothing leaves the computer). When a document looks scanned,
+a banner above the pages says so ("This document looks scanned: …") with a **Recognise
+text…** button.
+
+- **Pages**: *This page*, *Pages without text* (default: scans and blank pages) or *All
+  pages*. Pages that already have text are recognised but never get a second text layer.
+- **Make the text searchable (saved with the file)** (default on): the recognised words are
+  written into the page as invisible text, exactly over the words of the image. The page
+  looks the same; Ctrl+F in any viewer finds the words, and selection, copy and
+  highlight/underline/strike-through work on them. The whole run is one Undo step
+  ("Recognise text"); the next save is incremental (about 3 KB per page). Unchecked — or
+  when the document's security settings forbid changing it (the box is then disabled) — the
+  text is recognised for this session only: it can be selected and copied until the document
+  is closed, and is not saved.
+- Recognition takes about one second per page, in a separate process (the window stays
+  responsive; a progress dialog shows "Recognising text… page n of m" with **Cancel**, which
+  keeps the pages already done). The status bar ends with "Text recognised on n page(s)".
+- **Snapping on scans**: text boxes, stamps and signatures snap to the table cells,
+  underlines, checkbox squares and dotted leader lines of a scan, found in its pixels
+  (slightly skewed scans are straightened first). No OCR is needed for that.
+- The recognised layer is invisible text, so **Edit Page Text** refuses it ("…invisible OCR
+  layer…").
+
+Known limitations:
+
+- The page is read as displayed: turn sideways scans upright (Ctrl+R) first; there is no
+  automatic orientation detection. Only French and English; other languages come out with
+  wrong accents or words.
+- Accuracy depends on the scan: about 9 words out of 10 on a clean 200–300 dpi page, less on
+  blurred, low-resolution or handwritten pages; there is no confidence display or correction.
+- The invisible text uses a standard font (Helvetica, Windows-1252): characters outside it
+  (Greek, Cyrillic, some symbols) are stored as "?" in the searchable layer (they are right in
+  the session's selectable text).
+- Each page briefly occupies the window (≈ 0.1 s to prepare it). "Make searchable" needs the
+  permission to change the document. Snapping on skewed scans may be off by up to ≈ 3 pt;
+  dotted leaders are found when their dots are clearly separated.
+
+En français : Édition ▸ **Reconnaître le texte (OCR)…** (Ctrl+Maj+O) lit le texte des pages
+numérisées (français et anglais, sans connexion). Choisissez les pages (cette page, les pages
+sans texte, toutes les pages) et, coché par défaut, « Rendre le texte recherchable (enregistré
+dans le fichier) » : le texte reconnu est ajouté de façon invisible sur l’image, l’aspect de la
+page ne change pas, la recherche (Ctrl+F), la sélection et la copie fonctionnent ; une seule
+annulation (Ctrl+Z) retire tout. Environ une seconde par page ; **Annuler** garde les pages
+déjà faites. Un bandeau propose « Reconnaître le texte… » quand le document semble numérisé.
+
+### Manual OCR checklist (Milestone 8)
+
+Run it on copies of real scans; keep the originals.
+
+1. **Scanner PDF** (a multi-page letter scanned at 300 dpi): the banner "This document looks
+   scanned…" appears; click **Recognise text…**, keep the defaults: the progress dialog counts
+   pages, the window can still be scrolled, the status bar says "Text recognised on n
+   page(s)", the banner disappears, the pages look unchanged.
+2. Select Text (Shift+T): drag over a recognised line, Ctrl+C, paste into Notepad: the words
+   (accents included) come out. Highlight a recognised word: the highlight sits on the word.
+3. Ctrl+Z: the text layer goes (the title's `*` too if nothing else changed); Ctrl+Y brings it
+   back. Save (incremental), reopen in Adobe Acrobat Reader, Edge and Chrome: Ctrl+F finds a
+   recognised word, the page looks the same, no repair prompt.
+4. **Cancel**: start on a 10-page scan and cancel after two pages: those two are searchable
+   (one Undo step), the others are not.
+5. **Sideways scan**: a page shown on its side: Ctrl+R until upright, then recognise: the words
+   are found; rotate it back: selection still follows the words.
+6. **Protected file** (password, changes not allowed): the "searchable" box is disabled with a
+   tooltip; recognised text is selectable but nothing is saved.
+7. **Snapping**: on a scanned form, the text tool snaps to table cells, underlines and
+   checkbox squares (and a stamp centres in a square); on a slightly skewed scan too.
 
 ## License
 

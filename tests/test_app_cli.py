@@ -50,11 +50,16 @@ def test_self_check_passes_in_process(qapp, tmp_path, root_logging) -> None:
         "image_formats",
         "form",
         "annotations",
+        "font_subset",
+        "ocr",
+        "ocr_worker",
     ]
     checks = {c["name"]: c["detail"] for c in report["checks"]}
     assert checks["translators"]["count"] == 2
     assert checks["form"]["values"]["name"] == documents.FIELD_TEXT
     assert checks["annotations"]["annotations"] == ["signature", "stamp", "text"]
+    assert checks["ocr"]["recall"] >= 0.8 and checks["ocr_worker"]["recall"] >= 0.8
+    assert checks["ocr_worker"]["command"][-1] == "--ocr-worker"
     for name in (
         "form-aes256.pdf",
         "form-flattened.pdf",
