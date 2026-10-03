@@ -17,6 +17,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 [docs/M5_PLAN.md](docs/M5_PLAN.md), [docs/M6_PLAN.md](docs/M6_PLAN.md),
 [docs/M7_PLAN.md](docs/M7_PLAN.md) and [docs/M8_PLAN.md](docs/M8_PLAN.md).
 
+**Download:** the latest Windows setup program and portable zip are on the
+[Releases page](https://github.com/cor3nt1nn/pdf-editor/releases). **Build from source:** see [Setup](#setup) and
+[Build the Windows release](#build-the-windows-release) below (Python 3.12 + uv).
+**Licence:** [AGPL-3.0](LICENSE); bundled components in
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Bugs and suggestions:
+[issues](https://github.com/cor3nt1nn/pdf-editor/issues).
+
 ## Install & use (end users)
 
 ### Install (setup) — recommended

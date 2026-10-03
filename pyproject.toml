@@ -12,6 +12,12 @@ dependencies = [
     "pymupdf>=1.26,<1.29",
 ]
 
+[project.urls]
+Homepage = "https://github.com/cor3nt1nn/pdf-editor"
+Source = "https://github.com/cor3nt1nn/pdf-editor"
+Issues = "https://github.com/cor3nt1nn/pdf-editor/issues"
+Releases = "https://github.com/cor3nt1nn/pdf-editor/releases"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",

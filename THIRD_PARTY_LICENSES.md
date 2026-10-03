@@ -54,7 +54,7 @@ links with them, PDF Editor as a whole is distributed under the AGPL-3.0 too. So
 PyMuPDF and MuPDF at the links above (the exact versions are shown in Help ▸ About); the
 complete corresponding source code of PDF Editor (including `pdfeditor.spec` and
 `scripts\build_exe.ps1`, which produce this build) is the project repository this release was
-published from. If you received this program without its source code, you are entitled to
+published from: https://github.com/cor3nt1nn/pdf-editor (each release's source is under its tag, e.g. `v0.2.0`). If you received this program without its source code, you are entitled to
 obtain it from whoever gave it to you.
 
 ## fontTools — MIT License
