@@ -517,9 +517,9 @@ def page_has_text(page: pymupdf.Page) -> bool:
 
 def image_coverage(page: pymupdf.Page) -> float:
     """Fraction of the page covered by its images (0..1; overlaps counted once per
-    image, so it may overestimate stacked images)."""
-    box = page.cropbox
-    frame = pymupdf.Rect(0, 0, box.width, box.height)
+    image, so it may overestimate stacked images). Image boxes are in page space
+    (rotation applied), so they are clipped to ``page.rect``, not the unrotated cropbox."""
+    frame = page.rect
     area = frame.width * frame.height
     if area <= 0:
         return 0.0

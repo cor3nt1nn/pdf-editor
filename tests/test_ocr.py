@@ -247,6 +247,22 @@ def test_is_scanned_page(scan_clean, scan_rotated, simple_pdf, tmp_path) -> None
     doc.close()
 
 
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_image_coverage_of_a_turned_narrow_page(rotation) -> None:
+    """M8 review M3: image boxes are in rotated page space; clipping them to the
+    unrotated cropbox frame cut a 300 x 900 page turned by 90 deg to a third."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=900)
+    pix = pymupdf.Pixmap(pymupdf.csGRAY, pymupdf.IRect(0, 0, 600, 1800), False)
+    pix.clear_with(200)
+    page.insert_image(page.rect, pixmap=pix, keep_proportion=False)
+    page.set_rotation(rotation)
+    assert page.rect.width == 900 and page.rect.height == 300
+    assert ocr.image_coverage(page) > 0.99
+    assert ocr.is_scanned_page(page)
+    doc.close()
+
+
 def test_looking_at_pages_changes_nothing(tmp_path) -> None:
     """Scan detection and resolution choice never make MuPDF write appearance streams
     of annotations lacking them (the document would have changes to save)."""
