@@ -211,3 +211,52 @@ def nested_pages_pdf(tmp_path):
 @pytest.fixture
 def many_images_pdf(tmp_path):
     return fixtures.make_many_images_pdf(tmp_path / "many_images.pdf")
+
+
+# -- M8 OCR: synthetic scans (session-scoped: generating one takes ~0.3 s) -----------------
+@pytest.fixture(scope="session")
+def scan_clean(tmp_path_factory):
+    """A clean 300 dpi scan of the form (JPEG 75)."""
+    import scan_fixtures
+
+    return scan_fixtures.make_scan_pdf(tmp_path_factory.mktemp("scans") / "scan_clean.pdf")
+
+
+@pytest.fixture(scope="session")
+def scan_skewed(tmp_path_factory):
+    """A degraded scan: 1.3° skew, blur, 0.4 % noise, JPEG 55."""
+    import scan_fixtures
+
+    return scan_fixtures.make_scan_pdf(
+        tmp_path_factory.mktemp("scans") / "scan_skewed.pdf",
+        skew=1.3, blur=1.2, noise=0.004, jpeg=55,
+    )  # fmt: skip
+
+
+@pytest.fixture(scope="session")
+def scan_200(tmp_path_factory):
+    """A 200 dpi degraded scan skewed the other way (−0.8°)."""
+    import scan_fixtures
+
+    return scan_fixtures.make_scan_pdf(
+        tmp_path_factory.mktemp("scans") / "scan_200.pdf",
+        skew=-0.8, blur=0.8, noise=0.003, dpi=200, jpeg=50,
+    )  # fmt: skip
+
+
+@pytest.fixture(scope="session")
+def scan_rotated(tmp_path_factory):
+    """A clean scan stored sideways in a /Rotate 90 page (displays upright)."""
+    import scan_fixtures
+
+    return scan_fixtures.make_scan_pdf(
+        tmp_path_factory.mktemp("scans") / "scan_rotated.pdf", rotate=90
+    )
+
+
+@pytest.fixture(scope="session")
+def mixed_scan(tmp_path_factory, scan_clean):
+    """Page 1 digital text, page 2 the clean scan."""
+    import scan_fixtures
+
+    return scan_fixtures.make_mixed_pdf(tmp_path_factory.mktemp("scans") / "mixed.pdf", scan_clean)

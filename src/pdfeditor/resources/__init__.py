@@ -1,4 +1,9 @@
-"""Packaged resources: SVG icons, the Windows application icon and licence texts."""
+"""Packaged resources: SVG icons, the Windows application icon, licence texts and the
+Tesseract language data (M8).
+
+Importing this module does not import Qt (the OCR worker process uses :func:`tessdata_dir`
+without Qt); the icon helpers import ``QtGui`` when called.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +11,10 @@ import sys
 from functools import cache
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtGui import QIcon
+if TYPE_CHECKING:
+    from PySide6.QtGui import QIcon
 
 
 def resource_path(*parts: str) -> Path:
@@ -18,11 +25,15 @@ def resource_path(*parts: str) -> Path:
 @cache
 def icon(name: str) -> QIcon:
     """QIcon for ``icons/<name>.svg`` (null icon if missing)."""
+    from PySide6.QtGui import QIcon
+
     path = resource_path("icons", f"{name}.svg")
     return QIcon(str(path)) if path.is_file() else QIcon()
 
 
 def app_icon() -> QIcon:
+    from PySide6.QtGui import QIcon
+
     ico = resource_path("app.ico")
     result = QIcon(str(ico)) if ico.is_file() else QIcon()
     svg = resource_path("icons", "app.svg")
@@ -51,3 +62,14 @@ def third_party_notice() -> Path | None:
         candidates.append(Path(sys.executable).resolve().parent / THIRD_PARTY_NOTICE)
     candidates.append(Path(__file__).resolve().parents[3] / THIRD_PARTY_NOTICE)
     return next((p for p in candidates if p.is_file()), None)
+
+
+#: Folder of the Tesseract language files (``fra``/``eng`` ``.traineddata`` from
+#: tessdata_fast, see ``tessdata/VERSION.txt``).
+TESSDATA = "tessdata"
+
+
+def tessdata_dir() -> Path:
+    """Folder holding the bundled Tesseract language data (always passed explicitly to
+    MuPDF: ``TESSDATA_PREFIX`` and ``pymupdf.get_tessdata()`` are never relied on)."""
+    return resource_path(TESSDATA)

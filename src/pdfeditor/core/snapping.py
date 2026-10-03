@@ -201,6 +201,12 @@ def _drawings(page: pymupdf.Page) -> tuple[list[dict], tuple[float, ...] | None]
     return page.get_cdrawings(), tuple(page.rotation_matrix) if rotation else None
 
 
+def vector_paths(page: pymupdf.Page) -> list[dict]:
+    """The page's vector paths as MuPDF's line-art device reports them (see
+    :func:`_drawings`; the document is not modified). Caller holds the document lock."""
+    return _drawings(page)[0]
+
+
 def _annot_rects(page: pymupdf.Page) -> list[Box]:
     """Page-space rects (grown by ``ANNOT_MARGIN``) of the page's visible annotations and
     widgets, read from their /Rect (``load_annot`` would be quadratic)."""

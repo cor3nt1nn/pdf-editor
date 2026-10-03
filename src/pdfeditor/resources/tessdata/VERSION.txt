@@ -1,0 +1,19 @@
+Tesseract language data used by PDF Editor's text recognition (OCR).
+
+Source:   https://github.com/tesseract-ocr/tessdata_fast
+Commit:   87416418657359cb625c412a48b6e1d6d41c29bd (2024-08-01, "Mention Tesseract 5 too")
+Licence:  Apache License 2.0 (LICENSE in this folder, from the same commit)
+Files (byte-identical to that commit; git blob / SHA-256):
+  eng.traineddata  4,113,088 bytes
+      blob   bbef4675053b5b468cdb477053e28b1c698ba08e
+      sha256 7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2
+  fra.traineddata  1,130,365 bytes
+      blob   d9e2b2160be0d1ca3b8f1bf2730fae476ef3b4a6
+      sha256 ced037562e8c80c13122dece28dd477d399af80911a28791a66a63ac1e3445ca
+  LICENSE          11,358 bytes
+      blob   d645695673349e3947e8e5ae42332d0ac3164cd7
+
+Download URLs:
+  https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata
+  https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/fra.traineddata
+Used through MuPDF's built-in Tesseract (PyMuPDF Pixmap.pdfocr_tobytes); languages "fra+eng".
