@@ -163,6 +163,31 @@ def _version_strings(path: Path) -> dict[str, str]:
     return result
 
 
+def _fixed_file_version(path: Path) -> str:
+    """The binary file version (VS_FIXEDFILEINFO) of ``path`` as "a.b.c.d"."""
+    import ctypes
+    from ctypes import wintypes
+
+    version = ctypes.WinDLL("version")
+    size = version.GetFileVersionInfoSizeW(str(path), None)
+    buffer = ctypes.create_string_buffer(size)
+    assert version.GetFileVersionInfoW(str(path), 0, size, buffer)
+    pointer = ctypes.c_void_p()
+    length = wintypes.UINT()
+    assert version.VerQueryValueW(buffer, "\\", ctypes.byref(pointer), ctypes.byref(length))
+    fixed = (wintypes.DWORD * 13).from_address(pointer.value)
+    ms, ls = fixed[2], fixed[3]  # dwFileVersionMS, dwFileVersionLS
+    return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+
+
+def _numeric_version(text: str) -> str:
+    """scripts/build_exe.ps1's FileVersion: leading numbers, padded to four parts."""
+    import re
+
+    parts = re.match(r"\d+(\.\d+)*", text).group(0).split(".")[:4]
+    return ".".join(parts + ["0"] * (4 - len(parts)))
+
+
 def _run_setup(setup: Path, target: Path, log: Path) -> tuple[int, float]:
     start = time.monotonic()
     done = subprocess.run(
@@ -231,6 +256,7 @@ def test_setup_program(install) -> None:
     assert version["ProductVersion"] == __version__  # Inno Setup pads it with spaces
     assert version["ProductName"] == "PDF Editor"
     assert version["FileDescription"] == "PDF Editor Setup"
+    assert _fixed_file_version(install.setup) == _numeric_version(__version__)
 
 
 def test_silent_install(install) -> None:

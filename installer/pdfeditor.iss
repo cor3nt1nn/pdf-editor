@@ -1,7 +1,9 @@
 ﻿; PDF Editor setup script (Inno Setup 7; also compiles with Inno Setup 6).
 ;
 ; Built by scripts\build_exe.ps1 -Installer:
-;   ISCC.exe -q -dAppVersion=<version> -dSourceDir=<dist\PDFEditor> -dOutputDir=<dist> installer\pdfeditor.iss
+;   ISCC.exe -q -dAppVersion=<version> -dFileVersion=<n.n.n.n> -dSourceDir=<dist\PDFEditor> -dOutputDir=<dist> installer\pdfeditor.iss
+; AppVersion is __version__ as is (it may be "0.2.0rc1"); FileVersion is its leading numbers
+; padded to four ("0.2.0.0"): the version resource's binary file version must be numeric.
 ; Per-user install by default (no administrator rights), x64 only, English and French.
 ; The installer never writes file-association keys itself: the "Open with" task runs
 ; PDFEditor.exe --register-file-type and the uninstaller --unregister-file-type, which
@@ -9,6 +11,9 @@
 
 #ifndef AppVersion
   #error Define AppVersion: ISCC -dAppVersion=<version> installer\pdfeditor.iss
+#endif
+#ifndef FileVersion
+  #error Define FileVersion: ISCC -dFileVersion=<n.n.n.n> installer\pdfeditor.iss
 #endif
 #define RepoRoot SourcePath + "..\"
 #ifndef SourceDir
@@ -57,7 +62,7 @@ WizardStyle=modern
 SetupIconFile={#RepoRoot}src\pdfeditor\resources\app.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#FileVersion}
 VersionInfoTextVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}

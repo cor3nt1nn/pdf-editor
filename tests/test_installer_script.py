@@ -4,6 +4,8 @@ needed. The compiled setup is tested by tests/test_installer.py (marker ``instal
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ import pytest
 from pdfeditor import app
 
 ISS = Path(__file__).resolve().parent.parent / "installer" / "pdfeditor.iss"
+BUILD_EXE = ISS.parent.parent / "scripts" / "build_exe.ps1"
 #: The installation's identity for upgrades and the uninstaller: never change it.
 APP_ID = "{2F4F77DF-7029-452C-AE27-01CC3FD48311}"
 
@@ -104,6 +107,48 @@ def test_defines_match_the_app(text) -> None:
     assert defines["RegisterFlag"] == app.REGISTER_FLAG
     assert defines["UnregisterFlag"] == app.UNREGISTER_FLAG
     assert "#error" in text.split("#ifndef AppVersion", 1)[1].split("#endif", 1)[0]
+
+
+def test_numeric_file_version(setup, text) -> None:
+    """The binary file version must be n.n.n.n: build_exe.ps1 passes FileVersion, derived
+    from __version__; the text versions keep the full __version__."""
+    assert setup["VersionInfoVersion"] == "{#FileVersion}"
+    assert setup["VersionInfoTextVersion"] == "{#AppVersion}"
+    assert setup["VersionInfoProductVersion"] == "{#AppVersion}"
+    assert "#error" in text.split("#ifndef FileVersion", 1)[1].split("#endif", 1)[0]
+    build = BUILD_EXE.read_text(encoding="utf-8")
+    assert '"-dFileVersion=$FileVersion"' in build
+
+
+def _derivation() -> str:
+    """build_exe.ps1's FileVersion derivation (from the regex test to the join)."""
+    build = BUILD_EXE.read_text(encoding="utf-8")
+    start = build.index("if ($Version -notmatch")
+    end = build.index("\n", build.index("$FileVersion = $FileParts -join"))
+    return build[start:end]
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="needs Windows PowerShell")
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("0.1.0", "0.1.0.0"), ("0.2.0rc1", "0.2.0.0"), ("1", "1.0.0.0"), ("1.2.3.4.5", "1.2.3.4")],
+)
+def test_file_version_derivation(version, expected) -> None:
+    script = f'$Version = "{version}"\n{_derivation()}\nWrite-Output $FileVersion'
+    done = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == expected
+
+
+def test_current_version_has_a_file_version() -> None:
+    from pdfeditor import __version__
+
+    assert re.match(r"\d+(\.\d+)*", __version__)
 
 
 def test_per_user_x64_install(setup, sections) -> None:

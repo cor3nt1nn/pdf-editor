@@ -48,6 +48,12 @@ $MaxSetupMB = 45
 $Init = Get-Content (Join-Path $Root "src\pdfeditor\__init__.py") -Raw
 if ($Init -notmatch '__version__ = "([^"]+)"') { throw "__version__ not found" }
 $Version = $Matches[1]
+# The setup's binary file version must be numeric (n.n.n.n): the leading numbers of
+# __version__ ("0.2.0rc1" -> "0.2.0"), padded to four parts. AppVersion keeps the full text.
+if ($Version -notmatch '^\d+(\.\d+)*') { throw "__version__ $Version does not start with a number" }
+$FileParts = @($Matches[0].Split(".") | Select-Object -First 4)
+while ($FileParts.Count -lt 4) { $FileParts += "0" }
+$FileVersion = $FileParts -join "."
 
 Invoke-Step "uv sync --extra dev" { uv sync --extra dev }
 Invoke-Step "check translations" { uv run python scripts/check_i18n.py --fresh }
@@ -97,7 +103,8 @@ if ($Installer) {
     if (Test-Path $Setup) { Remove-Item $Setup -Force }
     Write-Host "==> Inno Setup: $Iscc"
     # Quoted: PowerShell 5.1 splits an unquoted -dName=0.1.0 at the first dot.
-    $IsccArgs = @("-q", "-dAppVersion=$Version", "-dSourceDir=$Dist", "-dOutputDir=$OutDir",
+    $IsccArgs = @("-q", "-dAppVersion=$Version", "-dFileVersion=$FileVersion",
+        "-dSourceDir=$Dist", "-dOutputDir=$OutDir",
         (Join-Path $Root "installer\pdfeditor.iss"))
     $ErrorActionPreference = "Continue"
     $IsccOutput = @(& $Iscc @IsccArgs 2>&1 | ForEach-Object { "$_" })
@@ -111,8 +118,10 @@ if ($Installer) {
     # Inno Setup pads its version strings with spaces.
     $SetupVersion = "$((Get-Item $Setup).VersionInfo.ProductVersion)".Trim()
     Write-Host ("  setup   {0,10}  {1}" -f (Format-MB $SetupBytes), $Setup)
-    Write-Host ("  setup version resource: ProductVersion {0}" -f $SetupVersion)
+    $SetupFileVersion = "$((Get-Item $Setup).VersionInfo.FileVersionRaw)"
+    Write-Host ("  setup version resource: ProductVersion {0}, FileVersion {1}" -f $SetupVersion, $SetupFileVersion)
     if ($SetupVersion -ne $Version) { throw "setup version resource $SetupVersion != $Version" }
+    if ($SetupFileVersion -ne $FileVersion) { throw "setup file version $SetupFileVersion != $FileVersion" }
     if ($SetupBytes -gt $MaxSetupMB * 1MB) { throw "setup is larger than $MaxSetupMB MB" }
 }
 
