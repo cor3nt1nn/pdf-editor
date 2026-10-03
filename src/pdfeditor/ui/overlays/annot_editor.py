@@ -14,10 +14,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRect, QRectF, Qt
-from PySide6.QtGui import QFont, QKeyEvent, QTextCursor
+from PySide6.QtGui import QColor, QFont, QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QFrame, QPlainTextEdit, QWidget
 
 from pdfeditor.core.annotations import AnnotInfo, AnnotKind, Color, fitted_width
+from pdfeditor.ui.colors import page_colors_css, page_palette
 from pdfeditor.ui.overlays.floating_editor import FloatingEditorOverlay, normalize_newlines
 
 if TYPE_CHECKING:
@@ -31,6 +32,8 @@ MIN_FONT_PX = 4
 #: Sans-serif family close to the /Helv the annotation is drawn with.
 FONT_FAMILY = "Arial"
 _BORDER = "1px dashed rgb(0, 120, 215)"
+#: Editor background: the page, slightly see-through.
+PAGE_BACKGROUND_TINT = QColor(255, 255, 255, 230)
 
 
 @dataclass(frozen=True)
@@ -63,9 +66,9 @@ class EditorAnchor:
         return "" if self.info is None else self.info.name
 
 
-def _css_color(color: Color) -> str:
+def _qcolor(color: Color) -> QColor:
     r, g, b = (round(max(0.0, min(1.0, c)) * 255) for c in color)
-    return f"rgb({r}, {g}, {b})"
+    return QColor(r, g, b)
 
 
 class AnnotTextEditor(FloatingEditorOverlay):
@@ -162,10 +165,10 @@ class AnnotTextEditor(FloatingEditorOverlay):
     # -- hooks ----------------------------------------------------------------------
     @staticmethod
     def _style(color: Color) -> str:
-        return (
-            f"QPlainTextEdit {{ border: {_BORDER}; padding: 0px; "
-            f"background: rgba(255, 255, 255, 230); color: {_css_color(color)}; }}"
-        )
+        # Page-like colours whatever the palette: the text box sits over the white page
+        # (the selection colours would otherwise come from the palette; Deviation 165).
+        colors = page_colors_css(_qcolor(color), PAGE_BACKGROUND_TINT)
+        return f"QPlainTextEdit {{ border: {_BORDER}; padding: 0px; {colors} }}"
 
     def _create_editor(self, anchor: EditorAnchor) -> QWidget:
         edit = QPlainTextEdit(self._view.viewport())
@@ -179,6 +182,7 @@ class AnnotTextEditor(FloatingEditorOverlay):
         font = QFont(FONT_FAMILY)
         font.setStyleHint(QFont.StyleHint.SansSerif)
         edit.setFont(font)
+        edit.setPalette(page_palette(edit.palette()))
         edit.setStyleSheet(self._style(anchor.color))
         if anchor.info is not None:
             edit.setPlainText(normalize_newlines(anchor.info.text))

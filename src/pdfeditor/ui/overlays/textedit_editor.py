@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtGui import QColor, QFont, QKeyEvent
 from PySide6.QtWidgets import QLineEdit, QWidget
 
 from pdfeditor.core.fontread import split_base_font
 from pdfeditor.core.pagetext import PageText, Span
 from pdfeditor.core.textedit import Run
+from pdfeditor.ui.colors import page_colors_css, page_palette
 from pdfeditor.ui.overlays.floating_editor import FloatingEditorOverlay
 
 if TYPE_CHECKING:
@@ -30,6 +31,8 @@ log = logging.getLogger(__name__)
 #: Smallest editor font (pixels) so that text stays readable when zoomed out.
 MIN_FONT_PX = 4
 _BORDER = "1px dashed rgb(0, 120, 215)"
+#: Editor background: the page, slightly see-through.
+PAGE_BACKGROUND_TINT = QColor(255, 255, 255, 235)
 #: PDF font flags (MuPDF span ``flags``).
 FLAG_ITALIC, FLAG_BOLD = 2, 16
 FLAG_SERIF, FLAG_MONO = 4, 8
@@ -213,11 +216,9 @@ class TextRunEditor(FloatingEditorOverlay):
     # -- hooks ----------------------------------------------------------------------
     @staticmethod
     def _style(color: tuple[int, int, int]) -> str:
-        r, g, b = color
-        return (
-            f"QLineEdit {{ border: {_BORDER}; padding: 0px; margin: 0px; "
-            f"background: rgba(255, 255, 255, 235); color: rgb({r}, {g}, {b}); }}"
-        )
+        # Page-like colours whatever the palette (Deviation 165).
+        colors = page_colors_css(QColor(*color), PAGE_BACKGROUND_TINT)
+        return f"QLineEdit {{ border: {_BORDER}; padding: 0px; margin: 0px; {colors} }}"
 
     def _create_editor(self, anchor: TextRunAnchor) -> QWidget:
         edit = QLineEdit(self._view.viewport())
@@ -230,6 +231,7 @@ class TextRunEditor(FloatingEditorOverlay):
         font.setBold(anchor.bold)
         font.setItalic(anchor.italic)
         edit.setFont(font)
+        edit.setPalette(page_palette(edit.palette()))
         edit.setStyleSheet(self._style(anchor.color))
         edit.setText(anchor.text if anchor.typed is None else anchor.typed)
         edit.selectAll()

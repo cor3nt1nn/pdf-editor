@@ -15,19 +15,28 @@ from PySide6.QtCore import (
     QObject,
     QPersistentModelIndex,
     QPoint,
+    QRect,
     QSize,
     Qt,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QPainter, QPalette, QPen, QPixmap
-from PySide6.QtWidgets import QAbstractItemView, QListView, QWidget
+from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QListView,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QWidget,
+)
 
 from pdfeditor.constants import THUMB_WIDTH_PX
 from pdfeditor.core.document import PdfDocument
 from pdfeditor.core.geometry import quantize_scale
 from pdfeditor.render.renderer import Priority, RenderKind
 from pdfeditor.render.service import RenderService
+from pdfeditor.ui.colors import contrast_ratio, ensure_contrast
 
 ModelIndex = QModelIndex | QPersistentModelIndex
 
@@ -39,6 +48,20 @@ PAGES_SOURCE_MIME = "application/x-pdfeditor-pages-source"
 #: Interval (ms) and step (px) of the scrolling while a drag hovers near an edge.
 AUTOSCROLL_MS = 40
 AUTOSCROLL_STEP = 24
+#: Item layout (logical px): the thumbnail sits THUMB_TOP below the item's top, centred
+#: horizontally (ITEM_EXTRA wide margins hold the selection frame and the current ring);
+#: the page number goes below it.
+THUMB_TOP = 8
+ITEM_EXTRA = QSize(16, 34)
+#: Selection frame (pen width, gap outside the thumbnail) and current-page ring offset.
+FRAME_WIDTH = 3
+FRAME_GAP = 1
+RING_OFFSET = 6
+#: Thin outline of an unselected thumbnail.
+PAGE_EDGE = QColor(160, 160, 160)
+#: Alpha of the selected / hovered item tint.
+SELECTED_TINT = 60
+HOVER_TINT = 28
 
 
 def encode_rows(rows: Iterable[int]) -> QByteArray:
@@ -133,7 +156,7 @@ class ThumbnailModel(QAbstractListModel):
             pixmap.setDevicePixelRatio(self.device_pixel_ratio)
             return pixmap
         if role == Qt.ItemDataRole.SizeHintRole:
-            return self.thumb_size(page) + QSize(16, 28)
+            return self.thumb_size(page) + ITEM_EXTRA
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignHCenter
         return None
@@ -201,6 +224,115 @@ class ThumbnailModel(QAbstractListModel):
         self.pending_mapping = None
 
 
+def selection_color(palette: QPalette) -> QColor:
+    """The palette's Highlight, adjusted until it stands out from Base (a dark accent
+    on a dark theme, a pale one on a light theme)."""
+    return ensure_contrast(
+        palette.color(QPalette.ColorRole.Highlight), palette.color(QPalette.ColorRole.Base)
+    )
+
+
+def current_ring_color(palette: QPalette) -> QColor:
+    """Ring around the current page: the palette's Text, which contrasts with Base."""
+    return ensure_contrast(
+        palette.color(QPalette.ColorRole.Text), palette.color(QPalette.ColorRole.Base)
+    )
+
+
+class ThumbnailDelegate(QStyledItemDelegate):
+    """Paints a thumbnail with its page number. Selected pages get a tinted cell, a
+    :data:`FRAME_WIDTH` frame and a filled number label in :func:`selection_color`; the
+    current page (the one the page view shows) gets a ring in :func:`current_ring_color`
+    and a bold number. Colours come from the view's palette, so both themes work, and
+    the thumbnail itself is never tinted (Deviation 165)."""
+
+    @staticmethod
+    def thumb_rect(item: QRect, pixmap: QPixmap | None) -> QRect:
+        """Where the thumbnail of an item laid out at ``item`` is drawn."""
+        if pixmap is None or pixmap.isNull():
+            size = QSize(THUMB_WIDTH_PX, THUMB_WIDTH_PX)
+        else:
+            size = pixmap.deviceIndependentSize().toSize()
+        x = item.x() + (item.width() - size.width()) // 2
+        return QRect(x, item.y() + THUMB_TOP, size.width(), size.height())
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: ModelIndex) -> None:
+        palette = option.palette
+        view = option.widget
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        current = isinstance(view, QAbstractItemView) and view.currentIndex() == index
+        accent = selection_color(palette)
+        pixmap = index.data(Qt.ItemDataRole.DecorationRole)
+        if not isinstance(pixmap, QPixmap):
+            pixmap = None
+        item = option.rect
+        thumb = self.thumb_rect(item, pixmap)
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            if selected or hovered:
+                tint = QColor(accent)
+                tint.setAlpha(SELECTED_TINT if selected else HOVER_TINT)
+                painter.fillRect(item, tint)
+            if pixmap is not None:
+                painter.drawPixmap(thumb, pixmap)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if pixmap is not None and not selected:
+                # Page edge, visible on a white Base (a white page has none of its own).
+                painter.setPen(QPen(PAGE_EDGE, 1))
+                painter.drawRect(thumb.adjusted(-1, -1, 0, 0))
+            if selected:
+                pen = QPen(accent, FRAME_WIDTH)
+                pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+                painter.setPen(pen)
+                # The pen is centred on the path: keep the whole frame outside the page.
+                out = FRAME_GAP + (FRAME_WIDTH + 1) // 2
+                painter.drawRect(thumb.adjusted(-out, -out, out - 1, out - 1))
+            if current:
+                painter.setPen(QPen(current_ring_color(palette), 1))
+                painter.drawRect(
+                    thumb.adjusted(-RING_OFFSET, -RING_OFFSET, RING_OFFSET - 1, RING_OFFSET - 1)
+                )
+            self._paint_number(painter, option, index, thumb, selected, current, accent)
+        finally:
+            painter.restore()
+
+    @staticmethod
+    def _paint_number(
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: ModelIndex,
+        thumb: QRect,
+        selected: bool,
+        current: bool,
+        accent: QColor,
+    ) -> None:
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
+        if not text:
+            return
+        font = QFont(option.font)
+        font.setBold(current)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        top = thumb.bottom() + RING_OFFSET + 1
+        width = metrics.horizontalAdvance(text) + 10
+        label = QRect(
+            option.rect.x() + (option.rect.width() - width) // 2, top, width, metrics.height()
+        )
+        palette = option.palette
+        if selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(accent)
+            painter.drawRoundedRect(label, 3, 3)
+            white, black = QColor(Qt.GlobalColor.white), QColor(Qt.GlobalColor.black)
+            ink = white if contrast_ratio(white, accent) >= contrast_ratio(black, accent) else black
+        else:
+            ink = palette.color(QPalette.ColorRole.Text)
+        painter.setPen(ink)
+        painter.drawText(label, Qt.AlignmentFlag.AlignCenter, text)
+
+
 class ThumbnailSidebar(QListView):
     """Single-column icon list; the current item follows the current page and clicks
     navigate. Ctrl/Shift+click build a multi-selection that survives navigation and
@@ -241,6 +373,8 @@ class ThumbnailSidebar(QListView):
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumWidth(THUMB_WIDTH_PX + 40)
+        self.setItemDelegate(ThumbnailDelegate(self))
+        self.setMouseTracking(True)  # hover tint
         self._syncing = False
         self._in_mouse_press = False
         self._saved_rows: list[int] = []

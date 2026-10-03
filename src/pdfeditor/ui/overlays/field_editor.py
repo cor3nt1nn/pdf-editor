@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from pdfeditor.core.forms import FieldKind, WidgetInfo
+from pdfeditor.ui.colors import page_colors_css, page_palette
 from pdfeditor.ui.overlays.floating_editor import (
     MIN_FONT_PX,
     FloatingEditorOverlay,
@@ -39,7 +40,24 @@ log = logging.getLogger(__name__)
 #: Field kinds the overlay can edit (checkboxes/radios toggle without an editor).
 EDITABLE_KINDS = (FieldKind.TEXT, FieldKind.COMBO, FieldKind.LIST)
 DEFAULT_FONT_PT = 10.0
-EDITOR_STYLE = "border: 1px solid rgb(0, 120, 215); padding: 0px; background: white;"
+EDITOR_BORDER = "1px solid rgb(0, 120, 215)"
+#: Page-like colours whatever the palette (a dark theme has light text on dark Base):
+#: the editors sit over the white page (docs/ARCHITECTURE.md Deviation 165).
+_PAGE = page_colors_css()
+EDITOR_STYLE = f"QLineEdit, QPlainTextEdit {{ border: {EDITOR_BORDER}; padding: 0px; {_PAGE} }}"
+COMBO_STYLE = (
+    f"QComboBox {{ border: {EDITOR_BORDER}; padding: 0px 2px; {_PAGE} }}"
+    f" QComboBox QLineEdit {{ border: none; {_PAGE} }}"
+    f" QComboBox QAbstractItemView {{ border: 1px solid rgb(120, 120, 120); {_PAGE} }}"
+)
+LIST_STYLE = f"QListWidget {{ border: {EDITOR_BORDER}; padding: 0px; {_PAGE} }}"
+
+
+def _page_colors(widget: QWidget, style: str) -> None:
+    """Give ``widget`` page-like colours: the style sheet, plus the same colours in its
+    palette for anything that paints from the palette (item delegates, popups)."""
+    widget.setPalette(page_palette(widget.palette()))
+    widget.setStyleSheet(style)
 
 
 class _ChoiceCombo(QComboBox):
@@ -122,7 +140,7 @@ class FieldEditorOverlay(FloatingEditorOverlay):
             edit = QPlainTextEdit(parent)
             edit.setPlainText(normalize_newlines(info.value))
             edit.setTabChangesFocus(True)
-            edit.setStyleSheet(EDITOR_STYLE)
+            _page_colors(edit, EDITOR_STYLE)
             edit.moveCursor(QTextCursor.MoveOperation.End)
             editor = edit
         elif info.kind is FieldKind.TEXT:
@@ -130,7 +148,7 @@ class FieldEditorOverlay(FloatingEditorOverlay):
             if info.max_len > 0:
                 line.setMaxLength(info.max_len)
             line.setText(info.value)
-            line.setStyleSheet(EDITOR_STYLE)
+            _page_colors(line, EDITOR_STYLE)
             line.selectAll()
             editor = line
         elif info.kind is FieldKind.COMBO:
@@ -143,11 +161,14 @@ class FieldEditorOverlay(FloatingEditorOverlay):
             combo.setCurrentIndex(index)
             if index < 0 and info.editable_combo:
                 combo.setEditText(info.value)
+            _page_colors(combo, COMBO_STYLE)
+            combo.view().setPalette(page_palette(combo.view().palette()))
             combo.activated.connect(self._on_combo_activated)
             editor = combo
         else:
             lst = QListWidget(parent)
             lst.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            _page_colors(lst, LIST_STYLE)
             for export, display in info.choices:
                 item = QListWidgetItem(display, lst)
                 item.setData(Qt.ItemDataRole.UserRole, export)
