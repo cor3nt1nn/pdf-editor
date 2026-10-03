@@ -7,7 +7,8 @@ verdict 5 and O12–O14). The page gets two new content streams around its own:
 * a *prefix* ``% PDFEditor OCR prefix v1`` + ``q`` before the original content, and
 * the *layer* ``% PDFEditor OCR layer v1`` + ``Q`` (back to the page's initial graphics
   state) + one ``BT … ET`` block: per word ``/PdfEdOcr <size> Tf <Tz> Tz <Tm> (text ) Tj``
-  with Helvetica (WinAnsi; characters outside cp1252 become ``?``), the size 0.85 × the
+  with Helvetica (WinAnsi; characters outside cp1252 become their NFKC compatibility
+  form when it fits — ligatures are split — else ``?``), the size 0.85 × the
   word's height, the baseline 0.22 × the height above its bottom, and the horizontal
   scaling fitting the word's width. A trailing space per word keeps the words apart in
   extractors that do not split on gaps (pypdf).
@@ -37,6 +38,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import unicodedata
 from collections.abc import Sequence
 from functools import cache
 
@@ -76,9 +78,29 @@ def page_to_content_matrix(page: pymupdf.Page) -> pymupdf.Matrix:
     return ~pymupdf.Matrix(ctm.a, ctm.b, ctm.c, ctm.d, ctm.e, ctm.f)
 
 
+def winansi(text: str) -> str:
+    """``text`` in the characters WinAnsi (cp1252) has: a character it lacks is replaced
+    by its NFKC compatibility form when that one fits (ligatures "ﬁ" → "fi", full-width
+    letters, "…" stays), else by ``?``."""
+    out = []
+    for c in text:
+        try:
+            c.encode("cp1252")
+        except UnicodeEncodeError:
+            alt = unicodedata.normalize("NFKC", c)
+            try:
+                alt.encode("cp1252")
+            except UnicodeEncodeError:
+                alt = "?"
+            out.append(alt)
+        else:
+            out.append(c)
+    return "".join(out)
+
+
 def encode(text: str) -> bytes:
-    """``text`` as a PDF literal string in WinAnsi (cp1252; others become ``?``)."""
-    raw = text.encode("cp1252", "replace")
+    """``text`` as a PDF literal string in WinAnsi (:func:`winansi`, then cp1252)."""
+    raw = winansi(text).encode("cp1252")
     out = bytearray(b"(")
     for b in raw:
         if b in b"()\\":
@@ -138,7 +160,7 @@ def _line_ops(line: OcrLine, inv: pymupdf.Matrix, skip: Sequence[Rect] = ()) -> 
         if skip and _covered(word.rect, skip):
             continue
         size = SIZE_RATIO * height
-        shown = word.text.encode("cp1252", "replace").decode("cp1252")
+        shown = winansi(word.text)
         natural = font.text_length(shown, fontsize=size)
         tz = min(max(100.0 * width / natural, MIN_TZ), MAX_TZ) if natural > 0 else 100.0
         base = c1 - BASELINE_RATIO * height

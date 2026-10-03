@@ -162,3 +162,24 @@ def test_without_text_scope_on_many_pages(qtbot, settings, simple_pdf, tmp_path)
     assert dialog.pages() == []  # cached
     assert time.perf_counter() - start < 0.05
     doc.close()
+
+
+# -- m3: ligatures and other compatibility characters in the layer --------------------------
+def test_layer_splits_ligatures() -> None:
+    from pdfeditor.core import ocr_layer
+
+    assert ocr_layer.winansi("ﬁnance ﬂux ﬀ") == "finance flux ff"
+    assert ocr_layer.winansi("été … ½ €") == "été … ½ €"  # in cp1252: unchanged
+    assert ocr_layer.winansi("Ｆｕｌｌ") == "Full"  # full-width forms
+    assert ocr_layer.winansi("日本 Ω") == "?? ?"
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=200)
+    words = (OcrWord((20, 40, 90, 56), "ﬁnance"), OcrWord((100, 40, 160, 56), "eﬀort"))
+    line = OcrLine((20, 40, 160, 56), (20, 56), words)
+    assert ocr_layer.add_layer(doc, page, PageOcr((line,), 300, 200)) == 2
+    data = pymupdf.open("pdf", doc.tobytes())
+    hit = data[0].search_for("finance")
+    assert len(hit) == 1 and abs(hit[0].x0 - 20) < 2
+    assert data[0].search_for("effort")
+    data.close()
+    doc.close()

@@ -810,7 +810,8 @@ Known limitations:
   blurred, low-resolution or handwritten pages; there is no confidence display or correction.
 - The invisible text uses a standard font (Helvetica, Windows-1252): characters outside it
   (Greek, Cyrillic, some symbols) are stored as "?" in the searchable layer (they are right in
-  the session's selectable text).
+  the session's selectable text); ligatures such as "ﬁ" are stored as their letters ("fi"),
+  so a search for "finance" finds them.
 - Each page briefly occupies the window (≈ 0.1 s to prepare it). "Make searchable" needs the
   permission to change the document. Snapping on skewed scans may be off by up to ≈ 3 pt;
   dotted leaders are found when their dots are clearly separated.
