@@ -1,6 +1,6 @@
 [project]
 name = "pdfeditor"
-version = "0.2.0"
+version = "0.2.1"
 description = "Free, open-source Windows PDF editor: fill forms, add text and stamps, sign."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
