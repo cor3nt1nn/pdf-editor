@@ -213,3 +213,32 @@ def test_specific_refusal_notices(qapp) -> None:
         assert textedit_tool.reason_notice(EditReason.DIRECTION).startswith("Le texte de droite")
     finally:
         remove_translators(qapp)
+
+
+# -- 12. the installed fonts are read off the GUI thread ----------------------------------
+def test_activation_warms_the_installed_fonts(window, tmp_path, monkeypatch) -> None:
+    import threading
+
+    from pdfeditor.core import fontmatch
+
+    fontmatch.clear_system_fonts_cache()
+    calls: list[str] = []
+
+    def files():
+        calls.append(threading.current_thread().name)
+        return [CALIBRI_PATH]
+
+    monkeypatch.setattr(fontmatch, "registry_font_files", files)
+    try:
+        window.textedit_tool.fonts = None
+        _open_window(window, tmp_path)
+        thread = fontmatch._warm_thread
+        assert thread is not None
+        thread.join(10)
+        fonts = fontmatch.system_fonts()  # read by the warm-up thread
+        assert calls == ["pdfeditor-system-fonts"]
+        assert [f.family for f in fonts.faces] == ["Calibri"]
+        fontmatch.warm_system_fonts()  # once per process: nothing more
+        assert fontmatch.system_fonts() is fonts and len(calls) == 1
+    finally:
+        fontmatch.clear_system_fonts_cache()

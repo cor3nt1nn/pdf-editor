@@ -659,7 +659,12 @@ Known limitations:
   hinting (may look a little softer on screen at small sizes); outlined or clipping text
   effects (stroked text) come back as plain filled text.
 - The edited text moves to the end of the page's reading order: text selection, copy and
-  screen readers meet it after the rest of the page.
+  screen readers meet it after the rest of the page. It is also drawn last, above anything
+  the page painted later than the original text (a shape or image over it now sits below
+  it); neighbouring letters that overlapped the edited ones are drawn again the same way.
+- The new text is written outside the page's optional-content groups (layers) and outside
+  its tagged structure (no marked content): it stays visible when the original text's layer
+  is hidden, and tagged-PDF readers (accessibility, reflow) do not see it in the structure.
 - Text boxes, stamps, signatures and markups over the edited text stay where they were.
 - The first edit merges the page's content into one stream, and the page's resources keep
   every name they had; Type3 (bitmap) text is replaced with a substitute font.

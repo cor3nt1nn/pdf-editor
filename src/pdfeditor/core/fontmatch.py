@@ -28,7 +28,6 @@ never written.
 from __future__ import annotations
 
 import enum
-import functools
 import logging
 import mmap
 import os
@@ -312,22 +311,52 @@ def scan_font_files(folder: Path | None = None) -> list[Path]:
         return []
 
 
-@functools.cache
+_system_fonts: SystemFonts | None = None
+_system_fonts_lock = threading.Lock()
+_warm_thread: threading.Thread | None = None
+
+
 def system_fonts() -> SystemFonts:
-    """The installed fonts (registry, else folder scan), read once per process."""
-    files = [p for p in registry_font_files() if p.suffix.lower() in FONT_SUFFIXES]
-    files = [p for p in files if p.is_file()]
-    if not files:
-        log.info("no fonts in the registry; scanning %s", fonts_dir())
-        files = scan_font_files()
-    fonts = SystemFonts.from_paths(files)
-    log.info("%d installed font faces", len(fonts.faces))
-    return fonts
+    """The installed fonts (registry, else folder scan), read once per process (≈ 0.2 s
+    the first time). Thread-safe: a call during :func:`warm_system_fonts` waits for it."""
+    global _system_fonts
+    with _system_fonts_lock:
+        if _system_fonts is None:
+            files = [p for p in registry_font_files() if p.suffix.lower() in FONT_SUFFIXES]
+            files = [p for p in files if p.is_file()]
+            if not files:
+                log.info("no fonts in the registry; scanning %s", fonts_dir())
+                files = scan_font_files()
+            _system_fonts = SystemFonts.from_paths(files)
+            log.info("%d installed font faces", len(_system_fonts.faces))
+        return _system_fonts
+
+
+def warm_system_fonts() -> None:
+    """Read :func:`system_fonts` on a daemon thread, once per process (the Edit Page Text
+    tool calls it when activated, so that the first substitution does not pay the scan on
+    the GUI thread). Pure file and registry reads: no MuPDF, no Qt."""
+    global _warm_thread
+    with _system_fonts_lock:
+        if _system_fonts is not None or _warm_thread is not None:
+            return
+        _warm_thread = threading.Thread(target=_warm, name="pdfeditor-system-fonts", daemon=True)
+        _warm_thread.start()
+
+
+def _warm() -> None:
+    try:
+        system_fonts()
+    except Exception:  # noqa: BLE001 - a later call reports it on the GUI thread
+        log.warning("could not read the installed fonts", exc_info=True)
 
 
 def clear_system_fonts_cache() -> None:
     """Forget :func:`system_fonts` (tests)."""
-    system_fonts.cache_clear()
+    global _system_fonts, _warm_thread
+    with _system_fonts_lock:
+        _system_fonts = None
+        _warm_thread = None
 
 
 # -- matching -----------------------------------------------------------------------------

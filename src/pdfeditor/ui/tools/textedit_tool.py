@@ -29,6 +29,7 @@ from PySide6.QtCore import QCoreApplication, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor, QKeyEvent, QPainter
 from PySide6.QtWidgets import QApplication
 
+from pdfeditor.core import fontmatch
 from pdfeditor.core.commands import ReplaceTextCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
 from pdfeditor.core.pagetext import CharRef, PageText
@@ -233,6 +234,10 @@ class TextEditTool(_TextSelecting, Tool):
         view.viewport().setMouseTracking(True)
         view.viewport().setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         self.document_view.annot_selection.clear()
+        if self.fonts is None:
+            # The first substitution needs the installed fonts: read them off the GUI
+            # thread now (once per process).
+            fontmatch.warm_system_fonts()
 
     def deactivate(self) -> None:
         self._leaving = True
