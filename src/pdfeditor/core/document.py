@@ -1030,7 +1030,8 @@ class PdfDocument(QObject):
         """Create a FreeText annotation, signature or text markup (``spec.name`` "" =
         new uuid4; a markup needs ``spec.quads``, page space). Emits page_changed.
 
-        ``fit_height``: a text box's height then hugs its wrapped text; otherwise
+        ``fit_height``: a text box's height then hugs its wrapped text (and an auto-width
+        box's width its text, ``spec.fixed_width`` False, Deviation 164); otherwise
         ``spec.rect`` is used as is. A signature (``spec.image`` required, already turned
         for the page) draws the document's image object with the same samples when there
         is one, else a new one. Raises :class:`AnnotError`.
@@ -1122,10 +1123,12 @@ class PdfDocument(QObject):
         rect: QRectF | None = None,
         fit_height: bool = False,
         opacity: float | None = None,
+        fixed_width: bool | None = None,
     ) -> AnnotInfo:
         """Change annotation ``name`` on ``page`` (see :func:`annotations.update_annot`;
-        ``rect`` in page space; a text markup only takes ``color`` and ``opacity``) and
-        return its new snapshot. Emits page_changed.
+        ``rect`` in page space; a text markup only takes ``color`` and ``opacity``;
+        ``fixed_width`` sets a text box's width mode, Deviation 164) and return its new
+        snapshot. Emits page_changed.
 
         Raises :class:`AnnotError` if it is gone or cannot be changed (locked, or a
         markup given text, rect or fit_height).
@@ -1145,6 +1148,7 @@ class PdfDocument(QObject):
                     rect=rect,
                     fit_height=fit_height,
                     opacity=opacity,
+                    fixed_width=fixed_width,
                 )
             except LookupError as exc:
                 raise AnnotError(f"annotation {name!r} not found on page {page}") from exc

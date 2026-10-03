@@ -106,6 +106,19 @@ LINE_HEIGHT_RATIO = 1.2
 #: Extra height (points) added below the text lines when a text box hugs its content.
 TEXT_PAD = 2.0
 DEFAULT_TEXT_WIDTH = 180.0
+#: Space (points) kept between an auto-width text box and the page's right edge (along
+#: the text direction) when nothing else limits its width (Deviation 164).
+TEXT_PAGE_MARGIN = 18.0
+#: Extra width (points) added to the measured text of an auto-width box so that no glyph
+#: overhang is clipped (MuPDF draws the text from the rect's left edge, unpadded).
+TEXT_SIDE_PAD = 2.0
+#: Private annotation keys written by this application only (Deviation 164):
+#: ``/PDFEditorFixedWidth`` (true: keep the width; false: auto width, the width hugs the
+#: text) and ``/PDFEditorMaxWidth`` (an auto box's wrap width, points; absent: up to the
+#: page edge). A text box without the flag (another program's, or an older version's)
+#: keeps its width.
+FIXED_WIDTH_KEY = "PDFEditorFixedWidth"
+MAX_WIDTH_KEY = "PDFEditorMaxWidth"
 DEFAULT_FONT_SIZE = 11.0
 BLACK: Color = (0.0, 0.0, 0.0)
 #: Annotation flags (PDF 32000 §12.5.3) making an annotation read-only for us.
@@ -159,6 +172,11 @@ class AnnotInfo:
     quads: tuple[Quad, ...] = ()
     #: /CA (1.0 when absent).
     opacity: float = 1.0
+    #: Text only: the width is kept on text edits (/PDFEditorFixedWidth not false);
+    #: False: the width hugs the text (Deviation 164).
+    fixed_width: bool = True
+    #: Text only, auto width: wrap width (points, /PDFEditorMaxWidth); 0 = page edge.
+    max_width: float = 0.0
 
     @property
     def editable(self) -> bool:
@@ -209,6 +227,10 @@ class AnnotSpec:
     quads: tuple[Quad, ...] = ()
     #: Markup only: /CA (written only below 1.0).
     opacity: float = 1.0
+    #: Text only: keep the width (True) or hug the text, up to ``max_width`` (0 = the
+    #: page edge less ``TEXT_PAGE_MARGIN``) when created with ``fit_height``.
+    fixed_width: bool = True
+    max_width: float = 0.0
 
 
 def quads_rect(quads: Iterable[Quad]) -> QRectF:
@@ -295,6 +317,17 @@ def _string_key(doc: pymupdf.Document, xref: int, key: str) -> str:
     return value if kind == "string" else ""
 
 
+def _float_key(doc: pymupdf.Document, xref: int, key: str) -> float:
+    kind, value = _key(doc, xref, key)
+    if kind in ("int", "float"):
+        try:
+            number = float(value)
+        except ValueError:
+            return 0.0
+        return number if math.isfinite(number) and number > 0 else 0.0
+    return 0.0
+
+
 def _int_key(doc: pymupdf.Document, xref: int, key: str) -> int:
     kind, value = _key(doc, xref, key)
     if kind in ("int", "float"):
@@ -358,6 +391,8 @@ def _info(
         unrotated_rect=(raw.x0, raw.y0, raw.x1, raw.y1),
         locked=callout or bool(flags & (ANNOT_READ_ONLY | ANNOT_LOCKED)),
         locked_contents=bool(flags & ANNOT_LOCKED_CONTENTS),
+        fixed_width=_key(doc, xref, FIXED_WIDTH_KEY) != ("bool", "false"),
+        max_width=_float_key(doc, xref, MAX_WIDTH_KEY),
     )
 
 
@@ -654,6 +689,8 @@ def create_annot(
     _set_name(fitz_doc, xref, spec.name or new_name())
     # add_freetext_annot writes a stray callout line array (A1).
     fitz_doc.xref_set_key(xref, "CL", "null")
+    if spec.kind is AnnotKind.TEXT:
+        _write_width_mode(fitz_doc, xref, spec.fixed_width, spec.max_width)
     info = _info(fitz_doc, page, page_index, page.load_annot(xref))
     if fit_height and info.kind is AnnotKind.TEXT:
         return update_annot(fitz_doc, page_index, info.name, fit_height=True)
@@ -707,6 +744,86 @@ def _update_markup(
     annot.update()  # keeps /QuadPoints and /Rotate (T4); a foreign markup gets an /AP
     xref = annot.xref
     return _info(fitz_doc, page, page_index, page.load_annot(xref), {**annot.info, "id": name})
+
+
+def _write_width_mode(
+    fitz_doc: pymupdf.Document, xref: int, fixed: bool, max_width: float | None = None
+) -> None:
+    """Write /PDFEditorFixedWidth and, given ``max_width`` (> 0 for an auto box), set or
+    remove /PDFEditorMaxWidth (Deviation 164)."""
+    fitz_doc.xref_set_key(xref, FIXED_WIDTH_KEY, "false" if not fixed else "true")
+    if max_width is None:
+        return
+    if not fixed and max_width > 0 and math.isfinite(max_width):
+        fitz_doc.xref_set_key(xref, MAX_WIDTH_KEY, f"{max_width:g}")
+    elif _key(fitz_doc, xref, MAX_WIDTH_KEY)[0] != "null":
+        fitz_doc.xref_set_key(xref, MAX_WIDTH_KEY, "null")
+
+
+def natural_text_width(text: str, font_size: float) -> float:
+    """Width (points) of the longest line of ``text`` in Helvetica at ``font_size`` (the
+    advance widths MuPDF wraps the FreeText appearance with), plus ``TEXT_SIDE_PAD``."""
+    longest = max(
+        (
+            pymupdf.get_text_length(line, fontname=_TEXT_FONT, fontsize=font_size)
+            for line in normalize_text(text).split("\n")
+        ),
+        default=0.0,
+    )
+    return longest + TEXT_SIDE_PAD
+
+
+def min_text_width(font_size: float) -> float:
+    """Smallest width (points) of an auto-width text box: one em."""
+    return max(float(font_size), 1.0)
+
+
+def fitted_width(text: str, font_size: float, limit: float) -> float:
+    """Width of an auto-width text box showing ``text``: its natural width, at most
+    ``limit`` (where longer lines wrap) and at least :func:`min_text_width`."""
+    low = min_text_width(font_size)
+    return max(low, min(natural_text_width(text, font_size), max(limit, low)))
+
+
+def width_limit(room: float, max_width: float = 0.0) -> float:
+    """Wrap width of an auto-width box with ``room`` points before the page edge (along
+    the text direction): ``max_width`` when set (a cell or underline), else ``room`` less
+    ``TEXT_PAGE_MARGIN``; never more than ``room`` unless that is less than the margin."""
+    limit = max_width if max_width > 0 else room - TEXT_PAGE_MARGIN
+    return max(1.0, min(limit, room) if room > 0 else limit)
+
+
+def normalize_text(text: str) -> str:
+    """``text`` with CRLF/CR line breaks turned into LF."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _frame_room(page: pymupdf.Page, rect: pymupdf.Rect, rotate: int) -> float:
+    """Distance (points) from the start of the text in unrotated ``rect`` to the page
+    edge, along the text direction."""
+    bounds = (page.rect * page.derotation_matrix).normalize()
+    if rotate == 90:  # bottom to top
+        return rect.y1 - bounds.y0
+    if rotate == 180:  # right to left
+        return rect.x1 - bounds.x0
+    if rotate == 270:  # top to bottom
+        return bounds.y1 - rect.y0
+    return bounds.x1 - rect.x0
+
+
+def _with_frame_width(rect: pymupdf.Rect, rotate: int, width: float) -> pymupdf.Rect:
+    """``rect`` (unrotated) with its text frame width set, keeping where the text
+    starts."""
+    r = pymupdf.Rect(rect)
+    if rotate == 90:
+        r.y0 = r.y1 - width
+    elif rotate == 180:
+        r.x0 = r.x1 - width
+    elif rotate == 270:
+        r.y1 = r.y0 + width
+    else:
+        r.x1 = r.x0 + width
+    return r
 
 
 def _with_frame_height(rect: pymupdf.Rect, rotate: int, height: float) -> pymupdf.Rect:
@@ -763,13 +880,17 @@ def update_annot(
     rect: QRectF | None = None,
     fit_height: bool = False,
     opacity: float | None = None,
+    fixed_width: bool | None = None,
 ) -> AnnotInfo:
     """Change an annotation and regenerate its appearance; returns the new snapshot.
 
     ``None`` keeps a property. ``rect`` is in page space. For a stamp resized without an
     explicit ``font_size`` the glyph is scaled to ``STAMP_FONT_RATIO x min(w, h)``.
     ``fit_height`` (text only) then sets the height to hug the wrapped text, keeping the
-    top edge and the width, capped at the page edge (longer text is clipped). Foreign
+    top edge and the width, capped at the page edge (longer text is clipped); an
+    auto-width text box (:attr:`AnnotInfo.fixed_width` False) first gets the width of its
+    text (:func:`fitted_width`, wrapping at its ``max_width`` or near the page edge, the
+    start of its text kept). ``fixed_width`` (text only) sets that mode. Foreign
     annotations are normalised to Helvetica (stamps to ZapfDingbats) and lose their rich
     text (/RC, /DS); /CL is always removed. The returned snapshot keeps ``name`` (even
     synthetic). A signature honours ``rect`` only (the rest is ignored; without a rect
@@ -812,10 +933,20 @@ def update_annot(
         annot.set_info(content=text)
     if rect is not None:
         _set_rect(fitz_doc, annot, page_to_unrotated(fitz_from_qrect(rect), page.derotation_matrix))
+    fixed = current.fixed_width
+    if fixed_width is not None and kind is AnnotKind.TEXT:
+        fixed = bool(fixed_width)
+        if fixed != current.fixed_width or _key(fitz_doc, xref, FIXED_WIDTH_KEY)[0] == "null":
+            _write_width_mode(fitz_doc, xref, fixed)
     kwargs = {"fontsize": _pdf_size(size), "fontname": _fontname(kind), "text_color": rgb}
     if fit_height and kind is AnnotKind.TEXT:
-        # Measure with a frame tall enough for every line, then hug the content.
         body = text if text is not None else current.text
+        if not fixed:
+            frame = pymupdf.Rect(annot.rect)
+            limit = width_limit(_frame_room(page, frame, current.rotate), current.max_width)
+            width = fitted_width(body, size, limit)
+            _set_rect(fitz_doc, annot, _with_frame_width(frame, current.rotate, width))
+        # Measure with a frame tall enough for every line, then hug the content.
         tall = fitted_height(len(body) + body.count("\n") + 2, size)
         _set_rect(fitz_doc, annot, _with_frame_height(annot.rect, current.rotate, tall))
         annot.update(**kwargs)
@@ -859,8 +990,8 @@ def delete_annot(fitz_doc: pymupdf.Document, page_index: int, name: str) -> bool
 # -- geometry helpers --------------------------------------------------------
 def spec_from(info: AnnotInfo, image: ImageData | None = None) -> AnnotSpec:
     """The spec re-creating ``info`` (same /NM, rect, rotation, style; a markup its
-    quads, colour, opacity and /Contents; a signature also needs its ``image``, e.g.
-    from ``PdfDocument.annot_image``)."""
+    quads, colour, opacity and /Contents; a text box its width mode; a signature also
+    needs its ``image``, e.g. from ``PdfDocument.annot_image``)."""
     return AnnotSpec(
         page=info.page,
         kind=info.kind,
@@ -873,6 +1004,8 @@ def spec_from(info: AnnotInfo, image: ImageData | None = None) -> AnnotSpec:
         image=image,
         quads=info.quads,
         opacity=info.opacity,
+        fixed_width=info.fixed_width,
+        max_width=info.max_width,
     )
 
 

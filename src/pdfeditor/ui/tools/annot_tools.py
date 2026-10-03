@@ -30,13 +30,15 @@ from PySide6.QtWidgets import QApplication
 
 from pdfeditor.core import snapping
 from pdfeditor.core.annotations import (
-    DEFAULT_TEXT_WIDTH,
     STAMP_GLYPHS,
     AnnotInfo,
     AnnotKind,
     AnnotSpec,
     Color,
+    fitted_width,
+    min_text_width,
     stamp_rect,
+    width_limit,
 )
 from pdfeditor.core.commands import AddAnnotCommand, DeleteAnnotCommand, EditAnnotCommand
 from pdfeditor.core.document import DocumentError, PdfDocument
@@ -417,7 +419,10 @@ class AnnotToolBase(Tool):
         if ghost is None or _same_rect(ghost, info.rect):
             return True
         fit = drag.mode is DragMode.RESIZE and info.kind is AnnotKind.TEXT
-        if self.edit(info, rect=ghost, fit_height=fit):
+        changes: dict[str, object] = {"rect": ghost, "fit_height": fit}
+        if fit and abs(ghost.width() - info.rect.width()) > 1e-6:
+            changes["fixed_width"] = True  # a width chosen by hand is kept (Dev. 164)
+        if self.edit(info, **changes):
             # The edit may have given a foreign annotation its lasting name.
             current = self.selection.current
             self._armed = current.name if current is not None else info.name
@@ -710,6 +715,9 @@ class TextTool(AnnotToolBase):
         return QCursor(Qt.CursorShape.IBeamCursor)
 
     def _placement(self, page: int, pos: QPointF, alt: bool) -> tuple[Snap, QRectF] | None:
+        """(snap, rect) of a new text box at ``pos``: the rect's width is the widest the
+        box may grow to (Deviation 164) — the cell less its padding, the rule, or up to
+        the page edge less ``TEXT_PAGE_MARGIN``."""
         doc = self._doc()
         if doc is None:
             return None
@@ -721,24 +729,52 @@ class TextTool(AnnotToolBase):
             snap = Snap(SnapKind.NONE)
         font_size, _color = self.style()
         size = doc.page_size(page)
-        rect = snapping.text_placement(
-            snap, pos, font_size, DEFAULT_TEXT_WIDTH, size.width(), size.height()
-        )
+        if snap.kind in (SnapKind.CELL, SnapKind.UNDERLINE):
+            widest = size.width()  # the cell or rule limits the width
+        else:
+            widest = max(width_limit(size.width() - pos.x()), min_text_width(font_size))
+        rect = snapping.text_placement(snap, pos, font_size, widest, size.width(), size.height())
         return snap, rect
 
     def create_at(self, page: int, pos: QPointF, alt: bool) -> None:
         placement = self._placement(page, pos, alt)
         if placement is None:
             return
+        snap, rect = placement
         font_size, color = self.style()
-        self.editor.open_new(page, placement[1], font_size, color)
+        limit = rect.width()
+        start = QRectF(rect)
+        start.setWidth(fitted_width("", font_size, limit))
+        snapped = snap.kind in (SnapKind.CELL, SnapKind.UNDERLINE)
+        self.editor.open_new(
+            page,
+            start,
+            font_size,
+            color,
+            auto_width=True,
+            max_width=limit if snapped else 0.0,
+            width_limit=limit,
+        )
 
     def preview_rect(self, page: int, pos: QPointF, alt: bool) -> QRectF | None:
         placement = self._placement(page, pos, alt)
         if placement is None:
             return None
         snap, rect = placement
-        return QRectF(snap.rect) if snap.rect is not None else rect
+        if snap.rect is not None:
+            return QRectF(snap.rect)
+        font_size, _color = self.style()
+        rect.setWidth(fitted_width("", font_size, rect.width()))  # where typing starts
+        return rect
+
+    def width_limit(self, info: AnnotInfo) -> float:
+        """Page-space width an auto-width box ``info`` may grow to while edited (its
+        stored wrap width, else up to the page edge less ``TEXT_PAGE_MARGIN``)."""
+        doc = self._doc()
+        if doc is None:
+            return info.rect.width()
+        room = doc.page_size(info.page).width() - info.rect.left()
+        return width_limit(room, info.max_width)
 
     def click_selected(self, info: AnnotInfo) -> None:
         if info.kind is not AnnotKind.TEXT:
@@ -747,7 +783,7 @@ class TextTool(AnnotToolBase):
         if current is None or not current.text_editable:
             return
         self._armed = None
-        self.editor.open_existing(current)
+        self.editor.open_existing(current, width_limit=self.width_limit(current))
 
     def _on_committed(self, anchor: EditorAnchor, text: str) -> None:
         doc = self._doc()
@@ -763,6 +799,8 @@ class TextTool(AnnotToolBase):
                     anchor.font_size,
                     tuple(anchor.color),
                     QRectF(anchor.rect),
+                    fixed_width=not anchor.auto_width,
+                    max_width=anchor.max_width,
                 )
             )
             return

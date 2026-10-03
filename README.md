@@ -328,12 +328,17 @@ stay editable here after the file is reopened.
   entry). The box snaps to what is under the pointer: inside a **table cell** it starts at
   the cell's left edge (on the baseline for a one-line cell), on an **underline** ("Name:
   ______") the text sits on the line. A dashed blue preview shows the target before you click.
+  The box is as wide as its text (it grows while you type) and wraps only at the cell's
+  width, at the end of the underline, or near the page's right edge; its height follows
+  the lines.
 - **Stamps**: clicking in a **checkbox** (a drawn square or a ☐ glyph) or a small cell puts
   the ✓ ✗ ● centred in it and sized to it; elsewhere a 12 pt stamp is centred on the click.
 - **Select, move, resize, edit**: with the Text or a stamp tool, click a text or stamp to
   select it (frame with 8 handles); drag it to move it, drag a handle to resize it (a text
   box's width; its height follows the text). Click a selected text again, or double-click
-  it, to edit it; emptying it deletes it. Escape deselects.
+  it, to edit it; emptying it deletes it. Escape deselects. Editing a text refits its width
+  to the new text, unless you resized its width by hand: it then keeps that width (saved
+  with the file).
 - **Style**: the toolbar's font size box and colour button set the size and colour of new
   text and change the selected one. Stamps use the current colour.
 - Each placement, edit, move, resize, style change and deletion is one Undo step (Ctrl+Z /
@@ -352,6 +357,8 @@ Known limitations:
 - Snapping only knows straight horizontal/vertical lines and rectangles drawn in the page and
   ☐-like symbol characters: nothing on scanned images (OCR is planned for later) and no
   snapping to underlines on pages rotated by 90° or 270°.
+- Text boxes made by other programs, or by earlier versions of PDF Editor, keep their width
+  when edited (only the height follows the text); resize them to change it.
 - Text boxes made by other programs (e.g. Adobe Acrobat comments) can be moved and edited,
   but editing them (or deleting then undoing) turns them into plain Helvetica text: rich text
   and the original font are lost. Opening such a file may give their comments an internal

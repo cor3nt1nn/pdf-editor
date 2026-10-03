@@ -561,9 +561,11 @@ class EditAnnotCommand(_AnnotCommand):
     ``None`` keeps a property. ``fit_height`` (default: ``text is not None``) makes a
     text box's height hug its text after the change. Undo restores the text/colour that
     were changed and always the old rect and font size (a text change refits the height,
-    a stamp resize rescales the glyph). The annotation is resolved by ``(page id, name)``
-    on every redo/undo, so the command survives saves and page moves; :class:`AnnotError`
-    if it is gone.
+    a stamp resize rescales the glyph). ``fixed_width`` (text boxes) sets the width mode
+    (Deviation 164: a resize makes a box fixed-width); undo restores the old mode, and a
+    text change of an auto-width box also refits its width. The annotation is resolved
+    by ``(page id, name)`` on every redo/undo, so the command survives saves and page
+    moves; :class:`AnnotError` if it is gone.
 
     A text markup (:data:`~pdfeditor.core.annotations.MARKUP_KINDS`) only changes its
     ``color`` and ``opacity`` ("Change markup color"); ``text``, ``font_size``, ``rect``
@@ -582,12 +584,19 @@ class EditAnnotCommand(_AnnotCommand):
         rect: QRectF | None = None,
         fit_height: bool | None = None,
         opacity: float | None = None,
+        fixed_width: bool | None = None,
     ) -> None:
-        changes = (text, font_size, color, rect, opacity)
+        changes = (text, font_size, color, rect, opacity, fixed_width)
         if all(change is None for change in changes):
             raise ValueError("EditAnnotCommand needs at least one change")
         if info.kind in MARKUP_KINDS:
-            if text is not None or font_size is not None or rect is not None or fit_height:
+            if (
+                text is not None
+                or font_size is not None
+                or rect is not None
+                or fit_height
+                or fixed_width is not None
+            ):
                 raise ValueError("a text markup only changes its colour and opacity")
         elif opacity is not None:
             raise ValueError("only a text markup has an opacity to change")
@@ -599,6 +608,7 @@ class EditAnnotCommand(_AnnotCommand):
         self.new_color = color
         self.new_rect = QRectF(rect) if rect is not None else None
         self.new_opacity = opacity
+        self.new_fixed_width = fixed_width
         self.fit_height = (text is not None) if fit_height is None else fit_height
 
     @staticmethod
@@ -642,6 +652,7 @@ class EditAnnotCommand(_AnnotCommand):
             color=self.new_color,
             rect=self.new_rect,
             fit_height=self.fit_height,
+            fixed_width=self.new_fixed_width,
         )
 
     def _undo(self) -> None:
@@ -661,6 +672,7 @@ class EditAnnotCommand(_AnnotCommand):
             font_size=old.font_size,
             color=old.color if self.new_color is not None else None,
             rect=QRectF(old.rect),
+            fixed_width=old.fixed_width if self.new_fixed_width is not None else None,
         )
 
 

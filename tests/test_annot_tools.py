@@ -228,9 +228,13 @@ def test_escape_with_empty_new_editor_creates_nothing(qtbot, word_window) -> Non
 def test_text_snaps_into_table_cell(qtbot, word_window) -> None:
     w = word_window
     _click(qtbot, w, QPointF(120, 165))
-    rect = w.document_view.annot_editor.anchor.rect
+    anchor = w.document_view.annot_editor.anchor
+    rect = anchor.rect
     assert rect.left() == pytest.approx(fixtures.WORD_TABLE_X[0] + 2, abs=0.5)
-    assert rect.width() == pytest.approx(100 - 4, abs=0.6)
+    # Auto width (Deviation 164): the box grows with the text up to the cell.
+    assert anchor.auto_width
+    assert anchor.width_limit == pytest.approx(100 - 4, abs=0.6)
+    assert anchor.max_width == pytest.approx(100 - 4, abs=0.6)
 
 
 def test_hover_previews_snap_target(qtbot, word_window) -> None:

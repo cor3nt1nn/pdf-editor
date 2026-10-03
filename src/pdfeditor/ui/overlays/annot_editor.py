@@ -9,6 +9,7 @@ QPlainTextEdit over its rect. It never touches the document: the text tool liste
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,7 @@ from PySide6.QtCore import QObject, QRect, QRectF, Qt
 from PySide6.QtGui import QFont, QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QFrame, QPlainTextEdit, QWidget
 
-from pdfeditor.core.annotations import AnnotInfo, AnnotKind, Color
+from pdfeditor.core.annotations import AnnotInfo, AnnotKind, Color, fitted_width
 from pdfeditor.ui.overlays.floating_editor import FloatingEditorOverlay, normalize_newlines
 
 if TYPE_CHECKING:
@@ -46,6 +47,11 @@ class EditorAnchor:
     color: Color
     #: The annotation being edited; None for a new text box.
     info: AnnotInfo | None = None
+    #: The width follows the text (Deviation 164), up to ``width_limit`` (page space,
+    #: points); ``max_width`` is the wrap width a new box stores (0 = the page edge).
+    auto_width: bool = False
+    max_width: float = 0.0
+    width_limit: float = 0.0
 
     @property
     def is_new(self) -> bool:
@@ -95,16 +101,51 @@ class AnnotTextEditor(FloatingEditorOverlay):
         return self._anchor
 
     # -- public API -------------------------------------------------------------
-    def open_new(self, page: int, rect: QRectF, font_size: float, color: Color) -> None:
-        """Open an empty editor for a new text box at ``rect`` (page space)."""
-        self._open_anchor(EditorAnchor(page, QRectF(rect), float(font_size), tuple(color)))
+    def open_new(
+        self,
+        page: int,
+        rect: QRectF,
+        font_size: float,
+        color: Color,
+        *,
+        auto_width: bool = False,
+        max_width: float = 0.0,
+        width_limit: float = 0.0,
+    ) -> None:
+        """Open an empty editor for a new text box at ``rect`` (page space). With
+        ``auto_width`` the editor's width follows the text up to ``width_limit``
+        (default: ``rect``'s width); ``max_width`` is stored with the new box."""
+        limit = float(width_limit) if width_limit > 0 else rect.width()
+        self._open_anchor(
+            EditorAnchor(
+                page,
+                QRectF(rect),
+                float(font_size),
+                tuple(color),
+                auto_width=auto_width,
+                max_width=float(max_width),
+                width_limit=limit,
+            )
+        )
 
-    def open_existing(self, info: AnnotInfo) -> None:
-        """Open an editor prefilled with the text of the annotation ``info``."""
+    def open_existing(self, info: AnnotInfo, *, width_limit: float = 0.0) -> None:
+        """Open an editor prefilled with the text of the annotation ``info``; an
+        auto-width box (``info.fixed_width`` False) follows the text up to
+        ``width_limit`` (default: its current width)."""
         if info.kind is not AnnotKind.TEXT:
             raise ValueError(f"no editor for {info.kind} annotations")
+        limit = float(width_limit) if width_limit > 0 else info.rect.width()
         self._open_anchor(
-            EditorAnchor(info.page, QRectF(info.rect), info.font_size, info.color, info)
+            EditorAnchor(
+                info.page,
+                QRectF(info.rect),
+                info.font_size,
+                info.color,
+                info,
+                auto_width=not info.fixed_width,
+                max_width=info.max_width,
+                width_limit=limit,
+            )
         )
 
     def set_style(self, font_size: float, color: Color) -> None:
@@ -176,11 +217,34 @@ class AnnotTextEditor(FloatingEditorOverlay):
         size = anchor.font_size if anchor is not None else 0.0
         return max(MIN_FONT_PX, round(size * self._view.view_scale))
 
+    def auto_width_px(self) -> int | None:
+        """Editor width (viewport pixels) of an auto-width anchor: the text's width as
+        the box will have it (``fitted_width``, Helvetica metrics), widened when the
+        editor's Arial needs more so that it wraps where the result does, never wider
+        than the anchor's ``width_limit``. None for a fixed-width anchor."""
+        anchor, editor = self._anchor, self._editor
+        if anchor is None or not anchor.auto_width or not isinstance(editor, QPlainTextEdit):
+            return None
+        scale = self._view.view_scale
+        text = normalize_newlines(editor.toPlainText())
+        width = fitted_width(text, anchor.font_size, anchor.width_limit) * scale
+        metrics = editor.fontMetrics()
+        margin = editor.document().documentMargin()
+        chrome = 2 * margin + 2 + editor.cursorWidth()  # dashed border, caret
+        widest = max((metrics.horizontalAdvance(line) for line in text.split("\n")), default=0)
+        px = max(round(width), math.ceil(widest + chrome))
+        cap = round(max(anchor.width_limit, fitted_width("", anchor.font_size, 0.0)) * scale)
+        return max(1, min(px, max(cap, round(width))))
+
     def _editor_geometry(self, rect: QRect) -> QRect:
-        """Grow the anchor rect downwards to fit the wrapped text."""
+        """Grow the anchor rect downwards to fit the wrapped text (an auto-width anchor
+        also takes the width of its text, :meth:`auto_width_px`)."""
         editor = self._editor
         if not isinstance(editor, QPlainTextEdit) or self._growing:
             return rect
+        width = self.auto_width_px()
+        if width is not None:
+            rect = QRect(rect.x(), rect.y(), width, rect.height())
         self._growing = True
         try:
             # Wrap at the final width before measuring.

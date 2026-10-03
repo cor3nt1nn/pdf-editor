@@ -226,7 +226,7 @@ def test_text_near_checkbox_gets_a_normal_box(qtbot, word_window, where) -> None
     _click(qtbot, w, point)
     editor = w.document_view.annot_editor
     assert editor.is_open
-    assert editor.anchor.rect.width() >= 36
+    assert editor.anchor.width_limit >= 36
     editor.cancel()
 
 
