@@ -1,5 +1,7 @@
 # PDF Editor
 
+![PDF Editor showing a multi-page report with the page thumbnails and the toolbar](docs/screenshots/main-window.png)
+
 Free, open-source (AGPL-3.0) PDF editor for Windows, bilingual French/English.
 
 Goals: fill PDF forms, fill flat forms/scans with free text and ✓ ✗ ● stamps, sign with an
@@ -23,6 +25,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 **Licence:** [AGPL-3.0](LICENSE); bundled components in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Bugs and suggestions:
 [issues](https://github.com/cor3nt1nn/pdf-editor/issues).
+
+## Screenshots
+
+| | |
+|---|---|
+| **Fill PDF forms**<br>[![A PDF form with highlighted fields being filled in, with the field editor open on the email field](docs/screenshots/form-filling.png)](docs/screenshots/form-filling.png) | **Fill flat forms**<br>[![A flat form with typed text boxes on its lines, check and cross stamps in its boxes and the snap preview on an empty box](docs/screenshots/flat-form.png)](docs/screenshots/flat-form.png) |
+| **Sign with an image**<br>[![A signature placed above a signature line and the Import Signature dialog showing the transparent signature on a checkerboard](docs/screenshots/signature.png)](docs/screenshots/signature.png) | **Highlight, underline, strike through**<br>[![Highlighted, underlined and struck-through text, plus a text selection](docs/screenshots/markup.png)](docs/screenshots/markup.png) |
+| **Edit the page's own text**<br>[![The Edit Page Text tool with the run editor open on a heading](docs/screenshots/edit-text.png)](docs/screenshots/edit-text.png) | **Organise pages**<br>[![Three selected page thumbnails with the page context menu: insert, delete, rotate, extract, split](docs/screenshots/page-tools.png)](docs/screenshots/page-tools.png) |
+| **Recognise text in scans (OCR)**<br>[![A scanned letter with the looks-scanned banner and the Recognise Text dialog](docs/screenshots/ocr.png)](docs/screenshots/ocr.png) | **English or French**<br>[![The French user interface with the Edit menu open](docs/screenshots/interface-fr.png)](docs/screenshots/interface-fr.png) |
+
+The screenshots use made-up demo documents; regenerate them with
+`uv run python scripts/make_screenshots.py` (Windows, see the script's docstring).
 
 ## Install & use (end users)
 
