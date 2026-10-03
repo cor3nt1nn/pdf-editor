@@ -3,6 +3,7 @@ installer (M8-I1). ``file_assoc`` is always patched: nothing real is registered.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -113,3 +114,26 @@ def test_subprocess_creates_no_qt_application() -> None:
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
     assert done.stdout.split() == ["registered", "0", "2", "True"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_instance_mutex(monkeypatch) -> None:
+    """The frozen app holds INSTANCE_MUTEX (the installer's AppMutex) while it runs."""
+    import ctypes
+    from ctypes import wintypes
+
+    name = f"PDFEditor-test-{os.getpid()}"
+    monkeypatch.setattr(app_module, "_instance_mutex", None)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenMutexW.restype = wintypes.HANDLE
+    kernel32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    synchronize = 0x00100000
+    assert not kernel32.OpenMutexW(synchronize, False, name)
+    handle = app_module.create_instance_mutex(name)
+    assert handle and app_module.create_instance_mutex(name) == handle  # created once
+    other = kernel32.OpenMutexW(synchronize, False, name)
+    assert other  # what Inno Setup's AppMutex check does
+    kernel32.CloseHandle(other)
+    kernel32.CloseHandle(handle)
+    assert app_module.INSTANCE_MUTEX == "PDFEditor-2F4F77DF-7029-452C-AE27-01CC3FD48311"

@@ -26,6 +26,10 @@ FR_MESSAGES = {
         "PDF Editor n’a pas pu être ajouté à la liste « Ouvrir avec ». "
         "Vous pourrez le faire plus tard depuis Paramètres."
     ),
+    "DeleteFailed": (
+        "Certains fichiers de %1 n’ont pas pu être supprimés (PDF Editor est-il encore ouvert ?). "
+        "Vous pouvez supprimer ce dossier vous-même."
+    ),
     "UserDataKept": (
         "PDF Editor a été désinstallé pour tous les utilisateurs. Les paramètres, signatures "
         "enregistrées et fichiers journaux de chaque utilisateur sont conservés dans son "
@@ -40,6 +44,10 @@ EN_MESSAGES = {
     ),
     "RegisterFailed": (
         "PDF Editor could not be added to the “Open with” list. You can do it later from Settings."
+    ),
+    "DeleteFailed": (
+        "Some files in %1 could not be deleted (is PDF Editor still open?). "
+        "You can delete that folder yourself."
     ),
     "UserDataKept": (
         "PDF Editor was removed for all users. Each user’s settings, saved signatures and log "
@@ -189,7 +197,18 @@ def test_user_data_prompt(sections) -> None:
     assert "usPostUninstall" in code and "not UninstallSilent" in code
     assert "MB_DEFBUTTON2" in code  # default answer: No
     assert "{userappdata}\\PDFEditor" in code and "{localappdata}\\PDFEditor" in code
-    assert code.count("DelTree(") == 2
+    assert code.count("DelTree(") == 1  # in DeleteUserFolder, called for both folders
+    assert code.count("DeleteUserFolder(Roaming)") == code.count("DeleteUserFolder(Local)") == 1
+    helper = code.split("procedure DeleteUserFolder", 1)[1].split("end;\nend;", 1)[0]
+    assert "not DelTree(Dir, True, True, True)" in helper
+    assert "Log(" in helper and "CustomMessage('DeleteFailed')" in helper
+
+
+def test_app_mutex(setup, text) -> None:
+    """Setup and the uninstaller ask to close a running PDF Editor (the app owns it)."""
+    assert setup["AppMutex"] == "{#AppMutexName}"
+    assert _defines(text)["AppMutexName"] == app.INSTANCE_MUTEX
+    assert "{" not in app.INSTANCE_MUTEX  # a brace would need escaping in [Setup]
 
 
 def test_all_users_uninstall_deletes_no_user_data(sections) -> None:

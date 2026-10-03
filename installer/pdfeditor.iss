@@ -23,6 +23,9 @@
 #define RegisterFlag "--register-file-type"
 #define UnregisterFlag "--unregister-file-type"
 ; Their exit codes: pdfeditor.app.EXIT_REGISTRY_ERROR / EXIT_REGISTER_FAILED.
+; Must equal pdfeditor.app.INSTANCE_MUTEX: the running app owns it, so Setup and the
+; uninstaller ask to close PDF Editor first.
+#define AppMutexName "PDFEditor-2F4F77DF-7029-452C-AE27-01CC3FD48311"
 #define ExitRegistryError "2"
 #define ExitRegisterFailed "3"
 
@@ -62,6 +65,7 @@ VersionInfoProductTextVersion={#AppVersion}
 VersionInfoDescription={#AppName} Setup
 ShowLanguageDialog=auto
 CloseApplications=yes
+AppMutex={#AppMutexName}
 LicenseFile={#RepoRoot}LICENSE
 
 [Languages]
@@ -75,6 +79,8 @@ en.DeleteUserData=Also delete your PDF Editor settings, saved signatures and log
 fr.DeleteUserData=Supprimer aussi vos paramètres, signatures enregistrées et fichiers journaux de PDF Editor ?%n%n%1%n%2
 en.RegisterFailed=PDF Editor could not be added to the “Open with” list. You can do it later from Settings.
 fr.RegisterFailed=PDF Editor n’a pas pu être ajouté à la liste « Ouvrir avec ». Vous pourrez le faire plus tard depuis Paramètres.
+en.DeleteFailed=Some files in %1 could not be deleted (is PDF Editor still open?). You can delete that folder yourself.
+fr.DeleteFailed=Certains fichiers de %1 n’ont pas pu être supprimés (PDF Editor est-il encore ouvert ?). Vous pouvez supprimer ce dossier vous-même.
 en.UserDataKept=PDF Editor was removed for all users. Each user’s settings, saved signatures and log files are kept in that user’s profile, in the AppData\Roaming\PDFEditor and AppData\Local\PDFEditor folders; each user can delete them.
 fr.UserDataKept=PDF Editor a été désinstallé pour tous les utilisateurs. Les paramètres, signatures enregistrées et fichiers journaux de chaque utilisateur sont conservés dans son profil, dossiers AppData\Roaming\PDFEditor et AppData\Local\PDFEditor ; chacun peut les supprimer.
 
@@ -146,6 +152,16 @@ begin
     RegisterFileType;
 end;
 
+{ Delete one of the user's data folders; say so when something stays behind. }
+procedure DeleteUserFolder(const Dir: String);
+begin
+  if DirExists(Dir) and not DelTree(Dir, True, True, True) then
+  begin
+    Log(Format('could not delete %s', [Dir]));
+    SuppressibleMsgBox(FmtMessage(CustomMessage('DeleteFailed'), [Dir]), mbError, MB_OK, IDOK);
+  end;
+end;
+
 { After an interactive per-user uninstall, offer (default No) to delete the user's data:
   settings and signatures in %APPDATA%\PDFEditor, logs in %LOCALAPPDATA%\PDFEditor.
   A silent uninstall never deletes them. An all-users uninstall runs elevated: there the
@@ -178,8 +194,8 @@ begin
       if MsgBox(FmtMessage(CustomMessage('DeleteUserData'), [Roaming, Local]),
         mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       begin
-        DelTree(Roaming, True, True, True);
-        DelTree(Local, True, True, True);
+        DeleteUserFolder(Roaming);
+        DeleteUserFolder(Local);
       end;
   end;
 end;

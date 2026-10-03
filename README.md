@@ -37,7 +37,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/M2_PLAN.md](docs/M2_PLAN
 5. Start it from the Start menu (**PDF Editor**). To upgrade, run the setup of the newer
    version: it offers to close a running PDF Editor and keeps your settings and signatures.
 6. Uninstall: Windows **Settings ▸ Apps ▸ Installed apps ▸ PDF Editor ▸ Uninstall** (or
-   Control Panel ▸ Programs and Features). This removes the program, its shortcuts and its
+   Control Panel ▸ Programs and Features); close PDF Editor first (the uninstaller asks you
+   to if it is open). This removes the program, its shortcuts and its
    "Open with" entry, then asks whether to also delete your settings, saved signatures and
    log files (default **No**). Uninstalling an all-users installation deletes no user's data:
    it says that each user's settings, signatures and logs stay in that user's
@@ -95,7 +96,8 @@ then delete the `PDFEditor` folder and, to remove your settings, signatures and 
    l’installation de la nouvelle version : elle propose de fermer PDF Editor s’il est ouvert
    et garde vos paramètres et signatures.
 6. Désinstallation : **Paramètres ▸ Applications ▸ Applications installées ▸ PDF Editor ▸
-   Désinstaller** (ou Panneau de configuration ▸ Programmes et fonctionnalités). Le programme,
+   Désinstaller** (ou Panneau de configuration ▸ Programmes et fonctionnalités) ; fermez
+   d’abord PDF Editor (la désinstallation vous le demande s’il est ouvert). Le programme,
    ses raccourcis et son entrée « Ouvrir avec » sont supprimés, puis une question propose de
    supprimer aussi vos paramètres, signatures enregistrées et fichiers journaux (par défaut
    **Non**). La désinstallation d’une installation pour tous les utilisateurs ne supprime

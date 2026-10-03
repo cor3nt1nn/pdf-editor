@@ -53,6 +53,11 @@ UNREGISTER_FLAG = "--unregister-file-type"
 EXIT_REGISTERED = 0
 EXIT_REGISTRY_ERROR = 2
 EXIT_REGISTER_FAILED = 3
+#: Named mutex held by the running (frozen) application: installer/pdfeditor.iss's
+#: ``AppMutex``, so Setup and the uninstaller ask to close PDF Editor first.
+INSTANCE_MUTEX = "PDFEditor-2F4F77DF-7029-452C-AE27-01CC3FD48311"
+#: The handle, kept open for the life of the process (Windows closes it at exit).
+_instance_mutex: int | None = None
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -150,6 +155,29 @@ def file_type_registration(register: bool) -> int:
     return EXIT_REGISTERED
 
 
+def create_instance_mutex(name: str = INSTANCE_MUTEX) -> int | None:
+    """Create (or open) the named mutex ``name`` and keep it for the life of the process;
+    returns its handle, None off Windows or on failure (never fatal). Several running
+    copies share it."""
+    global _instance_mutex
+    if sys.platform != "win32":
+        return None
+    if _instance_mutex is not None:
+        return _instance_mutex
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+    handle = kernel32.CreateMutexW(None, False, name)
+    if not handle:
+        log.warning("could not create the mutex %s (error %d)", name, ctypes.get_last_error())
+        return None
+    _instance_mutex = int(handle)
+    return _instance_mutex
+
+
 def _log_uncaught(kind, value, tb) -> None:  # noqa: ANN001 - sys.excepthook signature
     log.critical("uncaught exception", exc_info=(kind, value, tb))
 
@@ -180,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(frozen)
     if frozen:
         sys.excepthook = _log_uncaught
+        create_instance_mutex()  # the installer's AppMutex: "close PDF Editor first"
     sweep_orphans()  # undo copies left in %TEMP% by a crashed session
 
     settings = Settings()
